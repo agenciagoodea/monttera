@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-primary: var(--brand-primary, #3b82f6);
+  --color-secondary: var(--brand-secondary, #1e293b);
+}
+
+:root {
+  --brand-primary: #3b82f6;
+  --brand-secondary: #1e293b;
+}
+
+body {
+  @apply bg-[#F8FBFF] antialiased text-slate-800;
+}
+
+.bg-primary { background-color: var(--brand-primary); }
+.text-primary { color: var(--brand-primary); }
+.border-primary { border-color: var(--brand-primary); }
+
+.bg-secondary { background-color: var(--brand-secondary); }
+.text-secondary { color: var(--brand-secondary); }
+.border-secondary { border-color: var(--brand-secondary); }
