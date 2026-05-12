@@ -260,10 +260,10 @@ function initSettings() {
   });
 }
 
-function initTestData() {
+async function initTestData() {
   initSettings();
-  const hashedPassword = hashPassword('123456');
-  const adrianoPassword = hashPassword('04039866');
+  const hashedPassword = await hashPassword('123456');
+  const adrianoPassword = await hashPassword('04039866');
 
   // 1. Novo UsuÃ¡rio Admin (Adriano Amorim)
   const adrianoAdmin = db.get('SELECT * FROM users WHERE email = ?', 'contato@agenciagoodea.com');
@@ -307,7 +307,7 @@ async function startServer() {
     
     // Inicializa dados de teste
     console.log('Initializing test data...');
-    initTestData();
+    await initTestData();
 
     // Insert some mock data if empty
     const shouldSeedDemoData = process.env.SEED_DEMO_DATA === 'true';
@@ -388,7 +388,7 @@ async function startServer() {
 
     try {
       const name = `${firstName} ${lastName}`;
-      const hashedPassword = hashPassword(password);
+      const hashedPassword = await hashPassword(password);
       
       const userResult = db.run(`
         INSERT INTO users (name, email, password, role) 
@@ -454,7 +454,7 @@ async function startServer() {
 
       let passwordIsValid = false;
       try {
-        passwordIsValid = comparePassword(normalizedPassword, user.password);
+        passwordIsValid = await comparePassword(normalizedPassword, user.password);
       } catch (compareError) {
         console.error('Erro ao validar senha:', compareError);
         return res.status(500).json({ error: 'Erro ao validar credenciais' });
@@ -630,7 +630,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Token inválido ou expirado' });
       }
 
-      const hashedPassword = hashPassword(new_password);
+      const hashedPassword = await hashPassword(new_password);
       db.run('UPDATE users SET password = ? WHERE id = ?', hashedPassword, resetRequest.user_id);
       db.run('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', resetRequest.id);
 
@@ -2005,7 +2005,7 @@ async function startServer() {
       return res.status(409).json({ error: 'E-mail jÃ¡ cadastrado' });
     }
 
-    const hashedPassword = hashPassword(String(password));
+    const hashedPassword = await hashPassword(String(password));
 
     try {
       const trans = db.transaction(() => {
@@ -2235,7 +2235,7 @@ async function startServer() {
     try {
       const trans = db.transaction(() => {
         if (normalizedPassword) {
-          const hashedPassword = hashPassword(normalizedPassword);
+          const hashedPassword = await hashPassword(normalizedPassword);
           db.run(`
             UPDATE users
             SET

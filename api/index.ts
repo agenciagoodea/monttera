@@ -16,7 +16,7 @@ let pool: mysql.Pool | null = null;
 function getPool() {
   if (!pool) {
     const config = {
-      host: process.env.MYSQL_HOST || '177.136.229.86',
+      host: process.env.MYSQL_HOST || '187.110.162.234',
       port: Number(process.env.MYSQL_PORT || 3306),
       user: process.env.MYSQL_USER || 'digitalbordados_novo',
       password: process.env.MYSQL_PASSWORD || 'vmsC9hNpxwqAx3HGc8Md',
@@ -87,6 +87,7 @@ app.get('/api/settings', async (_req, res) => {
 app.get('/api/categories', async (_req, res) => {
   try {
     const rows = await q("SELECT * FROM product_categories WHERE status = 'active' ORDER BY sort_order ASC, name ASC");
+    res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
     res.json(rows);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -193,7 +194,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!email || !password) return res.status(400).json({ error: 'E-mail e senha são obrigatórios' });
     const user = await qOne('SELECT * FROM users WHERE email = ?', [email.trim().toLowerCase()]);
     if (!user) return res.status(401).json({ error: 'E-mail ou senha incorretos' });
-    const valid = bcrypt.compareSync(password, user.password);
+    const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: 'E-mail ou senha incorretos' });
     if (user.status !== 'ativo' && user.status !== 'active') return res.status(403).json({ error: 'Conta inativa' });
     const type = user.role === 'admin' ? 'user' : 'customer';
@@ -222,7 +223,7 @@ app.post('/api/auth/register', async (req, res) => {
     const { firstName, lastName, email, password } = req.body;
     if (!firstName || !lastName || !email || !password) return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
     const name = `${firstName} ${lastName}`;
-    const hash = bcrypt.hashSync(password, 10);
+    const hash = await bcrypt.hash(password, 10);
     const { insertId } = await qRun("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'customer')", [name, email, hash]);
     await qRun('INSERT INTO customers (user_id) VALUES (?)', [insertId]);
     const payload = { id: insertId, email, type: 'customer', name };
