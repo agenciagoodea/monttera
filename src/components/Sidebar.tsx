@@ -76,19 +76,6 @@ export default function Sidebar({ categories, selectedCategory, onSelectCategory
         </ul>
       </div>
 
-      <div className="mt-auto p-5 bg-blue-600 rounded-2xl text-white shadow-lg overflow-hidden relative group">
-        <div className="relative z-10">
-          <p className="text-[10px] font-black opacity-70 uppercase tracking-widest mb-1">Sob medida</p>
-          <p className="text-sm font-semibold leading-tight mb-4">Nao encontrou a matriz que precisa?</p>
-          <Link
-            to="/orcamento"
-            className="block w-full text-center bg-white text-blue-600 py-2.5 rounded-xl font-black text-[11px] uppercase hover:bg-blue-50 transition-all shadow-sm active:scale-95"
-          >
-            Solicitar Orcamento
-          </Link>
-        </div>
-        <div className="absolute -right-4 -bottom-4 bg-white/10 w-24 h-24 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700" />
-      </div>
     </aside>
   );
 }
