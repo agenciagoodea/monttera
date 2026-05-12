@@ -16,7 +16,7 @@ let pool: mysql.Pool | null = null;
 function getPool() {
   if (!pool) {
     const config = {
-      host: process.env.MYSQL_HOST || '187.110.162.234',
+      host: process.env.MYSQL_HOST || '177.136.229.86',
       port: Number(process.env.MYSQL_PORT || 3306),
       user: process.env.MYSQL_USER || 'digitalbordados_novo',
       password: process.env.MYSQL_PASSWORD || 'vmsC9hNpxwqAx3HGc8Md',
