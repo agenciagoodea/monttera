@@ -147,7 +147,12 @@ export default function AdminProductList() {
                         )}
                       </div>
                       <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-black text-slate-800 truncate uppercase tracking-tight">{product.name || 'Sem nome'}</span>
+                        <Link
+                          to={`/admin/produtos/editar/${product.id}`}
+                          className="text-xs font-black text-slate-800 truncate uppercase tracking-tight hover:text-blue-600 transition-colors"
+                        >
+                          {product.name || 'Sem nome'}
+                        </Link>
                         <span className="text-[10px] font-bold text-slate-400 truncate tracking-wide">#{product.slug || '-'}</span>
                       </div>
                     </div>

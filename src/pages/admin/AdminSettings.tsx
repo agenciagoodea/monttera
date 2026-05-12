@@ -55,6 +55,7 @@ export default function AdminSettings() {
     phone: '',
     email_contact: 'contato@digitalbordados.com',
     address: '',
+    new_badge_days: '20',
 
     // Mercado Pago
     mp_public_key: '',
@@ -75,6 +76,7 @@ export default function AdminSettings() {
     smtp_from_name: '',
     smtp_from_email: '',
     smtp_secure: 'false',
+    matrix_request_team_email: '',
   });
 
   useEffect(() => {
@@ -329,6 +331,22 @@ export default function AdminSettings() {
                           onChange={e => setSettings({...settings, site_description: e.target.value})}
                         ></textarea>
                       </div>
+                      <div className="md:col-span-2 space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Dias para selo "Novo"</label>
+                        <input
+                          type="number"
+                          min={1}
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                          value={settings.new_badge_days}
+                          onChange={(e) => {
+                            const onlyDigits = e.target.value.replace(/\D/g, '');
+                            setSettings({ ...settings, new_badge_days: onlyDigits || '20' });
+                          }}
+                        />
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                          Produtos cadastrados nos ultimos X dias exibirao o badge "Novo".
+                        </p>
+                      </div>
                     </div>
                   </div>
 
@@ -413,6 +431,28 @@ export default function AdminSettings() {
 
                         <div className="space-y-4">
                           <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Cor Secundária</label>
+                          <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 flex items-center gap-4">
+                            <div className="relative w-12 h-12 rounded-xl overflow-hidden shadow-sm ring-2 ring-white">
+                              <input 
+                                type="color" 
+                                className="absolute inset-0 w-[150%] h-[150%] -translate-x-1/4 -translate-y-1/4 border-none cursor-pointer p-0"
+                                value={settings.secondary_color}
+                                onChange={e => setSettings({...settings, secondary_color: e.target.value})}
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <input 
+                                type="text" 
+                                className="w-full bg-transparent border-none focus:ring-0 text-xs font-black uppercase tracking-widest text-slate-700"
+                                value={settings.secondary_color}
+                                onChange={e => setSettings({...settings, secondary_color: e.target.value})}
+                              />
+                              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Cor de contraste</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -520,6 +560,19 @@ export default function AdminSettings() {
                             onChange={e => setSettings({...settings, smtp_from_email: e.target.value})}
                             placeholder="nao-responda@seusite.com"
                           />
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail da Equipe (Solicitacao de Matriz)</label>
+                          <input
+                            type="email"
+                            className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                            value={settings.matrix_request_team_email}
+                            onChange={e => setSettings({ ...settings, matrix_request_team_email: e.target.value })}
+                            placeholder="equipe@seusite.com"
+                          />
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                            Este e-mail recebe os novos pedidos de matriz personalizada.
+                          </p>
                         </div>
                       </div>
 

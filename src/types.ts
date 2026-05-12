@@ -24,9 +24,10 @@ export interface Product {
   category_slug?: string;
   stitch_count?: number;
   colors?: string;
-  is_new: boolean;
-  is_featured: boolean;
+  is_new: boolean | number;
+  is_featured: boolean | number;
   status: string;
+  gallery?: string[];
   relatedProducts?: Product[];
 }
 

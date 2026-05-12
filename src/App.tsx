@@ -3,8 +3,12 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import Home from './pages/Home';
+import ShopPage from './pages/ShopPage';
+import BudgetPage from './pages/BudgetPage';
+import ContactPage from './pages/ContactPage';
 import ProductDetail from './pages/ProductDetail';
 import CartPage from './pages/CartPage';
+import FavoritesPage from './pages/FavoritesPage';
 import MyAccount from './pages/MyAccount';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -22,6 +26,7 @@ import AdminSettings from './pages/admin/AdminSettings';
 import AdminLayout from './layouts/AdminLayout';
 import { AuthProvider } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
+import { FavoritesProvider } from './contexts/FavoritesContext';
 
 export default function App() {
   useEffect(() => {
@@ -46,11 +51,11 @@ export default function App() {
   }, []);
 
   return (
-  return (
     <Router>
       <AuthProvider>
-        <CartProvider>
-          <Routes>
+        <FavoritesProvider>
+          <CartProvider>
+            <Routes>
           {/* Admin Routes */}
           <Route path="/admin/*" element={
             <AdminLayout>
@@ -76,8 +81,12 @@ export default function App() {
               <div className="flex-1">
                 <Routes>
                   <Route path="/" element={<Home />} />
+                  <Route path="/loja" element={<ShopPage />} />
+                  <Route path="/orcamento" element={<BudgetPage />} />
+                  <Route path="/contato" element={<ContactPage />} />
                   <Route path="/produto/:slug" element={<ProductDetail />} />
                   <Route path="/carrinho" element={<CartPage />} />
+                  <Route path="/favoritos" element={<FavoritesPage />} />
                   <Route path="/minha-conta" element={<MyAccount />} />
                   <Route path="/minha-conta/pedidos" element={<MyAccount />} />
                   <Route path="/login" element={<Login />} />
@@ -89,8 +98,9 @@ export default function App() {
               <Footer />
             </div>
           } />
-        </Routes>
-        </CartProvider>
+          </Routes>
+          </CartProvider>
+        </FavoritesProvider>
       </AuthProvider>
     </Router>
   );

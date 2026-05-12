@@ -11,7 +11,9 @@ import {
   Globe,
   Settings,
   Tag,
-  ChevronDown
+  ChevronDown,
+  Hash,
+  Palette
 } from 'lucide-react';
 import HtmlRichEditor from '../../components/admin/HtmlRichEditor';
 
@@ -346,7 +348,20 @@ export default function AdminProductForm() {
       });
 
       if (res.ok) {
-        navigate('/admin/produtos');
+        const responsePayload = await res.json().catch(() => ({} as any));
+
+        if (id) {
+          alert('Produto atualizado com sucesso.');
+          return;
+        }
+
+        const createdId = Number(responsePayload?.id);
+        if (Number.isInteger(createdId) && createdId > 0) {
+          navigate(`/admin/produtos/editar/${createdId}`);
+        } else {
+          alert('Produto salvo, mas não foi possível abrir a tela de edição automaticamente.');
+          navigate('/admin/produtos');
+        }
       } else {
         const error = await res.json();
         alert(error.error || 'Erro ao salvar produto');
@@ -829,23 +844,29 @@ export default function AdminProductForm() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Pontos</label>
-                  <input
-                    type="number"
-                    value={formData.stitch_count}
-                    onChange={e => setFormData((prev) => ({ ...prev, stitch_count: e.target.value }))}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold"
-                    placeholder="15000"
-                  />
+                  <div className="relative">
+                    <Hash className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="number"
+                      value={formData.stitch_count}
+                      onChange={e => setFormData((prev) => ({ ...prev, stitch_count: e.target.value }))}
+                      className="w-full pl-10 pr-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold"
+                      placeholder="15000"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Cores</label>
-                  <input
-                    type="text"
-                    value={formData.colors}
-                    onChange={e => setFormData((prev) => ({ ...prev, colors: e.target.value }))}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold"
-                    placeholder="5 cores"
-                  />
+                  <div className="relative">
+                    <Palette className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={formData.colors}
+                      onChange={e => setFormData((prev) => ({ ...prev, colors: e.target.value }))}
+                      className="w-full pl-10 pr-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold"
+                      placeholder="5 cores"
+                    />
+                  </div>
                 </div>
               </div>
             </div>

@@ -5,6 +5,7 @@ import { formatCurrency } from '../lib/utils';
 import { motion } from 'motion/react';
 import { useCart } from '../contexts/CartContext';
 import { Link } from 'react-router-dom';
+import { useFavorites } from '../contexts/FavoritesContext';
 
 interface ProductCardProps {
   product: Product;
@@ -13,7 +14,10 @@ interface ProductCardProps {
 
 export default function ProductCard({ product }: ProductCardProps) {
   const { addToCart, items } = useCart();
+  const { isFavorite, toggleFavorite } = useFavorites();
   const isInCart = items.some(item => item.product_id === product.id);
+  const isProductFavorite = isFavorite(product.id);
+  const showNewBadge = Number(product.is_new) === 1;
 
   const discount = product.sale_price 
     ? Math.round(((product.price - product.sale_price) / product.price) * 100)
@@ -28,13 +32,25 @@ export default function ProductCard({ product }: ProductCardProps) {
     >
       {/* Badges */}
       <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
-        {product.is_new && (
+        {showNewBadge ? (
           <span className="bg-[#FF9900] text-white text-[9px] font-black px-3 py-1 rounded-lg shadow-lg shadow-orange-200 tracking-widest uppercase">Novo</span>
-        )}
+        ) : null}
       </div>
 
-      <button className="absolute top-4 right-4 z-10 text-slate-300 hover:text-red-500 transition-colors bg-white p-2 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
-        <Heart className="w-4 h-4" />
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleFavorite(product.id, product.name);
+        }}
+        aria-label={isProductFavorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
+        className={`absolute top-4 right-4 z-10 transition-colors bg-white p-2 rounded-full shadow-sm transition-opacity ${
+          isProductFavorite
+            ? 'opacity-100 text-red-500'
+            : 'opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500'
+        }`}
+      >
+        <Heart className={`w-4 h-4 ${isProductFavorite ? 'fill-current' : ''}`} />
       </button>
 
       {/* Image Container */}

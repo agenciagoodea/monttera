@@ -383,6 +383,19 @@ export function initDb() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  query(`
+    CREATE TABLE IF NOT EXISTS matrix_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      whatsapp VARCHAR(50) NOT NULL,
+      details TEXT,
+      reference_image TEXT NULL,
+      status VARCHAR(50) DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
   const defaultTemplates = [
     {
       key: 'user_welcome',
@@ -460,6 +473,27 @@ export function initDb() {
       subject: 'Obrigado pela sua primeira compra! 🎉',
       variables: JSON.stringify(['name', 'store_name', 'downloads_url', 'account_url']),
       body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Que alegria ter você aqui! 🎉</h2><p>Olá, {{name}}!</p><p>Vimos que você acabou de realizar a sua primeira compra na <strong>{{store_name}}</strong>. Muito obrigado por confiar em nosso trabalho!</p><p>Na sua <a href="{{account_url}}">conta</a>, você pode acompanhar seus pedidos e baixar os arquivos adquiridos a qualquer momento.</p><p style="text-align: center; margin: 30px 0;"><a href="{{downloads_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Ir Para Meus Downloads</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+    },
+    {
+      key: 'matrix_request_submitted',
+      name: 'Solicitacao de Matriz Enviada com Sucesso',
+      subject: 'Recebemos sua solicitacao de matriz - {{store_name}}',
+      variables: JSON.stringify(['name', 'whatsapp', 'details', 'reference_image', 'store_name']),
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Solicitacao enviada com sucesso!</h2><p>Ola, <strong>{{name}}</strong>.</p><p>Recebemos sua solicitacao de matriz personalizada e nosso time vai analisar os detalhes.</p><p><strong>WhatsApp informado:</strong> {{whatsapp}}</p>{{#if details}}<p><strong>Informacoes enviadas:</strong><br/>{{details}}</p>{{/if}}{{#if reference_image}}<p><strong>Imagem de referencia:</strong> <a href="{{reference_image}}" target="_blank" rel="noopener noreferrer">abrir anexo</a></p>{{/if}}<p>Entraremos em contato em breve para confirmar o escopo e iniciar o desenvolvimento.</p><p>Atenciosamente,<br/>Equipe {{store_name}}</p></div>'
+    },
+    {
+      key: 'matrix_request_team_received',
+      name: 'Solicitacao de Matriz - Notificacao Interna',
+      subject: 'Nova solicitacao de matriz #{{request_id}} - {{store_name}}',
+      variables: JSON.stringify(['request_id', 'name', 'email', 'whatsapp', 'details', 'reference_image', 'store_name']),
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><h2>Nova solicitacao de matriz recebida</h2><p><strong>ID:</strong> #{{request_id}}</p><p><strong>Cliente:</strong> {{name}}</p><p><strong>E-mail:</strong> {{email}}</p><p><strong>WhatsApp:</strong> {{whatsapp}}</p>{{#if details}}<p><strong>Detalhes:</strong><br/>{{details}}</p>{{/if}}{{#if reference_image}}<p><strong>Imagem de referencia:</strong> <a href="{{reference_image}}" target="_blank" rel="noopener noreferrer">abrir anexo</a></p>{{/if}}</div>'
+    },
+    {
+      key: 'matrix_request_in_analysis',
+      name: 'Solicitacao de Matriz em Analise',
+      subject: 'Seu pedido de matriz ja esta em analise - {{store_name}}',
+      variables: JSON.stringify(['request_id', 'name', 'email', 'whatsapp', 'details', 'reference_image', 'store_name']),
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Recebemos seu pedido, {{name}}!</h2><p>Seu pedido de matriz <strong>#{{request_id}}</strong> ja esta em analise pela nossa equipe.</p><p>Assim que concluirmos a avaliacao, entraremos em contato no e-mail <strong>{{email}}</strong> e no WhatsApp <strong>{{whatsapp}}</strong>.</p>{{#if details}}<p><strong>Resumo enviado:</strong><br/>{{details}}</p>{{/if}}<p>Obrigado por confiar na {{store_name}}.</p></div>'
     }
   ];
 
@@ -475,6 +509,7 @@ export function initDb() {
   createIndexIfNotExists('products', 'idx_products_category', 'CREATE INDEX idx_products_category ON products(category_id)');
   createIndexIfNotExists('product_categories', 'idx_product_categories_slug', 'CREATE INDEX idx_product_categories_slug ON product_categories(slug)');
   createIndexIfNotExists('orders', 'idx_orders_user', 'CREATE INDEX idx_orders_user ON orders(user_id)');
+  createIndexIfNotExists('favorites', 'idx_favorites_user_product', 'CREATE UNIQUE INDEX idx_favorites_user_product ON favorites(user_id, product_id)');
 
   ensureColumn('products', 'short_description', 'TEXT NULL');
   ensureColumn('products', 'production_sheet', 'TEXT NULL');

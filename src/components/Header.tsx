@@ -2,6 +2,7 @@ import { Search, ShoppingCart, User, Heart, LogOut, LayoutDashboard, ShoppingBag
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
+import { useFavorites } from '../contexts/FavoritesContext';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 export default function Header() {
@@ -9,6 +10,7 @@ export default function Header() {
   const [search, setSearch] = useState(searchParams.get('q') || '');
   const { user, logout } = useAuth();
   const { totalItems, totalPrice } = useCart();
+  const { totalFavorites } = useFavorites();
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -148,9 +150,14 @@ export default function Header() {
             </div>
             
             <div className="flex items-center gap-4">
-              <button className="p-2 text-slate-400 hover:text-red-500 transition-colors relative">
+              <Link to="/favoritos" className="p-2 text-slate-400 hover:text-red-500 transition-colors relative" title="Favoritos">
                 <Heart className="w-6 h-6" />
-              </button>
+                {totalFavorites > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] w-[18px] h-[18px] rounded-full flex items-center justify-center font-bold border border-white">
+                    {totalFavorites > 99 ? '99+' : totalFavorites}
+                  </span>
+                )}
+              </Link>
               
               <Link to="/carrinho" className="flex items-center gap-3 bg-white border border-slate-200 pl-4 pr-1.5 py-1.5 rounded-full hover:border-blue-300 transition-all font-bold group">
                 <span className="text-sm text-slate-700">R$ {totalPrice.toFixed(2)}</span>

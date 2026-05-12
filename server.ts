@@ -12,6 +12,7 @@ import fs from 'fs';
 import https from 'https';
 import crypto from 'crypto';
 import { sendEmail } from './src/server/mailer';
+import nodemailer from 'nodemailer';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
 
 console.log('--- SERVER.TS EXECUTING ---');
@@ -188,6 +189,30 @@ function createUniqueProductSlug(baseName: string, ignoreProductId?: number) {
   }
 }
 
+function resolveNewBadgeDays() {
+  const settings = loadSettingsMap(['new_badge_days']);
+  const parsed = Number(settings.new_badge_days);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return Math.floor(parsed);
+  }
+  return 20;
+}
+
+function isProductWithinNewWindow(createdAt: any, days: number) {
+  if (!createdAt || days <= 0) return false;
+  const normalizedDateString = typeof createdAt === 'string'
+    ? createdAt.replace(' ', 'T')
+    : createdAt;
+  const createdDate = new Date(normalizedDateString as any);
+  if (Number.isNaN(createdDate.getTime())) return false;
+
+  const ageMs = Date.now() - createdDate.getTime();
+  if (ageMs < 0) return true;
+
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  return ageDays <= days;
+}
+
 function initSettings() {
   const defaultSettings = {
     site_name: 'Digital Bordados',
@@ -202,8 +227,10 @@ function initSettings() {
     mp_access_token: '',
     mercadopago_public_key: '',
     mercadopago_access_token: '',
+    new_badge_days: '20',
     smtp_from_name: '',
-    smtp_from_email: ''
+    smtp_from_email: '',
+    matrix_request_team_email: ''
   };
 
   Object.entries(defaultSettings).forEach(([key, value]) => {
@@ -455,6 +482,74 @@ async function startServer() {
     }
     
     res.json({ user: decoded });
+  });
+
+  // API Routes - FAVORITES
+  app.get('/api/favorites', authenticate, (req, res) => {
+    try {
+      const user = (req as any).user;
+      const favorites = db.all(`
+        SELECT
+          f.product_id,
+          f.created_at,
+          p.name,
+          p.slug,
+          p.image,
+          p.price,
+          p.sale_price,
+          p.status
+        FROM favorites f
+        JOIN products p ON p.id = f.product_id
+        WHERE f.user_id = ?
+          AND p.status = 'active'
+        ORDER BY f.created_at DESC
+      `, user.id) as any[];
+
+      const favoriteIds = favorites.map((item) => Number(item.product_id));
+      return res.json({ favorites, favorite_ids: favoriteIds });
+    } catch (error) {
+      console.error('Fetch Favorites Error:', error);
+      return res.status(500).json({ error: 'Erro ao buscar favoritos' });
+    }
+  });
+
+  app.post('/api/favorites/:productId', authenticate, (req, res) => {
+    const user = (req as any).user;
+    const productId = Number(req.params.productId);
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ error: 'product_id inválido' });
+    }
+
+    const product = db.get('SELECT id, status FROM products WHERE id = ?', productId) as any;
+    if (!product || product.status !== 'active') {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+
+    try {
+      db.run('INSERT IGNORE INTO favorites (user_id, product_id) VALUES (?, ?)', user.id, productId);
+      return res.status(201).json({ success: true, product_id: productId });
+    } catch (error) {
+      console.error('Add Favorite Error:', error);
+      return res.status(500).json({ error: 'Erro ao adicionar favorito' });
+    }
+  });
+
+  app.delete('/api/favorites/:productId', authenticate, (req, res) => {
+    const user = (req as any).user;
+    const productId = Number(req.params.productId);
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ error: 'product_id inválido' });
+    }
+
+    try {
+      db.run('DELETE FROM favorites WHERE user_id = ? AND product_id = ?', user.id, productId);
+      return res.json({ success: true, product_id: productId });
+    } catch (error) {
+      console.error('Remove Favorite Error:', error);
+      return res.status(500).json({ error: 'Erro ao remover favorito' });
+    }
   });
 
   app.post('/api/auth/forgot-password', async (req, res) => {
@@ -746,6 +841,8 @@ async function startServer() {
       production_sheet,
       category_id,
       category_ids,
+      stitch_count,
+      colors,
       tags,
       tag_ids,
       downloadable_files
@@ -798,6 +895,16 @@ async function startServer() {
     const nextCategoryId = category_id !== undefined
       ? (category_id === '' || category_id === null ? null : Number(category_id))
       : existingProduct.category_id;
+    const nextStitchCount = stitch_count !== undefined
+      ? (stitch_count === '' || stitch_count === null ? null : Number(stitch_count))
+      : existingProduct.stitch_count;
+    const nextColors = colors !== undefined
+      ? ((typeof colors === 'string' ? colors.trim() : String(colors)) || null)
+      : existingProduct.colors;
+
+    if (nextStitchCount !== null && !Number.isFinite(Number(nextStitchCount))) {
+      return res.status(400).json({ error: 'Quantidade de pontos inválida' });
+    }
 
     const productionSheetFile = files['production_sheet']?.[0]?.filename
       ? `/uploads/${files['production_sheet'][0].filename}`
@@ -819,11 +926,13 @@ async function startServer() {
           price = ?,
           sale_price = ?,
           category_id = ?,
+          stitch_count = ?,
+          colors = ?,
           image = ?,
           production_sheet = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, newImagePath, nextProductionSheet, productId);
+      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, newImagePath, nextProductionSheet, productId);
 
       if (files['image']?.[0] && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.startsWith('/uploads/')) {
         const oldImageFsPath = path.join(process.cwd(), 'public', existingProduct.image.replace('/uploads/', 'uploads/'));
@@ -2339,7 +2448,7 @@ async function startServer() {
       const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_secure")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       
-      const transporter = require('nodemailer').createTransport({
+      const transporter = nodemailer.createTransport({
         host: settings.smtp_host,
         port: Number(settings.smtp_port) || 587,
         secure: settings.smtp_secure === 'true' || settings.smtp_secure === '1',
@@ -2594,7 +2703,7 @@ async function startServer() {
   // API Routes - CONTENT
   app.get('/api/settings', (req, res) => {
     try {
-      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact")') as any[];
+      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "new_badge_days")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       res.json(settings);
     } catch (error) {
@@ -2610,6 +2719,82 @@ async function startServer() {
     } catch (error) {
       console.error('Error fetching categories:', error);
       res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  app.post('/api/matrix-requests', upload.single('reference_image'), async (req, res) => {
+    try {
+      const { name, email, whatsapp, details = '' } = req.body || {};
+
+      const normalizedName = typeof name === 'string' ? name.trim() : '';
+      const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+      const normalizedWhatsapp = typeof whatsapp === 'string' ? whatsapp.trim() : '';
+      const normalizedDetails = typeof details === 'string' ? details.trim() : '';
+
+      if (!normalizedName || !normalizedEmail || !normalizedWhatsapp) {
+        return res.status(400).json({ error: 'name, email e whatsapp sao obrigatorios' });
+      }
+
+      const emailIsValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+      if (!emailIsValid) {
+        return res.status(400).json({ error: 'email invalido' });
+      }
+
+      const referenceImagePath = req.file?.filename ? `/uploads/${req.file.filename}` : null;
+
+      const insertResult = db.run(`
+        INSERT INTO matrix_requests (name, email, whatsapp, details, reference_image, status)
+        VALUES (?, ?, ?, ?, ?, 'pending')
+      `, normalizedName, normalizedEmail, normalizedWhatsapp, normalizedDetails || null, referenceImagePath);
+
+      const settings = loadSettingsMap(['app_url', 'email_contact', 'matrix_request_team_email']);
+      const appUrl = settings.app_url || `${req.protocol}://${req.get('host')}`;
+      const referenceImageUrl = referenceImagePath ? `${appUrl}${referenceImagePath}` : '';
+      const requestId = Number(insertResult.lastInsertRowid || 0);
+      const teamEmail = String(settings.matrix_request_team_email || settings.email_contact || '').trim().toLowerCase();
+
+      if (teamEmail) {
+        const teamEmailResult = await sendEmail({
+          to: teamEmail,
+          templateKey: 'matrix_request_team_received',
+          variables: {
+            request_id: requestId,
+            name: normalizedName,
+            email: normalizedEmail,
+            whatsapp: normalizedWhatsapp,
+            details: normalizedDetails,
+            reference_image: referenceImageUrl,
+          },
+        });
+        if (!teamEmailResult.success) {
+          console.error('Matrix request team email failed:', teamEmailResult.error);
+        }
+      }
+
+      const customerEmailResult = await sendEmail({
+        to: normalizedEmail,
+        templateKey: 'matrix_request_in_analysis',
+        variables: {
+          request_id: requestId,
+          name: normalizedName,
+          email: normalizedEmail,
+          whatsapp: normalizedWhatsapp,
+          details: normalizedDetails,
+          reference_image: referenceImageUrl,
+        },
+      });
+      if (!customerEmailResult.success) {
+        return res.status(500).json({ error: customerEmailResult.error || 'Falha ao enviar email de confirmacao' });
+      }
+
+      return res.status(201).json({
+        success: true,
+        id: requestId,
+        message: 'Solicitacao de matriz enviada com sucesso',
+      });
+    } catch (error) {
+      console.error('Matrix request submit error:', error);
+      return res.status(500).json({ error: 'Erro ao enviar solicitacao de matriz' });
     }
   });
 
@@ -2666,7 +2851,11 @@ async function startServer() {
         LIMIT ? OFFSET ?
       `;
 
-      const products = db.all(query, ...params, itemsPerPage, offset);
+      const newBadgeDays = resolveNewBadgeDays();
+      const products = (db.all(query, ...params, itemsPerPage, offset) as any[]).map((product) => ({
+        ...product,
+        is_new: (Number(product.is_new) === 1 || isProductWithinNewWindow(product.created_at || product.updated_at, newBadgeDays)) ? 1 : 0,
+      }));
       
       res.json({
         products,
@@ -2714,23 +2903,44 @@ async function startServer() {
 
   app.get('/api/products/:slug', (req, res) => {
     try {
-      const product = db.get(`
+      const productRow = db.get(`
         SELECT p.*, pc.name as category_name, pc.slug as category_slug
         FROM products p
         LEFT JOIN product_categories pc ON p.category_id = pc.id
         WHERE p.slug = ?
       `, req.params.slug) as any;
 
-      if (!product) return res.status(404).json({ error: 'Produto não encontrado' });
+      if (!productRow) return res.status(404).json({ error: 'Produto nao encontrado' });
+      const newBadgeDays = resolveNewBadgeDays();
+      const product = {
+        ...productRow,
+        is_new: (Number(productRow.is_new) === 1 || isProductWithinNewWindow(productRow.created_at || productRow.updated_at, newBadgeDays)) ? 1 : 0,
+      };
 
       // Related products (same category)
-      const relatedProducts = db.all(`
+      const relatedProducts = (db.all(`
         SELECT * FROM products 
         WHERE category_id = ? AND id != ? AND status = 'active'
         LIMIT 4
-      `, product.category_id, product.id);
+      `, product.category_id, product.id) as any[]).map((relatedProduct) => ({
+        ...relatedProduct,
+        is_new: (Number(relatedProduct.is_new) === 1 || isProductWithinNewWindow(relatedProduct.created_at || relatedProduct.updated_at, newBadgeDays)) ? 1 : 0,
+      }));
 
-      res.json({ ...product, relatedProducts });
+      // Gallery images
+      const galleryRows = db.all(`
+        SELECT url FROM product_images
+        WHERE product_id = ?
+          AND (
+            file_type = 'gallery'
+            OR file_type IS NULL
+            OR file_type = ''
+          )
+        ORDER BY id ASC
+      `, product.id) as any[];
+      const gallery = Array.from(new Set(galleryRows.map(row => row.url).filter(Boolean)));
+
+      res.json({ ...product, gallery, relatedProducts });
     } catch (error) {
       console.error('Error fetching product detail:', error);
       res.status(500).json({ error: 'Erro interno ao buscar produto' });
