@@ -77,6 +77,28 @@ function normalizeCPF(cpf: string | undefined | null) {
   return String(cpf || '').replace(/\D/g, '');
 }
 
+function extractGatewayError(error: any) {
+  const fallback = 'Falha ao processar pagamento no gateway.';
+
+  const details = error?.cause || error?.response?.data || error?.message || null;
+  let message = fallback;
+
+  if (Array.isArray(error?.cause) && error.cause.length > 0) {
+    const first = error.cause[0];
+    message = first?.description || first?.message || first?.code || fallback;
+  } else if (typeof error?.message === 'string' && error.message.trim()) {
+    message = error.message;
+  } else if (typeof error?.cause?.message === 'string' && error.cause.message.trim()) {
+    message = error.cause.message;
+  }
+
+  return {
+    message,
+    details,
+    status: Number(error?.status || error?.statusCode || error?.response?.status || 400),
+  };
+}
+
 function httpGetJsonWithToken(url: string, accessToken: string): Promise<{ status: number; payload: any; raw: string }> {
   return new Promise((resolve, reject) => {
     const request = https.get(
@@ -339,7 +361,8 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '15mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '15mb' }));
   app.use(cookieParser());
   app.use('/uploads', express.static('public/uploads'));
 
@@ -1336,8 +1359,15 @@ async function startServer() {
         items: orderItems,
       });
 
+      const { mode, accessToken } = resolveMercadoPagoSettings();
+      if (!accessToken) {
+        db.run(`UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, orderId);
+        return res.status(400).json({
+          error: 'Mercado Pago nao configurado. Preencha o Access Token em Configuracoes > Meios de Pagamento.',
+        });
+      }
+
       const paymentClient = createMercadoPagoPaymentClient();
-      const { mode } = resolveMercadoPagoSettings();
       const notificationBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
 
       const commonBody: any = {
@@ -1354,29 +1384,39 @@ async function startServer() {
       };
 
       let payment: any;
-      if (payment_method === 'pix') {
-        payment = await paymentClient.create({
-          body: {
-            ...commonBody,
-            payment_method_id: 'pix',
-          },
-        });
-      } else {
-        if (!card_token) {
-          return res.status(400).json({ error: 'Token do cartão é obrigatório' });
-        }
-        const requestedInstallments = payment_method === 'debit_card'
-          ? 1
-          : Math.max(1, Number(installments || 1));
+      try {
+        if (payment_method === 'pix') {
+          payment = await paymentClient.create({
+            body: {
+              ...commonBody,
+              payment_method_id: 'pix',
+            },
+          });
+        } else {
+          if (!card_token) {
+            return res.status(400).json({ error: 'Token do cartao e obrigatorio' });
+          }
+          const requestedInstallments = payment_method === 'debit_card'
+            ? 1
+            : Math.max(1, Number(installments || 1));
 
-        payment = await paymentClient.create({
-          body: {
-            ...commonBody,
-            token: card_token,
-            installments: requestedInstallments,
-            payment_method_id: payment_method_id || (payment_method === 'credit_card' ? 'visa' : undefined),
-            issuer_id: issuer_id || undefined,
-          },
+          payment = await paymentClient.create({
+            body: {
+              ...commonBody,
+              token: card_token,
+              installments: requestedInstallments,
+              payment_method_id: payment_method_id || (payment_method === 'credit_card' ? 'visa' : undefined),
+              issuer_id: issuer_id || undefined,
+            },
+          });
+        }
+      } catch (gatewayError: any) {
+        const parsed = extractGatewayError(gatewayError);
+        db.run(`UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, orderId);
+        console.error('MercadoPago payment error:', parsed.details || gatewayError);
+        return res.status(parsed.status >= 400 && parsed.status < 500 ? parsed.status : 400).json({
+          error: parsed.message,
+          details: parsed.details || null,
         });
       }
 
@@ -2465,7 +2505,13 @@ async function startServer() {
       res.json({ ok: true });
     } catch (error: any) {
       console.error('SMTP Test Error:', error);
-      res.json({ ok: false, error: error.message || 'Falha ao conectar no servidor SMTP' });
+      res.json({
+        ok: false,
+        error: error?.message || 'Falha ao conectar no servidor SMTP',
+        code: error?.code || null,
+        name: error?.name || null,
+        stack: typeof error?.stack === 'string' ? error.stack.split('\n').slice(0, 3).join('\n') : null,
+      });
     }
   });
 
@@ -2873,31 +2919,42 @@ async function startServer() {
   });
 
   // API Routes - UPLOAD LOGO
-  app.post('/api/admin/upload-logo', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/upload-logo', authenticate, isAdmin, upload.single('logo'), (req, res) => {
     try {
-      const { image } = req.body;
-      if (!image) return res.status(400).json({ error: 'Imagem nÃ£o enviada' });
-
-      // In a real production app, use multer and save to storage.
-      // For this demo/internal tool, we'll save base64 to a local file or just return it.
-      // But we'll simulate a file save to /uploads/logo.png
-      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
-      const buffer = Buffer.from(base64Data, 'base64');
       const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-      
-      if (!require('fs').existsSync(uploadDir)) {
-        require('fs').mkdirSync(uploadDir, { recursive: true });
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
       }
 
-      const fileName = `logo-${Date.now()}.png`;
-      const filePath = path.join(uploadDir, fileName);
-      require('fs').writeFileSync(filePath, buffer);
+      if (req.file?.filename) {
+        return res.json({ url: `/uploads/${req.file.filename}` });
+      }
 
-      const logoUrl = `/uploads/${fileName}`;
-      res.json({ url: logoUrl });
+      const image = String(req.body?.image || '').trim();
+      if (!image) return res.status(400).json({ error: 'Imagem nao enviada' });
+
+      const base64Match = image.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,(.+)$/);
+      if (!base64Match) {
+        return res.status(400).json({ error: 'Formato de imagem invalido. Envie base64 ou arquivo.' });
+      }
+
+      const mimeExt = base64Match[1].toLowerCase();
+      const ext = mimeExt.includes('svg') ? 'svg' : (mimeExt.includes('jpeg') ? 'jpg' : 'png');
+      const base64Data = base64Match[2];
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      if (!buffer.length) {
+        return res.status(400).json({ error: 'Conteudo da imagem invalido' });
+      }
+
+      const fileName = `logo-${Date.now()}.${ext}`;
+      const filePath = path.join(uploadDir, fileName);
+      fs.writeFileSync(filePath, buffer);
+
+      return res.json({ url: `/uploads/${fileName}` });
     } catch (error) {
       console.error('Logo Upload Error:', error);
-      res.status(500).json({ error: 'Erro ao fazer upload da logo' });
+      return res.status(500).json({ error: 'Erro ao fazer upload da logo' });
     }
   });
 

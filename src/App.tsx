@@ -30,18 +30,39 @@ import { FavoritesProvider } from './contexts/FavoritesContext';
 
 export default function App() {
   useEffect(() => {
+    const hexToRgb = (hex: string) => {
+      const normalized = hex.replace('#', '').trim();
+      const raw = normalized.length === 3
+        ? normalized.split('').map((ch) => ch + ch).join('')
+        : normalized;
+      if (!/^[0-9a-fA-F]{6}$/.test(raw)) return null;
+      const int = Number.parseInt(raw, 16);
+      return {
+        r: (int >> 16) & 255,
+        g: (int >> 8) & 255,
+        b: int & 255,
+      };
+    };
+
     async function fetchBranding() {
       try {
-        const res = await fetch('/api/admin/settings');
+        const res = await fetch('/api/settings');
         const data = await res.json();
         if (data) {
           if (data.primary_color) {
             document.documentElement.style.setProperty('--brand-primary', data.primary_color);
+            const primaryRgb = hexToRgb(data.primary_color);
+            if (primaryRgb) {
+              document.documentElement.style.setProperty('--brand-primary-rgb', `${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}`);
+            }
           }
           if (data.secondary_color) {
             document.documentElement.style.setProperty('--brand-secondary', data.secondary_color);
+            const secondaryRgb = hexToRgb(data.secondary_color);
+            if (secondaryRgb) {
+              document.documentElement.style.setProperty('--brand-secondary-rgb', `${secondaryRgb.r}, ${secondaryRgb.g}, ${secondaryRgb.b}`);
+            }
           }
-          // We can also store logo_url in a context or local storage if needed by Header
         }
       } catch (err) {
         console.error('Failed to fetch branding:', err);

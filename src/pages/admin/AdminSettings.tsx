@@ -83,6 +83,29 @@ export default function AdminSettings() {
     fetchSettings();
   }, []);
 
+  useEffect(() => {
+    const toRgb = (hex: string) => {
+      const normalized = String(hex || '').replace('#', '').trim();
+      const raw = normalized.length === 3
+        ? normalized.split('').map((ch) => ch + ch).join('')
+        : normalized;
+      if (!/^[0-9a-fA-F]{6}$/.test(raw)) return null;
+      const int = Number.parseInt(raw, 16);
+      return `${(int >> 16) & 255}, ${(int >> 8) & 255}, ${int & 255}`;
+    };
+
+    if (settings.primary_color) {
+      document.documentElement.style.setProperty('--brand-primary', settings.primary_color);
+      const rgb = toRgb(settings.primary_color);
+      if (rgb) document.documentElement.style.setProperty('--brand-primary-rgb', rgb);
+    }
+    if (settings.secondary_color) {
+      document.documentElement.style.setProperty('--brand-secondary', settings.secondary_color);
+      const rgb = toRgb(settings.secondary_color);
+      if (rgb) document.documentElement.style.setProperty('--brand-secondary-rgb', rgb);
+    }
+  }, [settings.primary_color, settings.secondary_color]);
+
   const fetchSettings = async () => {
     setLoading(true);
     try {
@@ -378,26 +401,31 @@ export default function AdminSettings() {
                                 onChange={async (e) => {
                                   const file = e.target.files?.[0];
                                   if (!file) return;
-                                  
-                                  const reader = new FileReader();
-                                  reader.onloadend = async () => {
-                                    const base64 = reader.result as string;
-                                    try {
-                                      const res = await fetch('/api/admin/upload-logo', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ image: base64 })
-                                      });
-                                      const data = await res.json();
-                                      if (data.url) {
-                                        setSettings({ ...settings, logo_url: data.url });
-                                        setMessage({ text: 'Logo carregada! Salve para aplicar.', type: 'success' });
-                                      }
-                                    } catch (err) {
-                                      setMessage({ text: 'Erro ao subir logo.', type: 'error' });
+
+                                  try {
+                                    const formData = new FormData();
+                                    formData.append('logo', file);
+
+                                    const res = await fetch('/api/admin/upload-logo', {
+                                      method: 'POST',
+                                      body: formData,
+                                    });
+
+                                    const data = await res.json().catch(() => ({}));
+                                    if (!res.ok) {
+                                      setMessage({ text: data?.error || 'Erro ao subir logo.', type: 'error' });
+                                      return;
                                     }
-                                  };
-                                  reader.readAsDataURL(file);
+
+                                    if (data.url) {
+                                      setSettings({ ...settings, logo_url: data.url });
+                                      setMessage({ text: 'Logo carregada! Salve para aplicar.', type: 'success' });
+                                    }
+                                  } catch (err) {
+                                    setMessage({ text: 'Erro ao subir logo.', type: 'error' });
+                                  } finally {
+                                    e.currentTarget.value = '';
+                                  }
                                 }}
                               />
                             </label>

@@ -21,7 +21,7 @@ export default function Header() {
   useEffect(() => {
     async function fetchBranding() {
       try {
-        const res = await fetch('/api/admin/settings');
+        const res = await fetch('/api/settings');
         const data = await res.json();
         if (data && data.logo_url) {
           setLogoUrl(data.logo_url);
