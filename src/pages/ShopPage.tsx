@@ -8,12 +8,14 @@ import { Category, Product } from '../types';
 
 type SortMode = 'recent' | 'price_asc' | 'price_desc' | 'name';
 
+import { useAppData } from '../contexts/AppDataContext';
+
 export default function ShopPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const searchQuery = searchParams.get('q') || '';
   const pageParam = Number(searchParams.get('page') || '1');
 
-  const [categories, setCategories] = useState<Category[]>([]);
+  const { categories } = useAppData();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
@@ -23,21 +25,6 @@ export default function ShopPage() {
     pages: 1,
     currentPage: 1,
   });
-
-  useEffect(() => {
-    async function fetchCategories() {
-      try {
-        const res = await fetch('/api/categories');
-        const cats = await res.json();
-        if (Array.isArray(cats)) {
-          setCategories(cats);
-        }
-      } catch (error) {
-        console.error('Failed to fetch categories:', error);
-      }
-    }
-    fetchCategories();
-  }, []);
 
   useEffect(() => {
     async function fetchProducts() {

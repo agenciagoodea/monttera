@@ -27,56 +27,17 @@ import AdminLayout from './layouts/AdminLayout';
 import { AuthProvider } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import { FavoritesProvider } from './contexts/FavoritesContext';
+import { AppDataProvider } from './contexts/AppDataContext';
 
 export default function App() {
-  useEffect(() => {
-    const hexToRgb = (hex: string) => {
-      const normalized = hex.replace('#', '').trim();
-      const raw = normalized.length === 3
-        ? normalized.split('').map((ch) => ch + ch).join('')
-        : normalized;
-      if (!/^[0-9a-fA-F]{6}$/.test(raw)) return null;
-      const int = Number.parseInt(raw, 16);
-      return {
-        r: (int >> 16) & 255,
-        g: (int >> 8) & 255,
-        b: int & 255,
-      };
-    };
-
-    async function fetchBranding() {
-      try {
-        const res = await fetch('/api/settings');
-        const data = await res.json();
-        if (data) {
-          if (data.primary_color) {
-            document.documentElement.style.setProperty('--brand-primary', data.primary_color);
-            const primaryRgb = hexToRgb(data.primary_color);
-            if (primaryRgb) {
-              document.documentElement.style.setProperty('--brand-primary-rgb', `${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}`);
-            }
-          }
-          if (data.secondary_color) {
-            document.documentElement.style.setProperty('--brand-secondary', data.secondary_color);
-            const secondaryRgb = hexToRgb(data.secondary_color);
-            if (secondaryRgb) {
-              document.documentElement.style.setProperty('--brand-secondary-rgb', `${secondaryRgb.r}, ${secondaryRgb.g}, ${secondaryRgb.b}`);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch branding:', err);
-      }
-    }
-    fetchBranding();
-  }, []);
 
   return (
     <Router>
       <AuthProvider>
-        <FavoritesProvider>
-          <CartProvider>
-            <Routes>
+        <AppDataProvider>
+          <FavoritesProvider>
+            <CartProvider>
+              <Routes>
           {/* Admin Routes */}
           <Route path="/admin/*" element={
             <AdminLayout>
@@ -120,8 +81,9 @@ export default function App() {
             </div>
           } />
           </Routes>
-          </CartProvider>
-        </FavoritesProvider>
+            </CartProvider>
+          </FavoritesProvider>
+        </AppDataProvider>
       </AuthProvider>
     </Router>
   );
