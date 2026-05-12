@@ -61,7 +61,7 @@ export default function ProductDetail() {
 
   async function fetchReviews(productSlug: string) {
     try {
-      const res = await fetch(`/api/products/${productSlug}/reviews`);
+      const res = await fetch(`/api/products/${productSlug}/reviews`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setReviews(data.reviews || []);
@@ -82,6 +82,7 @@ export default function ProductDetail() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rating: newRating, comment: newComment }),
+        credentials: 'include',
       });
 
       if (res.ok) {
