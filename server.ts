@@ -3005,7 +3005,7 @@ async function startServer() {
   });
 
   // Vite Integration
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -3025,26 +3025,13 @@ async function startServer() {
   setInterval(() => {
     try {
       console.log('[Cron] Checking for pending PIX payments...');
-      // Buscar pedidos pendentes (criados há mais de 1 hora, mas menos de 24 horas, via PIX)
-      // Como não temos um campo 'reminded', vamos usar a diferença de tempo de forma aproximada,
-      // ou apenas enviar para os que estão pendentes criados há menos de 24h.
-      // O ideal seria registrar o envio, mas enviaremos se estiver 'pending' e tiver mais de 1h.
-      const query = `
-        SELECT * FROM orders 
-        WHERE status = 'pending' 
-        AND payment_method = 'pix'
-        AND created_at <= datetime('now', '-1 hour')
-        AND created_at >= datetime('now', '-24 hours')
-        AND id NOT IN (SELECT CAST(SUBSTR(subject, LOCATE('#', subject) + 1) AS INTEGER) FROM email_logs WHERE template_key = 'payment_pending_pix')
-      `;
-      // SQLite LOCATE isn't built-in, so a simpler approach is fetching and filtering.
       
       const pendingOrders = db.all(`
         SELECT * FROM orders 
         WHERE status = 'pending' 
         AND payment_method = 'pix'
-        AND created_at <= datetime('now', '-1 hour')
-        AND created_at >= datetime('now', '-24 hours')
+        AND created_at <= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
       `) as any[];
 
       const notifiedLogs = db.all(`SELECT subject FROM email_logs WHERE template_key = 'payment_pending_pix'`) as any[];
@@ -3077,11 +3064,21 @@ async function startServer() {
     }
   }, 30 * 60 * 1000);
 
-  console.log(`Starting express server on port ${PORT}...`);
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server successfully started and listening on http://0.0.0.0:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    console.log(`Starting express server on port ${PORT}...`);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server successfully started and listening on http://0.0.0.0:${PORT}`);
+    });
+  }
+  
+  return app;
 }
 
-startServer();
+const appPromise = startServer();
+export default async (req: any, res: any) => {
+  const app = await appPromise;
+  return app(req, res);
+};
+
+
 
