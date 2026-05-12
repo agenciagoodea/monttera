@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { Category } from '../types';
 
 interface SidebarProps {
@@ -7,9 +8,8 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ categories, selectedCategory, onSelectCategory }: SidebarProps) {
-  // Organiza categorias em hierarquia
-  const parentCategories = categories.filter(c => !c.parent_id);
-  const getSubcategories = (parentId: number) => categories.filter(c => c.parent_id === parentId);
+  const parentCategories = categories.filter((c) => !c.parent_id);
+  const getSubcategories = (parentId: number) => categories.filter((c) => c.parent_id === parentId);
 
   return (
     <aside className="w-full lg:w-64 flex-shrink-0 flex flex-col gap-6">
@@ -19,47 +19,48 @@ export default function Sidebar({ categories, selectedCategory, onSelectCategory
         </h3>
         <ul className="space-y-2 flex flex-col custom-scrollbar">
           <li>
-            <button 
+            <button
               onClick={() => onSelectCategory(null)}
               className={`w-full text-left px-3 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-between ${
-                selectedCategory === null 
-                ? 'bg-blue-50 text-blue-700 shadow-sm border border-blue-100/50' 
-                : 'text-slate-600 hover:bg-slate-50 border border-transparent'
+                selectedCategory === null
+                  ? 'bg-blue-50 text-blue-700 shadow-sm border border-blue-100/50'
+                  : 'text-slate-600 hover:bg-slate-50 border border-transparent'
               }`}
             >
               <span>Todas as Matrizes</span>
               {selectedCategory === null && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
             </button>
           </li>
+
           {parentCategories.map((category) => {
             const subcategories = getSubcategories(category.id);
             const isParentSelected = selectedCategory === category.id;
-            const isAnySubSelected = subcategories.some(s => s.id === selectedCategory);
+            const isAnySubSelected = subcategories.some((s) => s.id === selectedCategory);
 
             return (
               <li key={category.id} className="space-y-1">
-                <button 
+                <button
                   onClick={() => onSelectCategory(category.id)}
                   className={`w-full text-left px-3 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-between ${
-                    isParentSelected 
-                    ? 'bg-blue-50 text-blue-700 shadow-sm border border-blue-100/50' 
-                    : 'text-slate-600 hover:bg-slate-50 border border-transparent'
+                    isParentSelected
+                      ? 'bg-blue-50 text-blue-700 shadow-sm border border-blue-100/50'
+                      : 'text-slate-600 hover:bg-slate-50 border border-transparent'
                   }`}
                 >
                   <span className={subcategories.length > 0 ? 'text-blue-900' : ''}>{category.name}</span>
                   {isParentSelected && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
                 </button>
-                
+
                 {subcategories.length > 0 && (isParentSelected || isAnySubSelected) && (
                   <ul className="ml-4 space-y-1 mt-1 border-l border-slate-100 pl-3">
-                    {subcategories.map(sub => (
+                    {subcategories.map((sub) => (
                       <li key={sub.id}>
-                        <button 
+                        <button
                           onClick={() => onSelectCategory(sub.id)}
                           className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-between ${
                             selectedCategory === sub.id
-                            ? 'text-blue-600 bg-blue-50/50'
-                            : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                              ? 'text-blue-600 bg-blue-50/50'
+                              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
                           }`}
                         >
                           <span>{sub.name}</span>
@@ -78,10 +79,13 @@ export default function Sidebar({ categories, selectedCategory, onSelectCategory
       <div className="mt-auto p-5 bg-blue-600 rounded-2xl text-white shadow-lg overflow-hidden relative group">
         <div className="relative z-10">
           <p className="text-[10px] font-black opacity-70 uppercase tracking-widest mb-1">Sob medida</p>
-          <p className="text-sm font-semibold leading-tight mb-4">Não encontrou a matriz que precisa?</p>
-          <button className="w-full bg-white text-blue-600 py-2.5 rounded-xl font-black text-[11px] uppercase hover:bg-blue-50 transition-all shadow-sm active:scale-95">
-            Solicitar Orçamento
-          </button>
+          <p className="text-sm font-semibold leading-tight mb-4">Nao encontrou a matriz que precisa?</p>
+          <Link
+            to="/orcamento"
+            className="block w-full text-center bg-white text-blue-600 py-2.5 rounded-xl font-black text-[11px] uppercase hover:bg-blue-50 transition-all shadow-sm active:scale-95"
+          >
+            Solicitar Orcamento
+          </Link>
         </div>
         <div className="absolute -right-4 -bottom-4 bg-white/10 w-24 h-24 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700" />
       </div>
