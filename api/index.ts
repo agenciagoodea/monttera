@@ -79,6 +79,7 @@ app.get('/api/settings', async (_req, res) => {
   try {
     const rows = await q('SELECT `key`, value FROM settings');
     const map = rows.reduce((acc: any, r: any) => { acc[r.key] = r.value; return acc; }, {});
+    res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
     res.json(map);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -138,8 +139,12 @@ app.get('/api/products/:slug', async (req, res) => {
   try {
     const product = await qOne(`SELECT p.*, c.name as category_name FROM products p LEFT JOIN product_categories c ON c.id = p.category_id WHERE p.slug = ? AND p.status = 'active'`, [req.params.slug]);
     if (!product) return res.status(404).json({ error: 'Produto não encontrado' });
-    const gallery = await q("SELECT * FROM product_images WHERE product_id = ? AND file_type = 'gallery' ORDER BY id ASC", [product.id]);
-    const relatedProducts = await q("SELECT * FROM products WHERE category_id = ? AND id != ? AND status = 'active' LIMIT 6", [product.category_id, product.id]);
+    
+    const [gallery, relatedProducts] = await Promise.all([
+      q("SELECT * FROM product_images WHERE product_id = ? AND file_type = 'gallery' ORDER BY id ASC", [product.id]),
+      q("SELECT * FROM products WHERE category_id = ? AND id != ? AND status = 'active' LIMIT 6", [product.category_id, product.id])
+    ]);
+    
     res.json({ ...product, gallery, relatedProducts });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
