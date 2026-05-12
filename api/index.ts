@@ -143,6 +143,49 @@ app.get('/api/products/:slug', async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Reviews ────────────────────────────────────────────────────────────────
+app.get('/api/products/:slug/reviews', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const product = await qOne('SELECT id FROM products WHERE slug = ?', [slug]);
+    if (!product) return res.status(404).json({ error: 'Produto não encontrado' });
+
+    const reviews = await q(`
+      SELECT r.*, u.name as user_name 
+      FROM reviews r 
+      LEFT JOIN users u ON r.user_id = u.id 
+      WHERE r.product_id = ? AND r.status = 'approved'
+      ORDER BY r.created_at DESC
+    `, [product.id]);
+
+    const stats = await qOne('SELECT AVG(rating) as avgRating FROM reviews WHERE product_id = ? AND status = "approved"', [product.id]);
+
+    res.json({ reviews, avgRating: stats?.avgRating || 0 });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/products/:slug/reviews', authenticate, async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { rating, comment } = req.body;
+    const user = (req as any).user;
+
+    if (!rating || !comment) {
+      return res.status(400).json({ error: 'Nota e comentário são obrigatórios' });
+    }
+
+    const product = await qOne('SELECT id FROM products WHERE slug = ?', [slug]);
+    if (!product) return res.status(404).json({ error: 'Produto não encontrado' });
+
+    await qRun(`
+      INSERT INTO reviews (user_id, product_id, rating, comment, status) 
+      VALUES (?, ?, ?, ?, 'approved')
+    `, [user.id, product.id, rating, comment]);
+
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── Auth ────────────────────────────────────────────────────────────────────
 app.post('/api/auth/login', async (req, res) => {
   try {

@@ -1,11 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ChevronLeft, FileText, ShoppingCart, Bolt, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart } from 'lucide-react';
+import { ChevronLeft, FileText, ShoppingCart, Bolt, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send } from 'lucide-react';
 import { Product } from '../types';
 import { formatCurrency } from '../lib/utils';
 import { useCart } from '../contexts/CartContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { motion, AnimatePresence } from 'framer-motion';
+
+interface Review {
+  id: number;
+  user_name: string;
+  rating: number;
+  comment: string;
+  created_at: string;
+}
 
 export default function ProductDetail() {
   const { slug } = useParams();
@@ -15,6 +23,13 @@ export default function ProductDetail() {
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'description' | 'reviews'>('description');
+  
+  // Reviews state
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [avgRating, setAvgRating] = useState(0);
+  const [newRating, setNewRating] = useState(5);
+  const [newComment, setNewComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   useEffect(() => {
     async function fetchProduct() {
@@ -29,6 +44,9 @@ export default function ProductDetail() {
         const data = await res.json();
         setProduct(data);
         setActiveImage(data.image || data.gallery?.[0] || null);
+        
+        // Fetch reviews
+        fetchReviews(slug);
       } catch (error) {
         console.error('Failed to fetch product:', error);
         setProduct(null);
@@ -40,6 +58,47 @@ export default function ProductDetail() {
 
     fetchProduct();
   }, [slug]);
+
+  async function fetchReviews(productSlug: string) {
+    try {
+      const res = await fetch(`/api/products/${productSlug}/reviews`);
+      if (res.ok) {
+        const data = await res.json();
+        setReviews(data.reviews || []);
+        setAvgRating(data.avgRating || 0);
+      }
+    } catch (error) {
+      console.error('Failed to fetch reviews:', error);
+    }
+  }
+
+  async function handleSubmitReview(e: React.FormEvent) {
+    e.preventDefault();
+    if (!product || !newComment.trim()) return;
+
+    setSubmittingReview(true);
+    try {
+      const res = await fetch(`/api/products/${product.slug}/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rating: newRating, comment: newComment }),
+      });
+
+      if (res.ok) {
+        setNewComment('');
+        setNewRating(5);
+        fetchReviews(product.slug);
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Erro ao enviar avaliação. Você precisa estar logado.');
+      }
+    } catch (error) {
+      console.error('Failed to submit review:', error);
+      alert('Erro de conexão ao enviar avaliação.');
+    } finally {
+      setSubmittingReview(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -69,7 +128,7 @@ export default function ProductDetail() {
     return (
       <div className="max-w-[1280px] mx-auto px-6 py-20 text-center">
         <Package className="w-16 h-16 text-slate-200 mx-auto mb-4" />
-        <h1 className="text-2xl font-black text-slate-800 uppercase mb-4">Matriz nÃ£o encontrada</h1>
+        <h1 className="text-2xl font-black text-slate-800 uppercase mb-4">Matriz não encontrada</h1>
         <Link to="/" className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors">
           <ChevronLeft className="w-4 h-4" />
           Voltar para a loja
@@ -85,27 +144,12 @@ export default function ProductDetail() {
   const gallery = Array.from(
     new Set([product.image, ...(product.gallery || [])].filter((img): img is string => Boolean(img)))
   );
+
   const formatShortDescription = (html: string) => {
     let formatted = html || '';
-
-    // Garante quebra de linha logo após o título "Tamanho(s) disponível(is)"
-    formatted = formatted.replace(
-      /(Tamanhos?\s+dispon(?:[ií]vel(?:is)?|[ií]veis?)(?:\s+por\s+matriz)?\s*:\s*)/i,
-      '$1<br/>',
-    );
-
-    // Força quebra imediatamente após ":" quando vier seguido da primeira medida na mesma linha
-    formatted = formatted.replace(
-      /(►\s*Tamanhos?\s+dispon(?:[ií]vel(?:is)?|[ií]veis?)(?:\s+por\s+matriz)?\s*:\s*)(?=\d)/i,
-      '$1<br/>',
-    );
-
-    // Garante uma medida por linha no bloco azul (quebra após "/Pontos:xxxx")
-    formatted = formatted.replace(
-      /(\/Pontos:\s*\d+)\s+(?=\d{1,2}(?:[.,]\d+)?cm)/gi,
-      '$1<br/>',
-    );
-
+    formatted = formatted.replace(/(Tamanhos?\s+dispon(?:[ií]vel(?:is)?|[ií]veis?)(?:\s+por\s+matriz)?\s*:\s*)/i, '$1<br/>');
+    formatted = formatted.replace(/(►\s*Tamanhos?\s+dispon(?:[ií]vel(?:is)?|[ií]veis?)(?:\s+por\s+matriz)?\s*:\s*)(?=\d)/i, '$1<br/>');
+    formatted = formatted.replace(/(\/Pontos:\s*\d+)\s+(?=\d{1,2}(?:[.,]\d+)?cm)/gi, '$1<br/>');
     return formatted;
   };
 
@@ -128,7 +172,6 @@ export default function ProductDetail() {
             className="relative bg-white border border-slate-100 rounded-[40px] overflow-hidden group shadow-xl shadow-slate-200/50"
           >
             <div className="aspect-square relative flex items-center justify-center p-8 bg-slate-50/50">
-              {/* Watermark Pattern */}
               <div className="absolute inset-0 opacity-[0.03] pointer-events-none grid grid-cols-4 grid-rows-4 rotate-12 scale-150 select-none">
                 {Array.from({ length: 16 }).map((_, i) => (
                   <span key={i} className="text-[10px] font-black uppercase text-slate-900 flex items-center justify-center">
@@ -165,7 +208,6 @@ export default function ProductDetail() {
             </div>
           </motion.div>
 
-          {/* Gallery Thumbnails */}
           {gallery.length > 1 && (
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
@@ -193,6 +235,15 @@ export default function ProductDetail() {
           animate={{ opacity: 1, x: 0 }}
           className="flex flex-col"
         >
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex text-amber-400">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <Star key={s} className={`w-4 h-4 ${s <= Math.round(avgRating) ? 'fill-current' : 'text-slate-200'}`} />
+              ))}
+            </div>
+            <span className="text-xs font-bold text-slate-400">({reviews.length} avaliações)</span>
+          </div>
+
           <h1 className="text-2xl md:text-3xl lg:text-4xl font-black text-slate-900 leading-[1.1] mb-4">
             {product.name}
           </h1>
@@ -235,7 +286,6 @@ export default function ProductDetail() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-            {/* Flash Info */}
             <div className="flex items-center gap-3 p-4 bg-sky-50 border border-sky-100 rounded-2xl">
               <div className="w-10 h-10 bg-sky-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-sky-200">
                 <Bolt className="w-5 h-5 fill-current" />
@@ -246,7 +296,6 @@ export default function ProductDetail() {
               </div>
             </div>
 
-            {/* Produto Digital */}
             <div className="flex items-center gap-3 p-4 bg-violet-50 border border-violet-100 rounded-2xl">
               <div className="w-10 h-10 bg-violet-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-violet-200">
                 <DownloadCloud className="w-5 h-5" />
@@ -292,7 +341,6 @@ export default function ProductDetail() {
             </div>
           </div>
 
-          {/* Warning Box */}
           <div className="mb-8 p-4 bg-blue-50/50 border border-blue-100 rounded-2xl flex gap-3">
             <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
             <p className="text-[11px] font-medium text-blue-800 leading-relaxed">
@@ -331,7 +379,7 @@ export default function ProductDetail() {
               activeTab === 'description' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
             }`}
           >
-            DescriÃ§Ã£o
+            Descrição
           </button>
           <button 
             onClick={() => setActiveTab('reviews')}
@@ -339,7 +387,7 @@ export default function ProductDetail() {
               activeTab === 'reviews' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
             }`}
           >
-            AvaliaÃ§Ãµes (0)
+            Avaliações ({reviews.length})
           </button>
         </div>
 
@@ -360,13 +408,13 @@ export default function ProductDetail() {
                   />
                 ) : (
                   <p className="text-slate-600 leading-loose text-base">
-                    Este produto consiste em um arquivo de bordado digital, desenvolvida para ser utilizada em mÃ¡quinas de bordar computadorizadas desde domÃ©sticas a industriais.
+                    Este produto consiste em um arquivo de bordado digital, desenvolvida para ser utilizada em máquinas de bordar computadorizadas desde domésticas a industriais.
                   </p>
                 )}
                 
                 {!product.description && (
                   <div className="mt-8 space-y-4 text-slate-500 text-sm">
-                    <p>ApÃ³s a compra, o arquivo estarÃ¡ disponÃ­vel em sua Ã¡rea de cliente para download imediato em atÃ© cinco formatos diferentes, compatÃ­veis com diversas marcas de mÃ¡quinas de bordado, conforme listados abaixo.</p>
+                    <p>Após a compra, o arquivo estará disponível em sua área de cliente para download imediato em até cinco formatos diferentes, compatíveis com diversas marcas de máquinas de bordado, conforme listados abaixo.</p>
                     <ul className="list-disc pl-5 space-y-1">
                       <li>PES (Deco, Brother, Babylock)</li>
                       <li>JEF (Janome, Elna, Kenmore)</li>
@@ -375,7 +423,7 @@ export default function ProductDetail() {
                       <li>XXX (Compucon)</li>
                     </ul>
                     <p className="text-red-500 font-bold mt-6 italic">
-                      â€¢ NÃ£o fazemos alteraÃ§Ã£o de tamanho e ediÃ§Ãµes nas matrizes, fique atento nos detalhes da imagem e tamanho desta produto na descriÃ§Ã£o.
+                      • Não fazemos alteração de tamanho e edições nas matrizes, fique atento nos detalhes da imagem e tamanho desta produto na descrição.
                     </p>
                   </div>
                 )}
@@ -387,14 +435,87 @@ export default function ProductDetail() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="bg-white border border-slate-100 rounded-3xl p-12 text-center"
+              className="grid grid-cols-1 lg:grid-cols-3 gap-12"
             >
-              <Star className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-              <h3 className="text-lg font-black text-slate-800 uppercase mb-2">Sem avaliaÃ§Ãµes ainda</h3>
-              <p className="text-slate-500 text-sm">Seja o primeiro a avaliar "{product.name}"</p>
-              <button className="mt-8 px-6 py-2 border-2 border-blue-600 text-blue-600 rounded-xl font-bold hover:bg-blue-50 transition-colors">
-                Deixar minha opiniÃ£o
-              </button>
+              {/* Reviews Summary & Form */}
+              <div className="lg:col-span-1 space-y-8">
+                <div className="bg-white border border-slate-100 rounded-3xl p-8 shadow-sm">
+                  <h3 className="text-lg font-black text-slate-800 uppercase mb-4">Avalie este produto</h3>
+                  <form onSubmit={handleSubmitReview} className="space-y-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Sua nota</label>
+                      <div className="flex gap-2">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            key={star}
+                            type="button"
+                            onClick={() => setNewRating(star)}
+                            className={`p-1 transition-all ${newRating >= star ? 'text-amber-400 scale-110' : 'text-slate-200'}`}
+                          >
+                            <Star className={`w-8 h-8 ${newRating >= star ? 'fill-current' : ''}`} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Seu comentário</label>
+                      <textarea
+                        value={newComment}
+                        onChange={(e) => setNewComment(e.target.value)}
+                        placeholder="O que você achou desta matriz?"
+                        className="w-full h-32 bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all resize-none"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={submittingReview || !newComment.trim()}
+                      className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg shadow-blue-100 hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                    >
+                      {submittingReview ? 'Enviando...' : (
+                        <>
+                          <Send className="w-4 h-4" />
+                          Enviar Avaliação
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              {/* Reviews List */}
+              <div className="lg:col-span-2 space-y-6">
+                {reviews.length > 0 ? (
+                  reviews.map((review) => (
+                    <div key={review.id} className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm">
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                            <User className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-black text-slate-800">{review.user_name}</p>
+                            <div className="flex text-amber-400">
+                              {[1, 2, 3, 4, 5].map((s) => (
+                                <Star key={s} className={`w-3 h-3 ${s <= review.rating ? 'fill-current' : 'text-slate-200'}`} />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {new Date(review.created_at).toLocaleDateString('pt-BR')}
+                        </span>
+                      </div>
+                      <p className="text-slate-600 text-sm leading-relaxed italic">"{review.comment}"</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="bg-white border border-slate-100 rounded-3xl p-12 text-center">
+                    <Star className="w-12 h-12 text-slate-200 mx-auto mb-4" />
+                    <h3 className="text-lg font-black text-slate-800 uppercase mb-2">Sem avaliações ainda</h3>
+                    <p className="text-slate-500 text-sm">Seja o primeiro a avaliar "{product.name}"</p>
+                  </div>
+                )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -438,5 +559,3 @@ export default function ProductDetail() {
     </main>
   );
 }
-
-

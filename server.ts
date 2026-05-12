@@ -3004,6 +3004,56 @@ async function startServer() {
     }
   });
 
+  // ─── Reviews ────────────────────────────────────────────────────────────────
+  app.get('/api/products/:slug/reviews', (req, res) => {
+    try {
+      const { slug } = req.params;
+      const product = db.get('SELECT id FROM products WHERE slug = ?', slug) as any;
+      if (!product) return res.status(404).json({ error: 'Produto não encontrado' });
+
+      const reviews = db.all(`
+        SELECT r.*, u.name as user_name 
+        FROM reviews r 
+        LEFT JOIN users u ON r.user_id = u.id 
+        WHERE r.product_id = ? AND r.status = 'approved'
+        ORDER BY r.created_at DESC
+      `, product.id);
+
+      const stats = db.get('SELECT AVG(rating) as avgRating FROM reviews WHERE product_id = ? AND status = "approved"', product.id) as any;
+
+      res.json({ reviews, avgRating: stats?.avgRating || 0 });
+    } catch (error) {
+      console.error('Fetch reviews error:', error);
+      res.status(500).json({ error: 'Erro ao buscar avaliações' });
+    }
+  });
+
+  app.post('/api/products/:slug/reviews', authenticate, (req, res) => {
+    try {
+      const { slug } = req.params;
+      const { rating, comment } = req.body;
+      const user = (req as any).user;
+
+      if (!rating || !comment) {
+        return res.status(400).json({ error: 'Nota e comentário são obrigatórios' });
+      }
+
+      const product = db.get('SELECT id FROM products WHERE slug = ?', slug) as any;
+      if (!product) return res.status(404).json({ error: 'Produto não encontrado' });
+
+      db.run(`
+        INSERT INTO reviews (user_id, product_id, rating, comment, status) 
+        VALUES (?, ?, ?, ?, 'approved')
+      `, user.id, product.id, rating, comment);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Submit review error:', error);
+      res.status(500).json({ error: 'Erro ao enviar avaliação' });
+    }
+  });
+
+
   // Vite Integration
   if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     const vite = await createViteServer({
