@@ -15,17 +15,19 @@ app.use(cookieParser());
 let pool: mysql.Pool | null = null;
 function getPool() {
   if (!pool) {
-    pool = mysql.createPool({
-      host: process.env.MYSQL_HOST,
+    const config = {
+      host: process.env.MYSQL_HOST || '187.110.162.234',
       port: Number(process.env.MYSQL_PORT || 3306),
-      user: process.env.MYSQL_USER,
-      password: process.env.MYSQL_PASSWORD,
-      database: process.env.MYSQL_DATABASE,
+      user: process.env.MYSQL_USER || 'digitalbordados_novo',
+      password: process.env.MYSQL_PASSWORD || 'vmsC9hNpxwqAx3HGc8Md',
+      database: process.env.MYSQL_DATABASE || 'digitalbordados_novo',
       charset: 'utf8mb4',
       waitForConnections: true,
       connectionLimit: 5,
-      ssl: { rejectUnauthorized: false },
-    });
+      connectTimeout: 10000,
+    };
+    console.log('Connecting to DB:', { host: config.host, database: config.database, user: config.user });
+    pool = mysql.createPool(config);
   }
   return pool;
 }
