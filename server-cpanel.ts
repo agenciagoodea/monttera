@@ -4,7 +4,8 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import apiApp from './api/index'; // Importa a configuração exata do Vercel (com MySQL)
 
-const _dir = __dirname;
+const __filename = fileURLToPath(import.meta.url);
+const _dir = path.dirname(__filename);
 const distPath = path.join(_dir, 'dist');
 
 console.log('App Root:', _dir);
