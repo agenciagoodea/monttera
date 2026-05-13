@@ -44,6 +44,11 @@ export default function AdminSettings() {
   const [smtpTestEmail, setSmtpTestEmail] = useState('');
   const [smtpTestLoading, setSmtpTestLoading] = useState(false);
   const [smtpTestMsg, setSmtpTestMsg] = useState<string | null>(null);
+  const [testingPayPal, setTestingPayPal] = useState(false);
+  const [paypalTestResult, setPaypalTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [showPayPalSandboxSecret, setShowPayPalSandboxSecret] = useState(false);
+  const [showPayPalProdSecret, setShowPayPalProdSecret] = useState(false);
+  const [copiedPaypalWebhook, setCopiedPaypalWebhook] = useState(false);
 
   const [settings, setSettings] = useState({
     // Home/Info
@@ -67,6 +72,17 @@ export default function AdminSettings() {
     mp_enable_credit_card: 'true',
     mp_enable_debit_card: 'true',
     mp_enable_boleto: 'false',
+
+    // PayPal
+    paypal_enabled: 'false',
+    paypal_mode: 'sandbox',
+    paypal_sandbox_client_id: '',
+    paypal_sandbox_client_secret: '',
+    paypal_production_client_id: '',
+    paypal_production_client_secret: '',
+    paypal_default_currency: 'USD',
+    paypal_brl_usd_rate: '5.20',
+    paypal_webhook_id: '',
 
     // Email Config
     smtp_host: '',
@@ -124,6 +140,14 @@ export default function AdminSettings() {
           mp_enable_credit_card: data.mp_enable_credit_card ?? prev.mp_enable_credit_card,
           mp_enable_debit_card: data.mp_enable_debit_card ?? prev.mp_enable_debit_card,
           mp_enable_boleto: data.mp_enable_boleto ?? prev.mp_enable_boleto,
+          paypal_enabled: data.paypal_enabled ?? prev.paypal_enabled,
+          paypal_mode: data.paypal_mode ?? prev.paypal_mode,
+          paypal_sandbox_client_id: data.paypal_sandbox_client_id ?? prev.paypal_sandbox_client_id,
+          paypal_sandbox_client_secret: data.paypal_sandbox_client_secret ?? prev.paypal_sandbox_client_secret,
+          paypal_production_client_id: data.paypal_production_client_id ?? prev.paypal_production_client_id,
+          paypal_production_client_secret: data.paypal_production_client_secret ?? prev.paypal_production_client_secret,
+          paypal_brl_usd_rate: data.paypal_brl_usd_rate ?? prev.paypal_brl_usd_rate,
+          paypal_webhook_id: data.paypal_webhook_id ?? prev.paypal_webhook_id,
         }));
       }
     } catch (error) {
@@ -222,6 +246,28 @@ export default function AdminSettings() {
       setTestingConnection(false);
       setTimeout(() => setMessage(null), 3000);
     }
+  };
+
+  const testPayPalConnection = async () => {
+    setTestingPayPal(true);
+    setPaypalTestResult(null);
+    try {
+      const res = await fetch('/api/admin/paypal/test');
+      const data = await res.json();
+      setPaypalTestResult({ ok: data.ok, msg: data.message || data.error || 'Resultado desconhecido' });
+    } catch {
+      setPaypalTestResult({ ok: false, msg: 'Erro de rede ao testar PayPal' });
+    } finally {
+      setTestingPayPal(false);
+    }
+  };
+
+  const copyPaypalWebhookUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.origin + '/api/webhooks/paypal');
+      setCopiedPaypalWebhook(true);
+      setTimeout(() => setCopiedPaypalWebhook(false), 1500);
+    } catch { /* noop */ }
   };
 
   const testSmtpConnection = async () => {
@@ -819,6 +865,167 @@ export default function AdminSettings() {
                           <li>Crie a aplicação e copie as credenciais.</li>
                           <li>Adicione a URL acima em Webhooks, ouvindo eventos de payment.</li>
                         </ol>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ─── PayPal Section ─── */}
+                  <div className="space-y-8 pt-6 border-t border-slate-100">
+                    <div>
+                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">PayPal Internacional</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                        {/* Enable toggle */}
+                        <div className="md:col-span-2">
+                          <button
+                            type="button"
+                            onClick={() => setSettings({ ...settings, paypal_enabled: settings.paypal_enabled === 'true' ? 'false' : 'true' })}
+                            className={`w-full p-4 rounded-2xl border flex items-center justify-between transition-all ${
+                              settings.paypal_enabled === 'true' ? 'bg-[#0070ba]/10 border-[#0070ba]/30 text-[#0070ba]' : 'bg-slate-50 border-slate-200 text-slate-500'
+                            }`}
+                          >
+                            <span className="text-base font-black">PayPal Internacional {settings.paypal_enabled === 'true' ? '✅ Ativo' : '⛔ Inativo'}</span>
+                            <span className={`w-6 h-6 rounded-full border flex items-center justify-center ${
+                              settings.paypal_enabled === 'true' ? 'border-[#0070ba] bg-[#0070ba] text-white' : 'border-slate-300'
+                            }`}>
+                              {settings.paypal_enabled === 'true' && <Check className="w-4 h-4" />}
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Mode */}
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Ambiente</label>
+                          <select
+                            className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                            value={settings.paypal_mode}
+                            onChange={e => setSettings({ ...settings, paypal_mode: e.target.value })}
+                          >
+                            <option value="sandbox">Sandbox (Testes)</option>
+                            <option value="production">Production (Real)</option>
+                          </select>
+                        </div>
+
+                        {/* Currency + Rate */}
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Taxa BRL → USD</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="1"
+                            className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                            value={settings.paypal_brl_usd_rate}
+                            onChange={e => setSettings({ ...settings, paypal_brl_usd_rate: e.target.value })}
+                            placeholder="5.20"
+                          />
+                          <p className="text-[10px] font-bold text-slate-400 ml-1">Ex: 5.20 significa 1 USD = R$ 5,20</p>
+                        </div>
+
+                        {/* Sandbox credentials */}
+                        <div className="md:col-span-2">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Credenciais Sandbox</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Client ID Sandbox</label>
+                              <input
+                                type="text"
+                                className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                                value={settings.paypal_sandbox_client_id}
+                                onChange={e => setSettings({ ...settings, paypal_sandbox_client_id: e.target.value })}
+                                placeholder="AXxxxxxx"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Client Secret Sandbox</label>
+                              <div className="relative">
+                                <input
+                                  type={showPayPalSandboxSecret ? 'text' : 'password'}
+                                  className="w-full px-5 py-3.5 pr-12 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                                  value={settings.paypal_sandbox_client_secret}
+                                  onChange={e => setSettings({ ...settings, paypal_sandbox_client_secret: e.target.value })}
+                                  placeholder="EXxxxxxx"
+                                />
+                                <button type="button" onClick={() => setShowPayPalSandboxSecret(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                                  {showPayPalSandboxSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Production credentials */}
+                        <div className="md:col-span-2">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Credenciais Production</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Client ID Production</label>
+                              <input
+                                type="text"
+                                className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                                value={settings.paypal_production_client_id}
+                                onChange={e => setSettings({ ...settings, paypal_production_client_id: e.target.value })}
+                                placeholder="AXxxxxxx"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Client Secret Production</label>
+                              <div className="relative">
+                                <input
+                                  type={showPayPalProdSecret ? 'text' : 'password'}
+                                  className="w-full px-5 py-3.5 pr-12 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                                  value={settings.paypal_production_client_secret}
+                                  onChange={e => setSettings({ ...settings, paypal_production_client_secret: e.target.value })}
+                                  placeholder="EXxxxxxx"
+                                />
+                                <button type="button" onClick={() => setShowPayPalProdSecret(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                                  {showPayPalProdSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Webhook ID */}
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Webhook ID (opcional)</label>
+                          <input
+                            type="text"
+                            className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                            value={settings.paypal_webhook_id}
+                            onChange={e => setSettings({ ...settings, paypal_webhook_id: e.target.value })}
+                            placeholder="WH-xxxxx"
+                          />
+                        </div>
+
+                        {/* Webhook URL */}
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">URL do Webhook PayPal</label>
+                          <div className="flex items-center gap-2 rounded-2xl bg-slate-900 text-emerald-400 px-4 py-3">
+                            <span className="text-xs font-bold flex-1 break-all">{window.location.origin + '/api/webhooks/paypal'}</span>
+                            <button type="button" onClick={copyPaypalWebhookUrl} className="px-3 py-1.5 rounded-xl bg-white/10 text-white text-[10px] font-black uppercase tracking-widest shrink-0">
+                              {copiedPaypalWebhook ? 'Copiado!' : 'Copiar'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Test button */}
+                        <div className="md:col-span-2 flex flex-wrap items-center gap-4">
+                          <button
+                            type="button"
+                            onClick={testPayPalConnection}
+                            disabled={testingPayPal}
+                            className="px-6 py-3 rounded-2xl bg-[#0070ba] text-white text-[10px] font-black uppercase tracking-widest hover:bg-[#005ea6] disabled:opacity-50"
+                          >
+                            {testingPayPal ? 'Testando...' : '🔗 Testar Credenciais PayPal'}
+                          </button>
+                          {paypalTestResult && (
+                            <div className={`flex items-center gap-2 text-xs font-bold ${ paypalTestResult.ok ? 'text-emerald-600' : 'text-rose-600' }`}>
+                              {paypalTestResult.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                              {paypalTestResult.msg}
+                            </div>
+                          )}
+                        </div>
+
                       </div>
                     </div>
                   </div>

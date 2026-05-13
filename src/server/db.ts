@@ -522,6 +522,7 @@ export function initDb() {
   query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(100) NULL`);
   query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_registered DATETIME NULL`);
   query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS woo_user_id VARCHAR(50) NULL`);
+  query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT NULL`);
 
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone VARCHAR(20) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS cpf VARCHAR(14) NULL`);
@@ -530,6 +531,16 @@ export function initDb() {
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS state VARCHAR(50) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS zip VARCHAR(10) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS country VARCHAR(50) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_address TEXT NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_city VARCHAR(100) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_state VARCHAR(50) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_zip VARCHAR(10) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_country VARCHAR(50) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_address TEXT NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_city VARCHAR(100) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_state VARCHAR(50) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_zip VARCHAR(10) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_country VARCHAR(50) NULL`);
 
   query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255) NULL`);
   query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255) NULL`);

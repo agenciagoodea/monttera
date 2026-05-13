@@ -73,6 +73,10 @@ export default function App() {
                   <Route path="/favoritos" element={<FavoritesPage />} />
                   <Route path="/minha-conta" element={<MyAccount />} />
                   <Route path="/minha-conta/pedidos" element={<MyAccount />} />
+                  <Route path="/minha-conta/downloads" element={<MyAccount />} />
+                  <Route path="/minha-conta/enderecos" element={<MyAccount />} />
+                  <Route path="/minha-conta/perfil" element={<MyAccount />} />
+                  <Route path="/minha-conta/lista-de-desejos" element={<MyAccount />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/cadastro" element={<Register />} />
                   <Route path="/esqueci-senha" element={<ForgotPassword />} />

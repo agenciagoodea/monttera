@@ -1588,24 +1588,370 @@ async function startServer() {
 
     return res.sendStatus(200);
   });
+  app.get('/api/customer/account', authenticate, (req, res) => {
+    try {
+      const user = (req as any).user;
+      const profile = db.get(`
+        SELECT
+          u.id,
+          u.name,
+          u.email,
+          u.first_name,
+          u.last_name,
+          u.phone,
+          u.cpf,
+          u.avatar_url,
+          c.billing_address,
+          c.billing_city,
+          c.billing_state,
+          c.billing_zip,
+          c.billing_country,
+          c.shipping_address,
+          c.shipping_city,
+          c.shipping_state,
+          c.shipping_zip,
+          c.shipping_country,
+          c.address,
+          c.city,
+          c.state,
+          c.zip,
+          c.country
+        FROM users u
+        LEFT JOIN customers c ON c.user_id = u.id
+        WHERE u.id = ?
+        LIMIT 1
+      `, user.id) as any;
+
+      const summary = db.get(`
+        SELECT
+          (SELECT COUNT(*) FROM orders WHERE user_id = ?) AS orders_count,
+          (SELECT COUNT(*) FROM favorites WHERE user_id = ?) AS favorites_count,
+          (
+            SELECT COUNT(*)
+            FROM order_items oi
+            JOIN orders o ON o.id = oi.order_id
+            WHERE o.user_id = ? AND o.status = 'paid'
+          ) AS purchased_items
+      `, user.id, user.id, user.id) as any;
+
+      return res.json({
+        user: profile || null,
+        summary: {
+          orders_count: Number(summary?.orders_count || 0),
+          favorites_count: Number(summary?.favorites_count || 0),
+          purchased_items: Number(summary?.purchased_items || 0),
+        },
+      });
+    } catch (error) {
+      console.error('Customer Account Error:', error);
+      return res.status(500).json({ error: 'Erro ao carregar dados da conta' });
+    }
+  });
+
   app.get('/api/customer/orders', authenticate, (req, res) => {
-    const user = (req as any).user;
-    const orders = db.all('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC', user.id);
-    res.json(orders);
+    try {
+      const user = (req as any).user;
+      const orders = db.all(`
+        SELECT
+          o.*,
+          COALESCE(SUM(oi.quantity), 0) AS total_items
+        FROM orders o
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.user_id = ?
+        GROUP BY o.id
+        ORDER BY o.created_at DESC
+      `, user.id) as any[];
+      return res.json(orders);
+    } catch (error) {
+      console.error('Customer Orders Error:', error);
+      return res.status(500).json({ error: 'Erro ao buscar pedidos' });
+    }
+  });
+
+  app.get('/api/customer/orders/:id', authenticate, (req, res) => {
+    try {
+      const user = (req as any).user;
+      const orderId = Number(req.params.id);
+      if (!Number.isInteger(orderId) || orderId <= 0) {
+        return res.status(400).json({ error: 'Pedido invalido' });
+      }
+
+      const order = db.get(`
+        SELECT
+          o.id,
+          o.created_at,
+          o.updated_at,
+          o.status,
+          o.total,
+          o.payment_method,
+          o.transaction_id
+        FROM orders o
+        WHERE o.id = ? AND o.user_id = ?
+        LIMIT 1
+      `, orderId, user.id) as any;
+
+      if (!order) {
+        return res.status(404).json({ error: 'Pedido nao encontrado' });
+      }
+
+      const items = db.all(`
+        SELECT
+          oi.id,
+          oi.product_id,
+          COALESCE(oi.product_name, p.name) AS product_name,
+          COALESCE(oi.product_slug, p.slug) AS product_slug,
+          p.image AS product_image,
+          oi.quantity,
+          oi.price
+        FROM order_items oi
+        LEFT JOIN products p ON p.id = oi.product_id
+        WHERE oi.order_id = ?
+        ORDER BY oi.id ASC
+      `, orderId) as any[];
+
+      return res.json({ order, items });
+    } catch (error) {
+      console.error('Customer Order Detail Error:', error);
+      return res.status(500).json({ error: 'Erro ao buscar detalhes do pedido' });
+    }
   });
 
   app.get('/api/customer/downloads', authenticate, (req, res) => {
-    const user = (req as any).user;
-    // Seleciona produtos de pedidos pagos
-    const downloads = db.all(`
-      SELECT p.*, f.file_path, f.file_name, o.id as order_id
-      FROM products p
-      JOIN order_items oi ON p.id = oi.product_id
-      JOIN orders o ON oi.order_id = o.id
-      JOIN product_files f ON p.id = f.product_id
-      WHERE o.user_id = ? AND o.status = 'paid'
-    `, user.id);
-    res.json(downloads);
+    try {
+      const user = (req as any).user;
+      const downloads = db.all(`
+        SELECT
+          oi.id AS download_id,
+          o.id AS order_id,
+          oi.product_id,
+          COALESCE(oi.product_name, p.name) AS product_name,
+          p.slug AS product_slug,
+          p.image AS product_image,
+          p.production_sheet,
+          f.file_path,
+          f.file_name
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        LEFT JOIN products p ON p.id = oi.product_id
+        LEFT JOIN product_files f ON f.product_id = oi.product_id
+        WHERE o.user_id = ? AND o.status = 'paid'
+        ORDER BY o.created_at DESC, oi.id DESC
+      `, user.id) as any[];
+      return res.json(downloads);
+    } catch (error) {
+      console.error('Customer Downloads Error:', error);
+      return res.status(500).json({ error: 'Erro ao buscar matrizes compradas' });
+    }
+  });
+
+  app.put('/api/customer/profile', authenticate, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const {
+        first_name = '',
+        last_name = '',
+        display_name = '',
+        email = '',
+        phone = '',
+        cpf = '',
+      } = req.body || {};
+
+      const normalizedFirstName = String(first_name || '').trim();
+      const normalizedLastName = String(last_name || '').trim();
+      const normalizedDisplayName = String(display_name || '').trim();
+      const normalizedEmail = String(email || '').trim().toLowerCase();
+      const normalizedPhone = String(phone || '').trim();
+      const normalizedCpf = String(cpf || '').trim();
+
+      if (!normalizedDisplayName) {
+        return res.status(400).json({ error: 'Nome de exibicao e obrigatorio' });
+      }
+      if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+        return res.status(400).json({ error: 'E-mail invalido' });
+      }
+
+      const duplicate = db.get('SELECT id FROM users WHERE email = ? AND id <> ?', normalizedEmail, user.id) as any;
+      if (duplicate) {
+        return res.status(409).json({ error: 'Este e-mail ja esta em uso por outra conta' });
+      }
+
+      db.transaction(() => {
+        db.run(`
+          UPDATE users
+          SET
+            name = ?,
+            email = ?,
+            first_name = ?,
+            last_name = ?,
+            phone = ?,
+            cpf = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, normalizedDisplayName, normalizedEmail, normalizedFirstName || null, normalizedLastName || null, normalizedPhone || null, normalizedCpf || null, user.id);
+
+        const customer = db.get('SELECT id FROM customers WHERE user_id = ?', user.id) as any;
+        if (customer?.id) {
+          db.run('UPDATE customers SET phone = ?, cpf = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', normalizedPhone || null, normalizedCpf || null, user.id);
+        } else {
+          db.run('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', user.id, normalizedPhone || null, normalizedCpf || null);
+        }
+      })();
+
+      const updated = db.get(`
+        SELECT id, name, email, role, first_name, last_name, phone, cpf, avatar_url
+        FROM users WHERE id = ? LIMIT 1
+      `, user.id) as any;
+
+      return res.json({ success: true, user: updated });
+    } catch (error) {
+      console.error('Customer Update Profile Error:', error);
+      return res.status(500).json({ error: 'Erro ao atualizar perfil' });
+    }
+  });
+
+  app.put('/api/customer/password', authenticate, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { current_password = '', new_password = '', confirm_new_password = '' } = req.body || {};
+
+      if (!String(current_password).trim()) {
+        return res.status(400).json({ error: 'Senha atual e obrigatoria' });
+      }
+      if (!String(new_password).trim() || String(new_password).length < 6) {
+        return res.status(400).json({ error: 'A nova senha deve ter no minimo 6 caracteres' });
+      }
+      if (String(new_password) !== String(confirm_new_password)) {
+        return res.status(400).json({ error: 'A confirmacao da nova senha nao confere' });
+      }
+
+      const dbUser = db.get('SELECT id, password, email, name FROM users WHERE id = ? LIMIT 1', user.id) as any;
+      if (!dbUser) {
+        return res.status(404).json({ error: 'Usuario nao encontrado' });
+      }
+
+      const isValidCurrentPassword = await comparePassword(String(current_password), String(dbUser.password || ''));
+      if (!isValidCurrentPassword) {
+        return res.status(400).json({ error: 'Senha atual incorreta' });
+      }
+
+      const hashed = await hashPassword(String(new_password));
+      db.run('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', hashed, user.id);
+
+      return res.json({ success: true, message: 'Senha atualizada com sucesso' });
+    } catch (error) {
+      console.error('Customer Update Password Error:', error);
+      return res.status(500).json({ error: 'Erro ao atualizar senha' });
+    }
+  });
+
+  app.put('/api/customer/addresses', authenticate, (req, res) => {
+    try {
+      const user = (req as any).user;
+      const billing = req.body?.billing || {};
+      const shipping = req.body?.shipping || {};
+
+      const payload = {
+        billing_address: String(billing.address || '').trim() || null,
+        billing_city: String(billing.city || '').trim() || null,
+        billing_state: String(billing.state || '').trim() || null,
+        billing_zip: String(billing.zip || '').trim() || null,
+        billing_country: String(billing.country || '').trim() || null,
+        shipping_address: String(shipping.address || '').trim() || null,
+        shipping_city: String(shipping.city || '').trim() || null,
+        shipping_state: String(shipping.state || '').trim() || null,
+        shipping_zip: String(shipping.zip || '').trim() || null,
+        shipping_country: String(shipping.country || '').trim() || null,
+      };
+
+      const customer = db.get('SELECT id FROM customers WHERE user_id = ?', user.id) as any;
+      if (customer?.id) {
+        db.run(`
+          UPDATE customers
+          SET
+            billing_address = ?,
+            billing_city = ?,
+            billing_state = ?,
+            billing_zip = ?,
+            billing_country = ?,
+            shipping_address = ?,
+            shipping_city = ?,
+            shipping_state = ?,
+            shipping_zip = ?,
+            shipping_country = ?,
+            address = COALESCE(?, address),
+            city = COALESCE(?, city),
+            state = COALESCE(?, state),
+            zip = COALESCE(?, zip),
+            country = COALESCE(?, country),
+            updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = ?
+        `,
+          payload.billing_address,
+          payload.billing_city,
+          payload.billing_state,
+          payload.billing_zip,
+          payload.billing_country,
+          payload.shipping_address,
+          payload.shipping_city,
+          payload.shipping_state,
+          payload.shipping_zip,
+          payload.shipping_country,
+          payload.billing_address,
+          payload.billing_city,
+          payload.billing_state,
+          payload.billing_zip,
+          payload.billing_country,
+          user.id,
+        );
+      } else {
+        db.run(`
+          INSERT INTO customers (
+            user_id, phone, cpf,
+            billing_address, billing_city, billing_state, billing_zip, billing_country,
+            shipping_address, shipping_city, shipping_state, shipping_zip, shipping_country,
+            address, city, state, zip, country
+          )
+          VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+          user.id,
+          payload.billing_address,
+          payload.billing_city,
+          payload.billing_state,
+          payload.billing_zip,
+          payload.billing_country,
+          payload.shipping_address,
+          payload.shipping_city,
+          payload.shipping_state,
+          payload.shipping_zip,
+          payload.shipping_country,
+          payload.billing_address,
+          payload.billing_city,
+          payload.billing_state,
+          payload.billing_zip,
+          payload.billing_country,
+        );
+      }
+
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Customer Update Addresses Error:', error);
+      return res.status(500).json({ error: 'Erro ao atualizar enderecos' });
+    }
+  });
+
+  app.post('/api/customer/avatar', authenticate, upload.single('avatar'), (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!req.file?.filename) {
+        return res.status(400).json({ error: 'Arquivo de avatar nao enviado' });
+      }
+      const avatarUrl = `/uploads/${req.file.filename}`;
+      db.run('UPDATE users SET avatar_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', avatarUrl, user.id);
+      return res.json({ success: true, avatar_url: avatarUrl });
+    } catch (error) {
+      console.error('Customer Upload Avatar Error:', error);
+      return res.status(500).json({ error: 'Erro ao atualizar foto do perfil' });
+    }
   });
 
   // ROTA DE DESENVOLVIMENTO: Simular pagamento aprovado
@@ -3372,7 +3718,8 @@ async function startServer() {
         return match ? Number(match[1]) : null;
       }).filter(Boolean);
 
-      const appUrl = process.env.APP_URL || settings.app_url || `https://digitalbordados.com.br`;
+      const _settings = (db.all('SELECT * FROM settings LIMIT 1') as any[])[0] || null;
+      const appUrl = process.env.APP_URL || _settings?.app_url || `https://digitalbordados.com.br`;
 
       pendingOrders.forEach(order => {
         if (!notifiedOrderIds.includes(order.id)) {

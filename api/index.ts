@@ -271,10 +271,200 @@ app.get('/api/customer/orders', authenticate, async (req: any, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/customer/account', authenticate, async (req: any, res) => {
+  try {
+    const user = await qOne(`
+      SELECT
+        u.id,
+        u.name,
+        u.email,
+        u.first_name,
+        u.last_name,
+        c.phone,
+        c.cpf,
+        u.avatar_url,
+        c.billing_address,
+        c.billing_city,
+        c.billing_state,
+        c.billing_zip,
+        c.billing_country,
+        c.shipping_address,
+        c.shipping_city,
+        c.shipping_state,
+        c.shipping_zip,
+        c.shipping_country,
+        c.address,
+        c.city,
+        c.state,
+        c.zip,
+        c.country
+      FROM users u
+      LEFT JOIN customers c ON c.user_id = u.id
+      WHERE u.id = ?
+      LIMIT 1
+    `, [req.user.id]);
+    res.json({ user: user || null });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/customer/orders/:id', authenticate, async (req: any, res) => {
+  try {
+    const orderId = Number(req.params.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) return res.status(400).json({ error: 'Pedido invalido' });
+
+    const order = await qOne(`
+      SELECT id, created_at, updated_at, status, total, payment_method, transaction_id
+      FROM orders
+      WHERE id = ? AND user_id = ?
+      LIMIT 1
+    `, [orderId, req.user.id]);
+    if (!order) return res.status(404).json({ error: 'Pedido nao encontrado' });
+
+    const items = await q(`
+      SELECT
+        oi.id,
+        oi.product_id,
+        COALESCE(oi.product_name, p.name) AS product_name,
+        COALESCE(oi.product_slug, p.slug) AS product_slug,
+        p.image AS product_image,
+        oi.quantity,
+        oi.price
+      FROM order_items oi
+      LEFT JOIN products p ON p.id = oi.product_id
+      WHERE oi.order_id = ?
+      ORDER BY oi.id ASC
+    `, [orderId]);
+
+    res.json({ order, items });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/customer/downloads', authenticate, async (req: any, res) => {
   try {
     const downloads = await q("SELECT pf.*, p.name as product_name, p.image as product_image FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN product_files pf ON pf.product_id = oi.product_id JOIN products p ON p.id = oi.product_id WHERE o.user_id = ? AND o.status = 'paid' ORDER BY o.created_at DESC", [req.user.id]);
     res.json(downloads);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/customer/profile', authenticate, async (req: any, res) => {
+  try {
+    const {
+      first_name = '',
+      last_name = '',
+      display_name = '',
+      email = '',
+      phone = '',
+      cpf = '',
+    } = req.body || {};
+
+    const normalizedDisplayName = String(display_name || '').trim();
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedFirstName = String(first_name || '').trim();
+    const normalizedLastName = String(last_name || '').trim();
+    const normalizedPhone = String(phone || '').trim();
+    const normalizedCpf = String(cpf || '').trim();
+
+    if (!normalizedDisplayName) return res.status(400).json({ error: 'Nome de exibicao e obrigatorio' });
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return res.status(400).json({ error: 'E-mail invalido' });
+
+    const duplicate = await qOne('SELECT id FROM users WHERE email = ? AND id <> ?', [normalizedEmail, req.user.id]);
+    if (duplicate) return res.status(409).json({ error: 'Este e-mail ja esta em uso por outra conta' });
+
+    await qRun(`
+      UPDATE users
+      SET name = ?, email = ?, first_name = ?, last_name = ?
+      WHERE id = ?
+    `, [normalizedDisplayName, normalizedEmail, normalizedFirstName || null, normalizedLastName || null, req.user.id]);
+
+    const customer = await qOne('SELECT id FROM customers WHERE user_id = ?', [req.user.id]);
+    if (customer) {
+      await qRun('UPDATE customers SET phone = ?, cpf = ? WHERE user_id = ?', [normalizedPhone || null, normalizedCpf || null, req.user.id]);
+    } else {
+      await qRun('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', [req.user.id, normalizedPhone || null, normalizedCpf || null]);
+    }
+
+    const user = await qOne(`
+      SELECT u.id, u.name, u.email, u.first_name, u.last_name, c.phone, c.cpf, u.avatar_url
+      FROM users u
+      LEFT JOIN customers c ON c.user_id = u.id
+      WHERE u.id = ?
+      LIMIT 1
+    `, [req.user.id]);
+    res.json({ success: true, user });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/customer/password', authenticate, async (req: any, res) => {
+  try {
+    const { current_password = '', new_password = '', confirm_new_password = '' } = req.body || {};
+    if (!String(current_password).trim()) return res.status(400).json({ error: 'Senha atual e obrigatoria' });
+    if (!String(new_password).trim() || String(new_password).length < 6) return res.status(400).json({ error: 'A nova senha deve ter no minimo 6 caracteres' });
+    if (String(new_password) !== String(confirm_new_password)) return res.status(400).json({ error: 'A confirmacao da nova senha nao confere' });
+
+    const dbUser = await qOne('SELECT id, password FROM users WHERE id = ? LIMIT 1', [req.user.id]);
+    if (!dbUser) return res.status(404).json({ error: 'Usuario nao encontrado' });
+
+    const ok = await bcrypt.compare(String(current_password), String(dbUser.password || ''));
+    if (!ok) return res.status(400).json({ error: 'Senha atual incorreta' });
+
+    const hashed = await bcrypt.hash(String(new_password), 10);
+    await qRun('UPDATE users SET password = ? WHERE id = ?', [hashed, req.user.id]);
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/customer/addresses', authenticate, async (req: any, res) => {
+  try {
+    const billing = req.body?.billing || {};
+    const shipping = req.body?.shipping || {};
+
+    const payload = [
+      String(billing.address || '').trim() || null,
+      String(billing.city || '').trim() || null,
+      String(billing.state || '').trim() || null,
+      String(billing.zip || '').trim() || null,
+      String(billing.country || '').trim() || null,
+      String(shipping.address || '').trim() || null,
+      String(shipping.city || '').trim() || null,
+      String(shipping.state || '').trim() || null,
+      String(shipping.zip || '').trim() || null,
+      String(shipping.country || '').trim() || null,
+    ];
+
+    const customer = await qOne('SELECT id FROM customers WHERE user_id = ?', [req.user.id]);
+    if (customer) {
+      await qRun(`
+        UPDATE customers
+        SET
+          billing_address = ?,
+          billing_city = ?,
+          billing_state = ?,
+          billing_zip = ?,
+          billing_country = ?,
+          shipping_address = ?,
+          shipping_city = ?,
+          shipping_state = ?,
+          shipping_zip = ?,
+          shipping_country = ?,
+          address = COALESCE(?, address),
+          city = COALESCE(?, city),
+          state = COALESCE(?, state),
+          zip = COALESCE(?, zip),
+          country = COALESCE(?, country)
+        WHERE user_id = ?
+      `, [...payload, payload[0], payload[1], payload[2], payload[3], payload[4], req.user.id]);
+    } else {
+      await qRun(`
+        INSERT INTO customers (
+          user_id, billing_address, billing_city, billing_state, billing_zip, billing_country,
+          shipping_address, shipping_city, shipping_state, shipping_zip, shipping_country,
+          address, city, state, zip, country
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [req.user.id, ...payload, payload[0], payload[1], payload[2], payload[3], payload[4]]);
+    }
+
+    res.json({ success: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

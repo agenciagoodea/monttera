@@ -1,6 +1,6 @@
 import { Category } from '../types';
 import { Plus, Minus } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface SidebarProps {
   categories: Category[];
