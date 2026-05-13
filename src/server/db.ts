@@ -540,6 +540,42 @@ export function initDb() {
 
   query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS product_name VARCHAR(255) NULL`);
   query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS product_slug VARCHAR(255) NULL`);
+
+  // PayPal support columns (idempotent)
+  query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_provider VARCHAR(50) NULL DEFAULT 'mercadopago'`);
+  query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS paypal_order_id VARCHAR(255) NULL`);
+  query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS paypal_capture_id VARCHAR(255) NULL`);
+  query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS paypal_payer_email VARCHAR(255) NULL`);
+  query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS paypal_status VARCHAR(100) NULL`);
+  query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS currency VARCHAR(10) NULL DEFAULT 'BRL'`);
+  query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS original_total_brl DECIMAL(12,2) NULL`);
+  query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS converted_total_usd DECIMAL(12,2) NULL`);
+  query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(10,4) NULL`);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS paypal_webhook_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      event_id VARCHAR(255) NULL,
+      event_type VARCHAR(255) NULL,
+      resource_id VARCHAR(255) NULL,
+      payload_json LONGTEXT NULL,
+      verification_status VARCHAR(50) NULL DEFAULT 'unverified',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS payment_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      provider VARCHAR(50) NULL,
+      order_id INT NULL,
+      external_id VARCHAR(255) NULL,
+      status VARCHAR(100) NULL,
+      message TEXT NULL,
+      payload_json LONGTEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
 
 export default {

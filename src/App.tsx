@@ -14,6 +14,8 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
+import PayPalSuccess from './pages/PayPalSuccess';
+import PayPalCancel from './pages/PayPalCancel';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminProductList from './pages/admin/AdminProductList';
 import AdminProductForm from './pages/admin/AdminProductForm';
@@ -75,6 +77,8 @@ export default function App() {
                   <Route path="/cadastro" element={<Register />} />
                   <Route path="/esqueci-senha" element={<ForgotPassword />} />
                   <Route path="/redefinir-senha" element={<ResetPassword />} />
+                  <Route path="/checkout/paypal/success" element={<PayPalSuccess />} />
+                  <Route path="/checkout/paypal/cancel" element={<PayPalCancel />} />
                 </Routes>
               </div>
               <Footer />

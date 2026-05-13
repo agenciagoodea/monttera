@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 
-type CheckoutMethod = 'pix' | 'credit_card' | 'debit_card';
+type CheckoutMethod = 'pix' | 'credit_card' | 'debit_card' | 'paypal';
 
 type CheckoutResponse = {
   success: boolean;
@@ -61,6 +61,7 @@ export default function CartPage() {
   const [checkoutMethod, setCheckoutMethod] = useState<CheckoutMethod>('pix');
   const [loadingCheckout, setLoadingCheckout] = useState(false);
   const [checkoutResult, setCheckoutResult] = useState<CheckoutResponse | null>(null);
+  const [paypalConfig, setPaypalConfig] = useState<{ enabled: boolean; brl_usd_rate: number } | null>(null);
 
   const [publicKey, setPublicKey] = useState('');
   const [payer, setPayer] = useState({
@@ -129,6 +130,19 @@ export default function CartPage() {
       }
     }
     loadCheckoutConfig();
+  }, []);
+
+  useEffect(() => {
+    async function loadPayPalConfig() {
+      try {
+        const res = await fetch('/api/checkout/paypal/config');
+        const data = await res.json();
+        setPaypalConfig({ enabled: data?.enabled === true, brl_usd_rate: parseFloat(data?.brl_usd_rate || '5.20') });
+      } catch {
+        setPaypalConfig({ enabled: false, brl_usd_rate: 5.20 });
+      }
+    }
+    loadPayPalConfig();
   }, []);
 
   useEffect(() => {
@@ -286,6 +300,33 @@ export default function CartPage() {
     }
   };
 
+  const handlePayPalCheckout = async () => {
+    if (!user) {
+      navigate('/login?redirect=/carrinho');
+      return;
+    }
+    setLoadingCheckout(true);
+    setStatusMessage('');
+    try {
+      const res = await fetch('/api/paypal/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.approval_url) {
+        setStatusMessage(data?.error || 'Erro ao criar pedido PayPal');
+        setLoadingCheckout(false);
+        return;
+      }
+      // Redirect to PayPal
+      window.location.href = data.approval_url;
+    } catch {
+      setStatusMessage('Erro ao conectar com PayPal');
+      setLoadingCheckout(false);
+    }
+  };
+
   const handleCopyPix = async () => {
     if (!checkoutResult?.qr_code) return;
     await navigator.clipboard.writeText(checkoutResult.qr_code);
@@ -352,7 +393,7 @@ export default function CartPage() {
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 p-8 md:p-10 sticky top-28 space-y-6">
             <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Checkout Transparente</h2>
 
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <button type="button" onClick={() => setCheckoutMethod('pix')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'pix' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
                 PIX
               </button>
@@ -362,6 +403,11 @@ export default function CartPage() {
               <button type="button" onClick={() => setCheckoutMethod('debit_card')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'debit_card' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
                 Débito
               </button>
+              {paypalConfig?.enabled && (
+                <button type="button" onClick={() => setCheckoutMethod('paypal')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'paypal' ? 'bg-[#0070ba] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                  PayPal 🌐
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -414,6 +460,34 @@ export default function CartPage() {
               >
                 {loadingCheckout ? 'Gerando PIX...' : 'Gerar PIX'}
               </button>
+            ) : checkoutMethod === 'paypal' ? (
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 text-sm text-blue-800 font-medium">
+                  🌐 <strong>Pagamento internacional em dólar (USD).</strong><br />
+                  O valor será convertido pela cotação configurada pela loja.
+                </div>
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-1 text-xs font-semibold text-slate-600">
+                  <div className="flex justify-between">
+                    <span>Total em BRL:</span>
+                    <span className="text-slate-800 font-black">R$ {totalPrice.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Cotação:</span>
+                    <span>1 USD = R$ {(paypalConfig?.brl_usd_rate ?? 5.20).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-200 pt-1 mt-1">
+                    <span>Estimado em USD:</span>
+                    <span className="text-blue-700 font-black">$ {(totalPrice / (paypalConfig?.brl_usd_rate ?? 5.20)).toFixed(2)}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={handlePayPalCheckout}
+                  disabled={loadingCheckout}
+                  className="w-full bg-[#0070ba] hover:bg-[#005ea6] text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 transition-colors"
+                >
+                  {loadingCheckout ? 'Redirecionando...' : '🅿 Pagar com PayPal →'}
+                </button>
+              </div>
             ) : (
               <form id="form-checkout" className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
@@ -473,7 +547,7 @@ export default function CartPage() {
                 <span className="text-2xl font-black text-blue-600">R$ {totalPrice.toFixed(2)}</span>
               </div>
               <p className="mt-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                Checkout transparente via Mercado Pago (PIX, crédito e débito).
+                Checkout transparente via Mercado Pago (PIX, crédito e débito) e PayPal Internacional.
               </p>
             </div>
           </div>

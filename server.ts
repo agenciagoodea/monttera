@@ -252,7 +252,16 @@ function initSettings() {
     smtp_from_name: '',
     smtp_from_email: '',
     matrix_request_team_email: '',
-    app_url: 'https://digitalbordados.com.br'
+    app_url: 'https://digitalbordados.com.br',
+    paypal_enabled: 'false',
+    paypal_mode: 'sandbox',
+    paypal_sandbox_client_id: '',
+    paypal_sandbox_client_secret: '',
+    paypal_production_client_id: '',
+    paypal_production_client_secret: '',
+    paypal_default_currency: 'USD',
+    paypal_brl_usd_rate: '5.20',
+    paypal_webhook_id: '',
   };
 
   Object.entries(defaultSettings).forEach(([key, value]) => {
@@ -3057,6 +3066,274 @@ async function startServer() {
     }
   });
 
+
+
+  // ─── PayPal Utilities ────────────────────────────────────────────────────────
+
+  function getPayPalConfig() {
+    const s = loadSettingsMap([
+      'paypal_enabled', 'paypal_mode',
+      'paypal_sandbox_client_id', 'paypal_sandbox_client_secret',
+      'paypal_production_client_id', 'paypal_production_client_secret',
+      'paypal_default_currency', 'paypal_brl_usd_rate', 'paypal_webhook_id',
+    ]);
+    const mode = (process.env.PAYPAL_MODE || s.paypal_mode || 'sandbox').toLowerCase() as 'sandbox' | 'production';
+    const clientId = mode === 'production'
+      ? (process.env.PAYPAL_PRODUCTION_CLIENT_ID || s.paypal_production_client_id || '')
+      : (process.env.PAYPAL_SANDBOX_CLIENT_ID || s.paypal_sandbox_client_id || '');
+    const clientSecret = mode === 'production'
+      ? (process.env.PAYPAL_PRODUCTION_CLIENT_SECRET || s.paypal_production_client_secret || '')
+      : (process.env.PAYPAL_SANDBOX_CLIENT_SECRET || s.paypal_sandbox_client_secret || '');
+    const currency = process.env.PAYPAL_DEFAULT_CURRENCY || s.paypal_default_currency || 'USD';
+    const rate = parseFloat(process.env.PAYPAL_BRL_USD_RATE || s.paypal_brl_usd_rate || '5.20');
+    const webhookId = process.env.PAYPAL_WEBHOOK_ID || s.paypal_webhook_id || '';
+    const enabled = (s.paypal_enabled === 'true');
+    return { mode, clientId, clientSecret, currency, rate, webhookId, enabled };
+  }
+
+  function getPayPalBaseUrl(mode: string) {
+    return mode === 'production'
+      ? 'https://api-m.paypal.com'
+      : 'https://api-m.sandbox.paypal.com';
+  }
+
+  async function getPayPalAccessToken(clientId: string, clientSecret: string, baseUrl: string): Promise<string> {
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const axios = (await import('axios')).default;
+    const res = await axios.post(`${baseUrl}/v1/oauth2/token`, 'grant_type=client_credentials', {
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+    return res.data.access_token as string;
+  }
+
+  function convertBrlToUsd(totalBrl: number, rate: number) {
+    return Math.round((totalBrl / rate) * 100) / 100;
+  }
+
+  // ─── PayPal Endpoints ────────────────────────────────────────────────────────
+
+  // POST /api/paypal/create-order
+  app.post('/api/paypal/create-order', authenticate, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { items } = req.body || {};
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: 'Carrinho vazio' });
+      }
+
+      const cfg = getPayPalConfig();
+      if (!cfg.enabled) return res.status(400).json({ error: 'PayPal não está habilitado' });
+      if (!cfg.clientId || !cfg.clientSecret) return res.status(400).json({ error: 'Credenciais PayPal não configuradas' });
+
+      // Validate products and calculate total in BRL
+      let totalBrl = 0;
+      const validatedItems: any[] = [];
+      for (const item of items) {
+        const product = db.get('SELECT id, name, price, sale_price, status FROM products WHERE id = ?', item.product_id) as any;
+        if (!product || product.status !== 'active') {
+          return res.status(400).json({ error: `Produto ID ${item.product_id} não encontrado ou inativo` });
+        }
+        const price = product.sale_price || product.price;
+        totalBrl += price;
+        validatedItems.push({ product_id: product.id, product_name: product.name, price });
+      }
+
+      const totalUsd = convertBrlToUsd(totalBrl, cfg.rate);
+      const baseUrl = getPayPalBaseUrl(cfg.mode);
+      const appUrl = process.env.APP_URL || loadSettingsMap(['app_url']).app_url || 'https://digitalbordados.com.br';
+
+      // Create internal order
+      const orderResult = db.run(`
+        INSERT INTO orders (user_id, total, status, payment_method, payment_provider, currency,
+          original_total_brl, converted_total_usd, exchange_rate, customer_email, customer_name)
+        VALUES (?, ?, 'pending', 'paypal', 'paypal', ?, ?, ?, ?, ?, ?)
+      `, user.id, totalBrl, cfg.currency, totalBrl, totalUsd, cfg.rate,
+         user.email || '', user.name || '');
+      const orderId = Number(orderResult.lastInsertRowid);
+
+      for (const it of validatedItems) {
+        db.run('INSERT INTO order_items (order_id, product_id, product_name, price, quantity) VALUES (?, ?, ?, ?, 1)',
+          orderId, it.product_id, it.product_name, it.price);
+      }
+
+      // Create PayPal order
+      const accessToken = await getPayPalAccessToken(cfg.clientId, cfg.clientSecret, baseUrl);
+      const axios = (await import('axios')).default;
+      const ppRes = await axios.post(`${baseUrl}/v2/checkout/orders`, {
+        intent: 'CAPTURE',
+        purchase_units: [{
+          reference_id: String(orderId),
+          amount: {
+            currency_code: cfg.currency,
+            value: totalUsd.toFixed(2),
+          },
+          description: `Digital Bordados - Pedido #${orderId}`,
+        }],
+        application_context: {
+          brand_name: 'Digital Bordados',
+          locale: 'pt-BR',
+          landing_page: 'BILLING',
+          user_action: 'PAY_NOW',
+          return_url: `${appUrl}/checkout/paypal/success`,
+          cancel_url: `${appUrl}/checkout/paypal/cancel`,
+        },
+      }, {
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      });
+
+      const paypalOrderId = ppRes.data.id as string;
+      const approvalLink = (ppRes.data.links as any[]).find((l: any) => l.rel === 'approve')?.href || '';
+
+      db.run('UPDATE orders SET paypal_order_id = ?, paypal_status = ? WHERE id = ?', paypalOrderId, 'CREATED', orderId);
+
+      db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+        'paypal', orderId, paypalOrderId, 'created', 'PayPal order created');
+
+      return res.json({
+        success: true,
+        order_id: orderId,
+        paypal_order_id: paypalOrderId,
+        approval_url: approvalLink,
+        total_brl: totalBrl,
+        total_usd: totalUsd,
+        exchange_rate: cfg.rate,
+        currency: cfg.currency,
+      });
+    } catch (error: any) {
+      console.error('PayPal create-order error:', error?.response?.data || error?.message || error);
+      return res.status(500).json({ error: 'Erro ao criar pedido PayPal' });
+    }
+  });
+
+  // POST /api/paypal/capture-order
+  app.post('/api/paypal/capture-order', authenticate, async (req, res) => {
+    try {
+      const { paypal_order_id } = req.body || {};
+      if (!paypal_order_id) return res.status(400).json({ error: 'paypal_order_id é obrigatório' });
+
+      const order = db.get('SELECT * FROM orders WHERE paypal_order_id = ?', paypal_order_id) as any;
+      if (!order) return res.status(404).json({ error: 'Pedido não encontrado' });
+
+      const cfg = getPayPalConfig();
+      const baseUrl = getPayPalBaseUrl(cfg.mode);
+      const accessToken = await getPayPalAccessToken(cfg.clientId, cfg.clientSecret, baseUrl);
+      const axios = (await import('axios')).default;
+
+      const captureRes = await axios.post(
+        `${baseUrl}/v2/checkout/orders/${paypal_order_id}/capture`,
+        {},
+        { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
+      );
+
+      const captureData = captureRes.data;
+      const captureStatus = captureData?.status as string;
+      const capture = captureData?.purchase_units?.[0]?.payments?.captures?.[0];
+      const captureId = capture?.id || '';
+      const payerEmail = captureData?.payer?.email_address || '';
+
+      if (captureStatus === 'COMPLETED') {
+        db.run(`UPDATE orders SET status = 'paid', paypal_status = 'COMPLETED', paypal_capture_id = ?,
+          paypal_payer_email = ?, paid_at = NOW() WHERE id = ?`, captureId, payerEmail, order.id);
+        db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+          'paypal', order.id, captureId, 'completed', 'Pagamento capturado com sucesso');
+        return res.json({ success: true, status: 'paid', order_id: order.id, capture_id: captureId });
+      } else {
+        db.run("UPDATE orders SET paypal_status = ? WHERE id = ?", captureStatus, order.id);
+        db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+          'paypal', order.id, captureId || paypal_order_id, captureStatus, `Captura com status: ${captureStatus}`);
+        return res.status(400).json({ success: false, status: captureStatus, error: 'Pagamento não foi completado' });
+      }
+    } catch (error: any) {
+      console.error('PayPal capture-order error:', error?.response?.data || error?.message || error);
+      return res.status(500).json({ error: 'Erro ao capturar pagamento PayPal' });
+    }
+  });
+
+  // POST /api/webhooks/paypal (público)
+  app.post('/api/webhooks/paypal', async (req, res) => {
+    try {
+      const payload = req.body || {};
+      const eventId = payload?.id || '';
+      const eventType = payload?.event_type || '';
+      const resourceId = payload?.resource?.id || '';
+
+      db.run(`INSERT INTO paypal_webhook_logs (event_id, event_type, resource_id, payload_json, verification_status)
+        VALUES (?, ?, ?, ?, 'unverified')`, eventId, eventType, resourceId, JSON.stringify(payload));
+
+      if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
+        const captureId = resourceId;
+        const order = db.get('SELECT * FROM orders WHERE paypal_capture_id = ? OR paypal_order_id = ?',
+          captureId, payload?.resource?.supplementary_data?.related_ids?.order_id || '') as any;
+        if (order && order.status !== 'paid') {
+          db.run("UPDATE orders SET status = 'paid', paypal_status = 'COMPLETED', paid_at = NOW() WHERE id = ?", order.id);
+          db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+            'paypal', order.id, captureId, 'webhook_completed', 'Pago via webhook PAYMENT.CAPTURE.COMPLETED');
+        }
+      } else if (eventType === 'PAYMENT.CAPTURE.DENIED') {
+        const captureId = resourceId;
+        const order = db.get('SELECT * FROM orders WHERE paypal_capture_id = ?', captureId) as any;
+        if (order) {
+          db.run("UPDATE orders SET status = 'failed', paypal_status = 'DENIED' WHERE id = ?", order.id);
+          db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+            'paypal', order.id, captureId, 'denied', 'Captura negada via webhook PAYMENT.CAPTURE.DENIED');
+        }
+      }
+      // CHECKOUT.ORDER.APPROVED: só registra log, não libera download sem captura
+      return res.status(200).json({ received: true });
+    } catch (error) {
+      console.error('PayPal webhook error:', error);
+      return res.status(200).json({ received: true }); // Always 200 to PayPal
+    }
+  });
+
+  // GET /api/admin/paypal/test
+  app.get('/api/admin/paypal/test', authenticate, isAdmin, async (req, res) => {
+    try {
+      const cfg = getPayPalConfig();
+      if (!cfg.clientId || !cfg.clientSecret) {
+        return res.status(400).json({ ok: false, error: 'Credenciais PayPal não configuradas no painel' });
+      }
+      const baseUrl = getPayPalBaseUrl(cfg.mode);
+      const token = await getPayPalAccessToken(cfg.clientId, cfg.clientSecret, baseUrl);
+      if (token) {
+        return res.json({ ok: true, mode: cfg.mode, message: `Conexão PayPal (${cfg.mode}) estabelecida com sucesso!` });
+      }
+      return res.status(400).json({ ok: false, error: 'Não foi possível obter access token' });
+    } catch (error: any) {
+      console.error('PayPal test error:', error?.response?.data || error?.message);
+      return res.status(400).json({ ok: false, error: error?.response?.data?.error_description || error?.message || 'Falha na conexão PayPal' });
+    }
+  });
+
+  // GET /api/admin/paypal/webhook-logs
+  app.get('/api/admin/paypal/webhook-logs', authenticate, isAdmin, (req, res) => {
+    try {
+      const logs = db.all('SELECT id, event_id, event_type, resource_id, verification_status, created_at FROM paypal_webhook_logs ORDER BY created_at DESC LIMIT 100');
+      return res.json(logs);
+    } catch (error) {
+      console.error('PayPal webhook-logs error:', error);
+      return res.status(500).json({ error: 'Erro ao buscar logs PayPal' });
+    }
+  });
+
+  // GET /api/checkout/paypal/config (público - retorna apenas client_id e modo)
+  app.get('/api/checkout/paypal/config', (req, res) => {
+    try {
+      const cfg = getPayPalConfig();
+      return res.json({
+        enabled: cfg.enabled,
+        mode: cfg.mode,
+        client_id: cfg.clientId,
+        currency: cfg.currency,
+        brl_usd_rate: cfg.rate,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: 'Erro ao buscar config PayPal' });
+    }
+  });
 
   // Vite Integration
   if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
