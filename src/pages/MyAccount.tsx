@@ -133,6 +133,7 @@ export default function MyAccount() {
   const [profileMessage, setProfileMessage] = useState<string>('');
   const [passwordMessage, setPasswordMessage] = useState<string>('');
   const [addressMessage, setAddressMessage] = useState<string>('');
+  const [accountMessage, setAccountMessage] = useState<string>('');
 
   const [profileForm, setProfileForm] = useState({
     first_name: '',
@@ -190,7 +191,18 @@ export default function MyAccount() {
     let mounted = true;
     async function loadAccountData() {
       setLoading(true);
+      setAccountMessage('');
       try {
+        const parseResponse = async (res: Response) => {
+          const text = await res.text();
+          if (!text) return {};
+          try {
+            return JSON.parse(text);
+          } catch {
+            throw new Error('Resposta inválida da API. Reinicie o servidor backend (npm run dev).');
+          }
+        };
+
         const [accountRes, ordersRes, downloadsRes, favoritesRes] = await Promise.all([
           fetch('/api/customer/account'),
           fetch('/api/customer/orders'),
@@ -198,10 +210,27 @@ export default function MyAccount() {
           fetch('/api/favorites'),
         ]);
 
-        const accountData = await accountRes.json();
-        const ordersData = await ordersRes.json();
-        const downloadsData = await downloadsRes.json();
-        const favoritesData = await favoritesRes.json();
+        if ([accountRes, ordersRes, downloadsRes, favoritesRes].some((r) => r.status === 401)) {
+          navigate('/login?redirect=/minha-conta');
+          return;
+        }
+
+        const [accountData, ordersData, downloadsData, favoritesData] = await Promise.all([
+          parseResponse(accountRes),
+          parseResponse(ordersRes),
+          parseResponse(downloadsRes),
+          parseResponse(favoritesRes),
+        ]);
+
+        if ([accountRes, ordersRes, downloadsRes, favoritesRes].some((r) => !r.ok)) {
+          throw new Error(
+            (accountData as any)?.error ||
+            (ordersData as any)?.error ||
+            (downloadsData as any)?.error ||
+            (favoritesData as any)?.error ||
+            'Não foi possível carregar os dados da conta.'
+          );
+        }
 
         if (!mounted) return;
 
@@ -247,6 +276,7 @@ export default function MyAccount() {
         }
       } catch (error) {
         console.error('Failed to load my account data:', error);
+        setAccountMessage(error instanceof Error ? error.message : 'Erro ao carregar dados da conta.');
       } finally {
         if (mounted) setLoading(false);
       }
@@ -502,6 +532,12 @@ export default function MyAccount() {
 
         {/* Área de conteúdo */}
         <section className="space-y-6">
+          {accountMessage ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+              {accountMessage}
+            </div>
+          ) : null}
+
           {activeTab === 'dashboard' && (
             <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 md:p-8 shadow-sm">
               <h2 className="text-2xl font-black text-slate-900 mb-3">Ola, {displayName}!</h2>
