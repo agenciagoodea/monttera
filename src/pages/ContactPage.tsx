@@ -50,8 +50,8 @@ export default function ContactPage() {
     }
   };
 
-  const contactEmail = settings.email_contact || 'contato@digitalbordados.com';
-  const contactPhone = settings.phone || '(00) 00000-0000';
+  const contactEmail = settings.email_contact || 'contato@digitalbordados.com.br';
+  const contactPhone = settings.phone || '(91) 992426-1982';
   const contactAddress = settings.address || 'Atendimento online em todo o Brasil';
 
   return (
@@ -138,9 +138,8 @@ export default function ContactPage() {
 
             {status && (
               <div
-                className={`rounded-xl border px-4 py-3 text-xs font-black uppercase tracking-wider ${
-                  status.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
-                }`}
+                className={`rounded-xl border px-4 py-3 text-xs font-black uppercase tracking-wider ${status.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'
+                  }`}
               >
                 {status.text}
               </div>
