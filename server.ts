@@ -251,7 +251,8 @@ function initSettings() {
     new_badge_days: '20',
     smtp_from_name: '',
     smtp_from_email: '',
-    matrix_request_team_email: ''
+    matrix_request_team_email: '',
+    app_url: 'https://digitalbordados.com.br'
   };
 
   Object.entries(defaultSettings).forEach(([key, value]) => {
@@ -407,7 +408,7 @@ async function startServer() {
 
       // Trigger welcome email
       const settings = loadSettingsMap(['app_url', 'site_name']);
-      const appUrl = settings.app_url || 'http://localhost:3000';
+      const appUrl = process.env.APP_URL || settings.app_url || 'https://digitalbordados.com.br';
       sendEmail({
         to: email,
         templateKey: 'user_welcome',
@@ -595,7 +596,7 @@ async function startServer() {
       );
 
       const settings = loadSettingsMap(['app_url']);
-      const appUrl = settings.app_url || 'http://localhost:3000';
+      const appUrl = process.env.APP_URL || settings.app_url || 'https://digitalbordados.com.br';
       const resetUrl = `${appUrl}/redefinir-senha?token=${token}`;
 
       await sendEmail({
@@ -3094,7 +3095,7 @@ async function startServer() {
         return match ? Number(match[1]) : null;
       }).filter(Boolean);
 
-      const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+      const appUrl = process.env.APP_URL || settings.app_url || `https://digitalbordados.com.br`;
 
       pendingOrders.forEach(order => {
         if (!notifiedOrderIds.includes(order.id)) {
