@@ -223,7 +223,7 @@ export default function ProductDetail() {
                     activeImage === img ? 'border-blue-600 shadow-lg shadow-blue-100 scale-95' : 'border-slate-100 hover:border-slate-300'
                   }`}
                 >
-                  <img src={img} alt={`${product.name} - ${idx}`} className="w-full h-full object-cover" />
+                  <img src={img} alt={`${product.name} - ${idx}`} loading="lazy" className="w-full h-full object-cover" />
                 </button>
               ))}
             </motion.div>
@@ -538,7 +538,7 @@ export default function ProductDetail() {
                 className="group bg-white border border-slate-100 rounded-3xl p-4 transition-all hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1"
               >
                 <div className="aspect-square bg-slate-50 rounded-2xl overflow-hidden mb-4 p-4 relative">
-                  <img src={rel.image} alt={rel.name} className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" />
+                  <img src={rel.image} alt={rel.name} loading="lazy" className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" />
                   {rel.sale_price && (
                     <div className="absolute top-3 right-3 bg-red-500 text-white text-[9px] font-black px-2 py-1 rounded-full uppercase">
                       {Math.round((1 - rel.sale_price / rel.price) * 100)}% OFF

@@ -379,7 +379,7 @@ async function startServer() {
   });
 
   // API Routes - AUTH
-  app.post('/api/auth/register', (req, res) => {
+  app.post('/api/auth/register', async (req, res) => {
     const { firstName, lastName, email, password } = req.body;
     
     if (!firstName || !lastName || !email || !password) {
@@ -429,7 +429,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     try {
       const { email, password } = req.body || {};
       const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -1972,7 +1972,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/admin/users', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     const {
       name,
       email,
@@ -2188,7 +2188,7 @@ async function startServer() {
     }
   });
 
-  const adminUpdateUserHandler = (req: express.Request, res: express.Response) => {
+  const adminUpdateUserHandler = async (req: express.Request, res: express.Response) => {
     const userId = Number(req.params.id);
     if (!Number.isInteger(userId) || userId <= 0) {
       return res.status(400).json({ error: 'ID de usuário inválido' });
@@ -2233,9 +2233,13 @@ async function startServer() {
     }
 
     try {
+      let hashedPassword: string | undefined;
+      if (normalizedPassword) {
+        hashedPassword = await hashPassword(normalizedPassword);
+      }
+
       const trans = db.transaction(() => {
         if (normalizedPassword) {
-          const hashedPassword = await hashPassword(normalizedPassword);
           db.run(`
             UPDATE users
             SET

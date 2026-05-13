@@ -8,7 +8,7 @@ import 'dotenv/config';
 
 const app = express();
 app.use(cors({ credentials: true, origin: true }));
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 
 // ─── DB Pool ─────────────────────────────────────────────────────────────────

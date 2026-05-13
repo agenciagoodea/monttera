@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { Category } from '../types';
 
 interface AppSettings {
@@ -85,8 +85,12 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const contextValue = useMemo(() => ({
+    categories, settings, loadingCategories
+  }), [categories, settings, loadingCategories]);
+
   return (
-    <AppDataContext.Provider value={{ categories, settings, loadingCategories }}>
+    <AppDataContext.Provider value={contextValue}>
       {children}
     </AppDataContext.Provider>
   );
