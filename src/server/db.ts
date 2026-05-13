@@ -1,8 +1,5 @@
-import { createRequire } from 'module';
+import MySql from 'sync-mysql2';
 import 'dotenv/config';
-
-const require = createRequire(import.meta.url);
-const MySql = require('sync-mysql2');
 
 type QueryRows = Record<string, any>[];
 type QueryWriteResult = { affectedRows?: number; changedRows?: number; insertId?: number };
