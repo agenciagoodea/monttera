@@ -110,10 +110,7 @@ export default function Banner() {
             transition={{ duration: 0.32 }}
             className="relative z-10"
           >
-            <h2 className="max-w-3xl text-4xl md:text-5xl font-black tracking-[-0.04em] text-white leading-[0.93]">
-              Compre em 3 passos <span className="text-sky-100">rapidos e seguros</span>
-            </h2>
-            <p className="mt-4 max-w-2xl text-sm md:text-base font-semibold text-white/85">
+            <p className="max-w-full text-lg md:text-xl font-black text-white leading-tight uppercase tracking-tight">
               Tudo pronto para voce baixar sua matriz em poucos minutos.
             </p>
 
@@ -144,14 +141,6 @@ export default function Banner() {
               })}
             </div>
 
-            <button
-              type="button"
-              onClick={() => goToSlide(1)}
-              className="mt-6 inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-xs md:text-sm font-black uppercase tracking-wide text-blue-700 transition hover:bg-sky-50"
-            >
-              Solicitar matriz personalizada
-              <ArrowRight className="h-4 w-4" />
-            </button>
           </motion.div>
         ) : (
           <motion.div
@@ -163,12 +152,8 @@ export default function Banner() {
             className="relative z-10"
           >
             <div className="mb-4 md:mb-5">
-              <h3 className="max-w-3xl text-4xl md:text-5xl font-black tracking-[-0.04em] leading-[0.93] text-white">
-                Nao achou a matriz? <span className="text-sky-100">A equipe cria para voce.</span>
-              </h3>
-
-              <p className="mt-4 max-w-2xl text-sm md:text-base font-semibold text-white/85">
-                Envie sua referencia agora no formulario abaixo e receba o retorno com os detalhes para producao.
+              <p className="max-w-full text-lg md:text-xl font-black text-white leading-tight uppercase tracking-tight">
+                Não achou a matriz? Envie-nos sua referencia pelo formulario que retornamos.
               </p>
             </div>
 

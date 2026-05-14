@@ -16,7 +16,8 @@ import {
   Send,
   Wifi,
   FileText,
-  Activity
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import AdminEmailTemplates from './AdminEmailTemplates';
 import AdminEmailLogs from './AdminEmailLogs';
@@ -96,6 +97,7 @@ export default function AdminSettings() {
     smtp_from_email: '',
     smtp_secure: 'false',
     matrix_request_team_email: '',
+    brand_logos: '[]',
   });
 
   useEffect(() => {
@@ -550,6 +552,129 @@ export default function AdminSettings() {
                             </div>
                           </div>
                         </div>
+                      </div>
+
+                      <div className="space-y-6 pt-6 border-t border-slate-50">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Redes Sociais</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Facebook URL</label>
+                            <input 
+                              type="text" 
+                              placeholder="https://facebook.com/..."
+                              className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                              value={settings.facebook_url}
+                              onChange={e => setSettings({...settings, facebook_url: e.target.value})}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Instagram URL</label>
+                            <input 
+                              type="text" 
+                              placeholder="https://instagram.com/..."
+                              className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-pink-500 text-xs font-bold"
+                              value={settings.instagram_url}
+                              onChange={e => setSettings({...settings, instagram_url: e.target.value})}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">YouTube URL</label>
+                            <input 
+                              type="text" 
+                              placeholder="https://youtube.com/..."
+                              className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-red-500 text-xs font-bold"
+                              value={settings.youtube_url}
+                              onChange={e => setSettings({...settings, youtube_url: e.target.value})}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Carrossel de Marcas */}
+                  <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150">
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Carrossel de Marcas Parceiras</h3>
+                    <div className="bg-white rounded-[2rem] p-8 border border-slate-100 shadow-sm space-y-6">
+                      <div className="space-y-4 pt-4 border-t border-slate-50">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Carrossel de Marcas Parceiras</label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                          {(() => {
+                            try {
+                              const logos = JSON.parse(settings.brand_logos || '[]');
+                              return logos.map((url: string, idx: number) => (
+                                <div key={idx} className="group relative aspect-video bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-center p-4 overflow-hidden hover:border-blue-200 transition-all">
+                                  <img src={url} alt={`Brand ${idx}`} className="max-w-full max-h-full object-contain grayscale group-hover:grayscale-0 transition-all" />
+                                  <button 
+                                    type="button"
+                                    onClick={() => {
+                                      const newLogos = [...logos];
+                                      newLogos.splice(idx, 1);
+                                      setSettings({ ...settings, brand_logos: JSON.stringify(newLogos) });
+                                    }}
+                                    className="absolute top-2 right-2 p-1.5 bg-white text-red-500 rounded-lg shadow-sm opacity-0 group-hover:opacity-100 transition-all hover:bg-red-50 active:scale-95"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ));
+                            } catch (e) {
+                              return null;
+                            }
+                          })()}
+                          
+                          <label className="aspect-video bg-white border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-all group">
+                            <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-blue-100 transition-all">
+                              <Plus className="w-4 h-4 text-slate-400 group-hover:text-blue-600" />
+                            </div>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest group-hover:text-blue-600">Adicionar</span>
+                            <input 
+                              type="file" 
+                              className="hidden" 
+                              accept="image/*"
+                              multiple
+                              onChange={async (e) => {
+                                const files = Array.from(e.target.files || []);
+                                if (files.length === 0) return;
+
+                                try {
+                                  setSaving(true);
+                                  const uploadedUrls: string[] = [];
+                                  
+                                  for (const file of files) {
+                                    const formData = new FormData();
+                                    formData.append('logo', file);
+
+                                    const res = await fetch('/api/admin/upload-logo', {
+                                      method: 'POST',
+                                      body: formData,
+                                    });
+
+                                    const data = await res.json().catch(() => ({}));
+                                    if (res.ok && data.url) {
+                                      uploadedUrls.push(data.url);
+                                    }
+                                  }
+
+                                  if (uploadedUrls.length > 0) {
+                                    const currentLogos = JSON.parse(settings.brand_logos || '[]');
+                                    const newLogos = [...currentLogos, ...uploadedUrls];
+                                    setSettings({ ...settings, brand_logos: JSON.stringify(newLogos) });
+                                    setMessage({ text: `${uploadedUrls.length} logo(s) carregada(s)! Salve para aplicar.`, type: 'success' });
+                                  }
+                                } catch (err) {
+                                  setMessage({ text: 'Erro ao subir logos.', type: 'error' });
+                                } finally {
+                                  setSaving(false);
+                                  e.target.value = '';
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                          Estes logos aparecerão no rodapé da página inicial em um carrossel. Recomendado: PNG com fundo transparente.
+                        </p>
                       </div>
                     </div>
                   </div>

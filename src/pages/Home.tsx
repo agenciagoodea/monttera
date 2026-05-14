@@ -13,7 +13,7 @@ export default function Home() {
   const searchQuery = searchParams.get('q') || '';
   const pageParam = parseInt(searchParams.get('page') || '1');
   
-  const { categories } = useAppData();
+  const { categories, settings } = useAppData();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
@@ -184,15 +184,60 @@ export default function Home() {
       </div>
 
       {/* Brand Logos Footer */}
-      <section className="mt-24 py-12 border-t border-slate-100">
-        <div className="flex flex-wrap justify-center md:justify-between items-center gap-12 opacity-40 grayscale hover:grayscale-0 transition-all duration-700">
-           {['Singer', 'Janome', 'Brother', 'Elna', 'Ricoma', 'Bernina', 'HappyJapan', 'Tajima', 'Barudan', 'ZSK'].map(brand => (
-             <div key={brand} className="text-xl font-black text-slate-400 hover:text-slate-900 cursor-default uppercase tracking-tighter">
-               {brand}
-             </div>
-           ))}
-        </div>
-      </section>
+      {(() => {
+        let logos: string[] = [];
+        try {
+          logos = JSON.parse(settings.brand_logos || '[]');
+        } catch (e) {
+          logos = [];
+        }
+
+        if (logos.length === 0) return null;
+
+        // Duplicate logos for infinite scroll effect
+        const tickerLogos = [...logos, ...logos, ...logos];
+
+        return (
+          <section className="mt-24 py-16 border-t border-slate-100 overflow-hidden bg-slate-50/30">
+            <div className="max-w-[1440px] mx-auto px-6 md:px-10">
+              <div className="flex flex-col items-center mb-10">
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-2">Compatível com as principais máquinas</h3>
+                <div className="h-1 w-10 bg-primary rounded-full"></div>
+              </div>
+              
+              <div className="relative">
+                {/* Gradient Masks */}
+                <div className="absolute inset-y-0 left-0 w-20 bg-gradient-to-r from-white/80 to-transparent z-10 pointer-events-none"></div>
+                <div className="absolute inset-y-0 right-0 w-20 bg-gradient-to-l from-white/80 to-transparent z-10 pointer-events-none"></div>
+                
+                <div className="flex overflow-hidden">
+                  <motion.div 
+                    className="flex gap-16 items-center"
+                    animate={{ x: ["0%", "-33.33%"] }}
+                    transition={{ 
+                      x: {
+                        duration: 20,
+                        repeat: Infinity,
+                        ease: "linear"
+                      }
+                    }}
+                  >
+                    {tickerLogos.map((url, idx) => (
+                      <div key={idx} className="w-32 h-16 flex-shrink-0 flex items-center justify-center grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all duration-500">
+                        <img 
+                          src={url} 
+                          alt="Brand Logo" 
+                          className="max-w-full max-h-full object-contain"
+                        />
+                      </div>
+                    ))}
+                  </motion.div>
+                </div>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
     </main>
   );
 }

@@ -609,19 +609,19 @@ export default function MyAccount() {
           {/* Suporte - lado direito */}
           <div className="shrink-0 p-6 md:p-8 flex flex-col justify-center items-start md:items-end border-t md:border-t-0 md:border-l border-white/20">
             <p className="text-[11px] font-black uppercase tracking-widest text-white/70 mb-3">Precisa de Ajuda?</p>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-row gap-2 flex-wrap md:flex-nowrap">
               <a 
                 href={`https://wa.me/${(settings.support_whatsapp || settings.whatsapp || '').replace(/\D/g, '')}`} 
                 target="_blank" 
                 rel="noopener noreferrer" 
-                className="flex items-center gap-2 bg-white px-5 py-2.5 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-white/90 hover:scale-105 active:scale-95 transition-all shadow-lg" 
+                className="flex items-center gap-2 bg-white px-4 py-2.5 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-white/90 hover:scale-105 active:scale-95 transition-all shadow-lg whitespace-nowrap" 
                 style={{ color: 'var(--brand-primary, #2563eb)' }}
               >
                 Suporte WhatsApp
               </a>
               <a 
                 href={`mailto:${settings.support_email || settings.email_contact || settings.email || ''}`} 
-                className="flex items-center gap-2 bg-white/10 text-white border border-white/20 px-5 py-2.5 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-white/20 hover:scale-105 active:scale-95 transition-all"
+                className="flex items-center gap-2 bg-white/10 text-white border border-white/20 px-4 py-2.5 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-white/20 hover:scale-105 active:scale-95 transition-all whitespace-nowrap"
               >
                 E-mail Suporte
               </a>

@@ -1,5 +1,5 @@
-import { Search, ShoppingCart, User, Heart, LogOut, LayoutDashboard, ShoppingBag, Download, ChevronRight } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import { ShoppingCart, User, Search, Heart, LogOut, ChevronRight, LayoutDashboard, ShoppingBag, Download, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
 import { useFavorites } from '../contexts/FavoritesContext';
@@ -7,11 +7,16 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 export default function Header() {
   const [searchParams] = useSearchParams();
-  const [search, setSearch] = useState(searchParams.get('q') || '');
   const { user, logout } = useAuth();
   const { totalItems, totalPrice } = useCart();
   const { totalFavorites } = useFavorites();
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [search, setSearch] = useState(searchParams.get('q') || '');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const searchRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -31,12 +36,65 @@ export default function Header() {
     fetchBranding();
   }, []);
 
+  // Busca inteligente com debounce
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (search.trim().length >= 2) {
+        setIsSearching(true);
+        setShowResults(true);
+        try {
+          const response = await fetch(`/api/products/search?q=${encodeURIComponent(search.trim())}`);
+          const data = await response.json();
+          // Lida com array direto ou objeto com propriedade products
+          setSearchResults(Array.isArray(data) ? data : (data.products || []));
+        } catch (error) {
+          console.error('Erro na busca:', error);
+          setSearchResults([]);
+        } finally {
+          setIsSearching(false);
+        }
+      } else {
+        setSearchResults([]);
+        setShowResults(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Fechar resultados ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setShowResults(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (search.trim()) {
-      navigate(`/?q=${encodeURIComponent(search.trim())}`);
-    } else {
-      navigate('/');
+    if (activeIndex >= 0 && searchResults[activeIndex]) {
+      navigate(`/produto/${searchResults[activeIndex].slug}`);
+      setShowResults(false);
+      setSearch('');
+    } else if (search.trim()) {
+      navigate(`/loja?q=${encodeURIComponent(search.trim())}`);
+      setShowResults(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(prev => (prev < searchResults.length - 1 ? prev + 1 : prev));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(prev => (prev > 0 ? prev - 1 : -1));
+    } else if (e.key === 'Escape') {
+      setShowResults(false);
     }
   };
 
@@ -72,15 +130,15 @@ export default function Header() {
         <div className="max-w-[1440px] mx-auto flex flex-col lg:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-10 w-full lg:w-auto justify-between">
             {/* Logo */}
-            <Link to="/" className="flex flex-col group min-w-[200px]">
+            <Link to="/" className="flex flex-col group">
               {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="h-10 w-auto object-contain" />
+                <img src={logoUrl} alt="Logo" className="h-16 w-auto object-contain" />
               ) : (
                 <>
-                  <span className="text-2xl font-black text-primary leading-none tracking-tighter uppercase group-hover:text-blue-800 transition-colors">
+                  <span className="text-4xl font-black text-primary leading-none tracking-tighter uppercase group-hover:text-blue-800 transition-colors">
                     DIGITAL<span className="text-blue-400 font-light">BORDADOS</span>
                   </span>
-                  <span className="text-[9px] font-extrabold text-slate-400 tracking-[0.3em] -mt-0.5">EXCELÊNCIA EM MATRIZES</span>
+                  <span className="text-[12px] font-extrabold text-slate-400 tracking-[0.3em] -mt-1">EXCELÊNCIA EM MATRIZES</span>
                 </>
               )}
             </Link>
@@ -100,19 +158,81 @@ export default function Header() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 w-full max-w-2xl">
+          <div className="flex items-center gap-4 w-full max-w-2xl relative" ref={searchRef}>
              <form onSubmit={handleSearch} className="relative flex-1 group">
                 <input 
                   type="text" 
                   placeholder="Buscar matrizes (ex: Flor, Urso, Logotipo)..." 
-                  className="w-full pl-6 pr-14 py-2.5 bg-slate-50 border border-slate-200 rounded-full text-sm focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-300 transition-all"
+                  className="w-full pl-6 pr-14 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-300 transition-all font-medium"
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setActiveIndex(-1);
+                  }}
+                  onFocus={() => search.trim().length >= 2 && setShowResults(true)}
+                  onKeyDown={handleKeyDown}
                 />
-                <button type="submit" className="absolute right-2 top-1.5 p-1.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors shadow-sm">
-                  <Search className="w-4 h-4" />
+                <button type="submit" className="absolute right-2 top-1.5 p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200">
+                  {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                 </button>
              </form>
+
+             {/* Resultados da Busca Inteligente */}
+             {showResults && (
+               <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl overflow-hidden z-[100] animate-in fade-in slide-in-from-top-2 duration-200">
+                 {isSearching ? (
+                   <div className="p-8 text-center">
+                     <Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-500 mb-2" />
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Buscando as melhores matrizes...</p>
+                   </div>
+                 ) : searchResults.length > 0 ? (
+                   <div className="max-h-[450px] overflow-y-auto custom-scrollbar">
+                     <div className="p-2 border-b border-slate-50 bg-slate-50/50">
+                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-3">Sugestões Encontradas</span>
+                     </div>
+                     {searchResults.map((product, index) => (
+                       <Link
+                         key={product.id}
+                         to={`/produto/${product.slug}`}
+                         onClick={() => {
+                           setShowResults(false);
+                           setSearch('');
+                         }}
+                         onMouseEnter={() => setActiveIndex(index)}
+                         className={`flex items-center gap-4 p-3 transition-all ${
+                           index === activeIndex ? 'bg-blue-50' : 'hover:bg-slate-50'
+                         }`}
+                       >
+                         <div className="w-14 h-14 rounded-xl overflow-hidden border border-slate-100 flex-shrink-0 bg-white">
+                           <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                         </div>
+                         <div className="flex-1 min-w-0">
+                           <p className="text-sm font-bold text-slate-800 truncate">{product.name}</p>
+                           <p className="text-[10px] font-black text-blue-500 uppercase tracking-wider">{product.category_name}</p>
+                         </div>
+                         <div className="text-right">
+                           <p className="text-xs font-black text-slate-900">
+                             R$ {Number(product.sale_price || product.price).toFixed(2)}
+                           </p>
+                         </div>
+                       </Link>
+                     ))}
+                     <Link 
+                       to={`/loja?q=${encodeURIComponent(search.trim())}`}
+                       className="block p-3 text-center bg-slate-50 hover:bg-blue-50 text-[11px] font-black text-blue-600 uppercase tracking-widest transition-colors"
+                     >
+                       Ver todos os resultados para "{search}"
+                     </Link>
+                   </div>
+                 ) : (
+                   <div className="p-8 text-center">
+                     <Search className="w-8 h-8 text-slate-200 mx-auto mb-2" />
+                     <p className="text-sm font-bold text-slate-800">Nenhum produto encontrado</p>
+                     <p className="text-xs text-slate-400 mt-1">Tente buscar por termos diferentes ou mais genéricos.</p>
+                   </div>
+                 )}
+               </div>
+             )}
           </div>
 
           <div className="hidden lg:flex items-center gap-8">
@@ -135,14 +255,14 @@ export default function Header() {
                     )}
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Minha Conta</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider whitespace-nowrap">Minha Conta</span>
                     {user ? (
-                      <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                      <span className="text-xs font-bold text-slate-800 flex items-center gap-1 whitespace-nowrap">
                         Olá, {user.name.split(' ')[0]}
                         <ChevronRight className={`w-3 h-3 transition-transform ${menuOpen ? 'rotate-90' : ''}`} />
                       </span>
                     ) : (
-                      <Link to="/login" className="text-xs font-bold text-slate-800 hover:text-blue-600 transition-colors">Olá, Entrar</Link>
+                      <Link to="/login" className="text-xs font-bold text-slate-800 hover:text-blue-600 transition-colors whitespace-nowrap">Olá, Entrar</Link>
                     )}
                   </div>
                 </div>
@@ -193,17 +313,8 @@ export default function Header() {
             </div>
             
             <div className="flex items-center gap-4">
-              <Link to="/favoritos" className="p-2 text-slate-400 hover:text-red-500 transition-colors relative" title="Favoritos">
-                <Heart className="w-6 h-6" />
-                {totalFavorites > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] w-[18px] h-[18px] rounded-full flex items-center justify-center font-bold border border-white">
-                    {totalFavorites > 99 ? '99+' : totalFavorites}
-                  </span>
-                )}
-              </Link>
-              
               <Link to="/carrinho" className="flex items-center gap-3 bg-white border border-slate-200 pl-4 pr-1.5 py-1.5 rounded-full hover:border-blue-300 transition-all font-bold group">
-                <span className="text-sm text-slate-700">R$ {totalPrice.toFixed(2)}</span>
+                <span className="text-sm text-slate-700 whitespace-nowrap">R$ {totalPrice.toFixed(2)}</span>
                 <div className="relative bg-blue-600 p-2 rounded-full text-white shadow-md group-hover:scale-105 transition-transform">
                   <ShoppingCart className="w-4 h-4" />
                   {totalItems > 0 && (

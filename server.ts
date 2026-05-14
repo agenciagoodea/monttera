@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import { sendEmail } from './src/server/mailer';
 import nodemailer from 'nodemailer';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
+import axios from 'axios';
 
 // Simple in-memory cache for extreme optimization
 class CacheProvider {
@@ -420,6 +421,30 @@ async function startServer() {
   });
 
   // API Routes - AUTH
+  // Busca inteligente de produtos (Posicionada no início para evitar conflitos)
+  app.get('/api/products/search', (req, res) => {
+    try {
+      const queryStr = req.query.q as string;
+      if (!queryStr || queryStr.trim().length < 2) return res.json([]);
+
+      const searchTerm = `%${queryStr.trim()}%`;
+      
+      // Busca direta e simples
+      const products = db.all(`
+        SELECT id, name, slug, price, sale_price, image 
+        FROM products 
+        WHERE (name LIKE ? OR slug LIKE ? OR description LIKE ?)
+        AND status IN ('active', 'ativo')
+        LIMIT 10
+      `, searchTerm, searchTerm, searchTerm);
+
+      return res.json(products);
+    } catch (error: any) {
+      console.error('SEARCH ERROR:', error);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post('/api/auth/register', async (req, res) => {
     const { firstName, lastName, email, password } = req.body;
     
@@ -687,7 +712,7 @@ async function startServer() {
       const user = db.get('SELECT * FROM users WHERE id = ?', resetRequest.user_id) as any;
       if (user) {
         const settings = loadSettingsMap(['app_url']);
-        const appUrl = settings.app_url || 'http://localhost:3000';
+        const appUrl = settings.app_url || 'https://digitalbordados.com.br';
         
         await sendEmail({
           to: user.email,
@@ -1503,9 +1528,9 @@ async function startServer() {
           if (!card_token) {
             return res.status(400).json({ error: 'Token do cartao e obrigatorio' });
           }
-          const requestedInstallments = payment_method === 'debit_card'
-            ? 1
-            : Math.max(1, Number(installments || 1));
+          const requestedInstallments = payment_method === 'credit_card'
+            ? Math.max(1, Number(installments || 1))
+            : 1;
 
           payment = await paymentClient.create({
             body: {
@@ -1740,9 +1765,13 @@ async function startServer() {
           purchased_items: Number(summary?.purchased_items || 0),
         },
       });
-    } catch (error) {
-      console.error('Customer Account Error:', error);
-      return res.status(500).json({ error: 'Erro ao carregar dados da conta' });
+    } catch (error: any) {
+      console.error('Customer Account Error Detail:', {
+        message: error.message,
+        stack: error.stack,
+        userId: user.id
+      });
+      return res.status(500).json({ error: `Erro ao carregar dados da conta: ${error.message}` });
     }
   });
 
@@ -1842,35 +1871,31 @@ async function startServer() {
         return res.status(400).json({ error: 'Caminho do arquivo é obrigatório' });
       }
 
-      // Segurança: Apenas permitir downloads de domínios confiáveis ou caminhos específicos
-      // Para simplificar e resolver o erro do usuário:
-      const targetUrl = filePath.startsWith('http') ? filePath : `https://digitalbordados.com.br${filePath}`;
+      // Segurança: Prevenir SSRF garantindo que apenas arquivos do domínio oficial sejam baixados
+      let targetUrl = filePath.startsWith('http') ? filePath : `https://digitalbordados.com.br${filePath.startsWith('/') ? '' : '/'}${filePath}`;
       
-      console.log(`Iniciando download via proxy: ${targetUrl}`);
-
-      const response = await fetch(targetUrl);
-      if (!response.ok) {
-        throw new Error(`Falha ao buscar arquivo: ${response.statusText}`);
+      const allowedDomain = 'digitalbordados.com.br';
+      try {
+        const urlObj = new URL(targetUrl);
+        if (!urlObj.hostname.includes(allowedDomain)) {
+          return res.status(403).json({ error: 'Download não autorizado para este domínio.' });
+        }
+      } catch (e) {
+        return res.status(400).json({ error: 'URL de arquivo inválida.' });
       }
 
-      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      console.log(`Iniciando download via proxy seguro: ${targetUrl}`);
+
+      const response = await axios.get(targetUrl, { responseType: 'stream' });
+      const contentType = response.headers['content-type'] || 'application/octet-stream';
       const fileName = targetUrl.split('/').pop() || 'matriz.zip';
 
       res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
 
-      // Converter ReadableStream do fetch para um stream que o Express possa enviar
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('Falha ao ler stream do arquivo');
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(value);
-      }
-      res.end();
-    } catch (error) {
-      console.error('Erro no proxy de download:', error);
+      response.data.pipe(res);
+    } catch (error: any) {
+      console.error('Erro no proxy de download:', error.message);
       res.status(500).json({ error: 'Não foi possível processar o download. Tente novamente mais tarde.' });
     }
   });
@@ -2810,6 +2835,7 @@ async function startServer() {
         }
       });
       trans(settings);
+      apiCache.delete('public_settings');
       res.json({ success: true });
     } catch (error) {
       console.error('Update Settings Error:', error);
@@ -2934,20 +2960,20 @@ async function startServer() {
       const testVars = {
         name: 'Usuário Teste',
         email: to,
-        login_url: 'http://localhost:3000/login',
-        reset_url: 'http://localhost:3000/redefinir-senha?token=test',
+        login_url: 'https://digitalbordados.com.br/login',
+        reset_url: 'https://digitalbordados.com.br/redefinir-senha?token=test',
         order_id: '9999',
         order_total: 'R$ 150,00',
         order_status: 'Pendente',
         items: '<li>1x Produto Teste - R$ 150,00</li>',
         payment_method: 'PIX',
-        account_url: 'http://localhost:3000/conta',
-        downloads_url: 'http://localhost:3000/conta',
-        retry_url: 'http://localhost:3000/checkout',
+        account_url: 'https://digitalbordados.com.br/conta',
+        downloads_url: 'https://digitalbordados.com.br/conta',
+        retry_url: 'https://digitalbordados.com.br/checkout',
         pix_code: '00020126580014br.gov.bcb.pix...',
         expires_at: new Date(Date.now() + 3600000).toLocaleString('pt-BR'),
         temp_password: 'SenhaTemporaria123',
-        change_password_url: 'http://localhost:3000/conta',
+        change_password_url: 'https://digitalbordados.com.br/conta',
         expires_in: '2'
       };
 
@@ -3206,7 +3232,7 @@ async function startServer() {
       const cached = apiCache.get('public_settings');
       if (cached) return res.json(cached);
 
-      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "new_badge_days")') as any[];
+      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "new_badge_days", "brand_logos", "facebook_url", "instagram_url", "youtube_url")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);
@@ -3305,6 +3331,8 @@ async function startServer() {
       return res.status(500).json({ error: 'Erro ao enviar solicitacao de matriz' });
     }
   });
+
+
 
   app.get('/api/products', (req, res) => {
     try {

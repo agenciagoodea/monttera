@@ -69,17 +69,29 @@ export default function CartPage() {
     first_name: '',
     last_name: '',
     cpf: '',
+    zip_code: '',
+    street: '',
+    number: '',
+    neighborhood: '',
+    city: '',
+    state: '',
   });
 
   const [pixExpiresAt, setPixExpiresAt] = useState<number | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(30 * 60);
   const [statusMessage, setStatusMessage] = useState('');
   const [payerErrors, setPayerErrors] = useState<string[]>([]);
-  const [payerTouched, setPayerTouched] = useState<Record<'first_name' | 'last_name' | 'email' | 'cpf', boolean>>({
+  const [payerTouched, setPayerTouched] = useState<Record<string, boolean>>({
     first_name: false,
     last_name: false,
     email: false,
     cpf: false,
+    zip_code: false,
+    street: false,
+    number: false,
+    neighborhood: false,
+    city: false,
+    state: false,
   });
 
   const cardFormRef = useRef<any>(null);
@@ -104,20 +116,59 @@ export default function CartPage() {
     cpf: !isValidCPF(payer.cpf) ? 'CPF inválido' : '',
   };
 
-  const inputClassName = (field: keyof typeof fieldError) => {
-    if (!payerTouched[field]) return 'px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold';
-    if (fieldError[field]) return 'px-4 py-3 bg-rose-50 border border-rose-300 rounded-xl text-xs font-semibold text-rose-700';
+  const inputClassName = (field: keyof typeof payer) => {
+    if (!payerTouched[field as string]) return 'px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold';
+    if ((fieldError as any)[field]) return 'px-4 py-3 bg-rose-50 border border-rose-300 rounded-xl text-xs font-semibold text-rose-700';
     return 'px-4 py-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs font-semibold text-emerald-700';
   };
 
   useEffect(() => {
     if (user) {
-      setPayer((prev) => ({
-        ...prev,
-        email: prev.email || user.email || '',
-      }));
+      fetch('/api/customer/account')
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && !data.error) {
+            const [firstName, ...rest] = (data.name || '').split(' ');
+            setPayer(prev => ({
+              ...prev,
+              email: data.email || user.email || prev.email,
+              first_name: data.first_name || firstName || prev.first_name,
+              last_name: data.last_name || rest.join(' ') || prev.last_name,
+              cpf: data.cpf || prev.cpf,
+              zip_code: data.billing_zip || data.zip || prev.zip_code,
+              street: data.billing_address || data.address || prev.street,
+              city: data.billing_city || data.city || prev.city,
+              state: data.billing_state || data.state || prev.state,
+            }));
+          } else {
+            setPayer((prev) => ({ ...prev, email: prev.email || user.email || '' }));
+          }
+        })
+        .catch(() => {
+          setPayer((prev) => ({ ...prev, email: prev.email || user.email || '' }));
+        });
     }
   }, [user]);
+
+  const handleCepBlur = async () => {
+    setPayerTouched(prev => ({ ...prev, zip_code: true }));
+    const cep = payer.zip_code.replace(/\D/g, '');
+    if (cep.length === 8) {
+      try {
+        const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+        const data = await res.json();
+        if (!data.erro) {
+          setPayer(prev => ({
+            ...prev,
+            street: data.logradouro || prev.street,
+            neighborhood: data.bairro || prev.neighborhood,
+            city: data.localidade || prev.city,
+            state: data.uf || prev.state,
+          }));
+        }
+      } catch (e) {}
+    }
+  };
 
   useEffect(() => {
     async function loadCheckoutConfig() {
@@ -359,26 +410,26 @@ export default function CartPage() {
         <h1 className="text-3xl font-black text-slate-800 uppercase tracking-tight">Meu Carrinho</h1>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-        <div className="lg:col-span-2 space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="space-y-6">
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
             <div className="divide-y divide-slate-50">
               {items.map((item) => (
-                <motion.div layout key={item.product_id} className="p-6 md:p-8 flex flex-col md:flex-row md:items-center gap-6 group">
-                  <div className="w-32 h-32 bg-slate-100 rounded-3xl overflow-hidden flex-shrink-0 border border-slate-100">
+                <motion.div layout key={item.product_id} className="p-6 md:p-8 flex flex-col xl:flex-row xl:items-center gap-6 group">
+                  <div className="w-24 h-24 bg-slate-100 rounded-3xl overflow-hidden flex-shrink-0 border border-slate-100 mx-auto xl:mx-0">
                     <img src={item.product_image || ''} alt={item.product_name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight truncate">{item.product_name}</h3>
-                    <span className="text-sm font-black text-blue-600">R$ {item.price.toFixed(2)}</span>
+                  <div className="flex-1 min-w-0 text-center xl:text-left">
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight truncate">{item.product_name}</h3>
+                    <span className="text-xs font-black text-blue-600 block mt-1">R$ {item.price.toFixed(2)}</span>
                   </div>
-                  <button onClick={() => removeFromCart(item.product_id)} className="w-12 h-12 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center hover:bg-red-500 hover:text-white transition-all shadow-sm">
-                    <Trash2 className="w-5 h-5" />
+                  <button onClick={() => removeFromCart(item.product_id)} className="w-10 h-10 mx-auto xl:mx-0 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center hover:bg-red-500 hover:text-white transition-all shadow-sm flex-shrink-0">
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </motion.div>
               ))}
             </div>
-            <div className="p-8 bg-slate-50/50 border-t border-slate-50 flex justify-between items-center">
+            <div className="p-6 bg-slate-50/50 border-t border-slate-50 flex justify-between items-center">
               <button onClick={clearCart} className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-red-500 transition-colors">
                 Limpar Carrinho
               </button>
@@ -387,70 +438,180 @@ export default function CartPage() {
               </span>
             </div>
           </div>
+
+          <div className="bg-[#eaf4fc] border border-blue-100 rounded-[2rem] p-6 text-[13px] text-blue-900 leading-relaxed shadow-sm">
+            <p className="font-bold mb-2 text-blue-950">Neste pacote contém arquivos: PES - JEF - DST - EXP - XXX</p>
+            <p>
+              Após a finalização da sua compra, caso você não seja redirecionado automaticamente para download, acesse o Painel do Cliente no menu superior do site clicando na opção <strong>"Matrizes Compradas"</strong> para visualizar e baixar seus arquivos. Certifique-se de utilizar o usuário e a senha cadastrados no momento da compra. Caso não se lembre dos seus dados de acesso, utilize a opção "Esqueci minha senha" para redefini-los.
+            </p>
+          </div>
+          
+
         </div>
 
         <div className="space-y-6">
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 p-8 md:p-10 sticky top-28 space-y-6">
-            <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">Checkout Transparente</h2>
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 p-6 md:p-8 space-y-6">
+            <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">Seus Dados</h2>
 
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setCheckoutMethod('pix')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'pix' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                PIX
-              </button>
-              <button type="button" onClick={() => setCheckoutMethod('credit_card')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'credit_card' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                Crédito
-              </button>
-              <button type="button" onClick={() => setCheckoutMethod('debit_card')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'debit_card' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                Débito
-              </button>
-              {paypalConfig?.enabled && (
-                <button type="button" onClick={() => setCheckoutMethod('paypal')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'paypal' ? 'bg-[#0070ba] text-white' : 'bg-slate-100 text-slate-600'}`}>
-                  PayPal 🌐
-                </button>
-              )}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Nome</label>
+                <input
+                  type="text"
+                  placeholder="Seu nome"
+                  value={payer.first_name}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, first_name: e.target.value }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, first_name: true }))}
+                  className={`${inputClassName('first_name')} w-full`}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Sobrenome</label>
+                <input
+                  type="text"
+                  placeholder="Seu sobrenome"
+                  value={payer.last_name}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, last_name: e.target.value }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, last_name: true }))}
+                  className={`${inputClassName('last_name')} w-full`}
+                />
+              </div>
+              <div className="space-y-1 col-span-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">E-mail</label>
+                <input
+                  type="email"
+                  placeholder="exemplo@email.com"
+                  value={payer.email}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, email: e.target.value }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, email: true }))}
+                  className={`${inputClassName('email')} w-full`}
+                />
+              </div>
+              <div className="space-y-1 col-span-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">CPF</label>
+                <input
+                  type="text"
+                  placeholder="000.000.000-00"
+                  value={payer.cpf}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, cpf: maskCPF(e.target.value) }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, cpf: true }))}
+                  className={`${inputClassName('cpf')} w-full`}
+                />
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                type="text"
-                placeholder="Nome"
-                value={payer.first_name}
-                onChange={(e) => setPayer((prev) => ({ ...prev, first_name: e.target.value }))}
-                onBlur={() => setPayerTouched((prev) => ({ ...prev, first_name: true }))}
-                className={inputClassName('first_name')}
-              />
-              <input
-                type="text"
-                placeholder="Sobrenome"
-                value={payer.last_name}
-                onChange={(e) => setPayer((prev) => ({ ...prev, last_name: e.target.value }))}
-                onBlur={() => setPayerTouched((prev) => ({ ...prev, last_name: true }))}
-                className={inputClassName('last_name')}
-              />
-              <input
-                type="email"
-                placeholder="E-mail"
-                value={payer.email}
-                onChange={(e) => setPayer((prev) => ({ ...prev, email: e.target.value }))}
-                onBlur={() => setPayerTouched((prev) => ({ ...prev, email: true }))}
-                className={`${inputClassName('email')} col-span-2`}
-              />
-              <input
-                type="text"
-                placeholder="CPF"
-                value={payer.cpf}
-                onChange={(e) => setPayer((prev) => ({ ...prev, cpf: maskCPF(e.target.value) }))}
-                onBlur={() => setPayerTouched((prev) => ({ ...prev, cpf: true }))}
-                className={`${inputClassName('cpf')} col-span-2`}
-              />
+            <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight pt-4 border-t border-slate-50">Endereço de Faturamento</h3>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1 col-span-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">CEP</label>
+                <input
+                  type="text"
+                  placeholder="00000-000"
+                  value={payer.zip_code}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, zip_code: maskCPF(e.target.value.replace(/\D/g, '').slice(0, 8).replace(/^(\d{5})(\d)/, '$1-$2')) }))}
+                  onBlur={handleCepBlur}
+                  className={`${inputClassName('zip_code')} w-full`}
+                />
+              </div>
+              <div className="space-y-1 col-span-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Rua/Avenida</label>
+                <input
+                  type="text"
+                  placeholder="Nome da rua"
+                  value={payer.street}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, street: e.target.value }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, street: true }))}
+                  className={`${inputClassName('street')} w-full`}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Número</label>
+                <input
+                  type="text"
+                  placeholder="123"
+                  value={payer.number}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, number: e.target.value }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, number: true }))}
+                  className={`${inputClassName('number')} w-full`}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Bairro</label>
+                <input
+                  type="text"
+                  placeholder="Nome do bairro"
+                  value={payer.neighborhood}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, neighborhood: e.target.value }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, neighborhood: true }))}
+                  className={`${inputClassName('neighborhood')} w-full`}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Cidade</label>
+                <input
+                  type="text"
+                  placeholder="Sua cidade"
+                  value={payer.city}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, city: e.target.value }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, city: true }))}
+                  className={`${inputClassName('city')} w-full`}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Estado (UF)</label>
+                <input
+                  type="text"
+                  placeholder="UF"
+                  value={payer.state}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, state: e.target.value.toUpperCase().slice(0, 2) }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, state: true }))}
+                  className={`${inputClassName('state')} w-full`}
+                />
+              </div>
             </div>
+
             {payerErrors.length > 0 && (
-              <ul className="text-[11px] text-rose-600 font-semibold space-y-0.5">
+              <ul className="text-[11px] text-rose-600 font-semibold space-y-0.5 pt-2">
                 {payerErrors.map((error) => (
                   <li key={error}>• {error}</li>
                 ))}
               </ul>
             )}
+          </div>
+
+          <div className="bg-[#eef8f6] border border-emerald-100 rounded-[2rem] p-6 text-[13px] text-emerald-900 leading-relaxed shadow-sm">
+            <p className="font-bold mb-2 flex items-center gap-2 text-emerald-950"><span className="text-lg">🔒</span> Uso exclusivo para quem adquiriu</p>
+            <p className="mb-2">
+              Essa matriz foi desenvolvida com muito carinho e dedicação. Por isso, pedimos que <strong>não compartilhe, doe ou revenda</strong> este arquivo em nenhuma plataforma, rede social ou mídia digital.
+            </p>
+            <p className="mb-3 flex items-start gap-2">
+              <span className="text-lg leading-none">📜</span> <span>A redistribuição sem autorização é proibida pela <strong>Lei de Direitos Autorais (Lei 9.610/98)</strong>.</span>
+            </p>
+            <p className="font-bold text-emerald-950">Contamos com seu apoio para valorizar o trabalho de quem cria!💛</p>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 p-6 md:p-8 sticky top-28 space-y-6">
+            <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">Pagamento</h2>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setCheckoutMethod('pix')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'pix' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                PIX
+              </button>
+              <button type="button" onClick={() => setCheckoutMethod('credit_card')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'credit_card' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                Crédito
+              </button>
+              <button type="button" onClick={() => setCheckoutMethod('debit_card')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'debit_card' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                Débito
+              </button>
+              {paypalConfig?.enabled && (
+                <button type="button" onClick={() => setCheckoutMethod('paypal')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'paypal' ? 'bg-[#0070ba] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                  PayPal 🌐
+                </button>
+              )}
+            </div>
 
             {checkoutMethod === 'pix' ? (
               <button
@@ -491,19 +652,48 @@ export default function CartPage() {
             ) : (
               <form id="form-checkout" className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <input id="form-checkout__cardNumber" className="col-span-2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  <input id="form-checkout__expirationDate" className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  <input id="form-checkout__securityCode" className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  <input id="form-checkout__cardholderName" className="col-span-2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  <select id="form-checkout__issuer" className="col-span-2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  <select id="form-checkout__installments" className="col-span-2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  <select id="form-checkout__identificationType" className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  <input id="form-checkout__identificationNumber" className="px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  <input id="form-checkout__email" className="col-span-2 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Número do Cartão</label>
+                    <input id="form-checkout__cardNumber" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Vencimento</label>
+                    <input id="form-checkout__expirationDate" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">CVV</label>
+                    <input id="form-checkout__securityCode" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Nome no Cartão</label>
+                    <input id="form-checkout__cardholderName" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Banco Emissor</label>
+                    <select id="form-checkout__issuer" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                  </div>
+                  {checkoutMethod === 'credit_card' && (
+                    <div className="space-y-1 col-span-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Parcelamento</label>
+                      <select id="form-checkout__installments" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Tipo Doc.</label>
+                    <select id="form-checkout__identificationType" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Número Doc.</label>
+                    <input id="form-checkout__identificationNumber" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                  </div>
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">E-mail de Cobrança</label>
+                    <input id="form-checkout__email" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                  </div>
                 </div>
                 <button type="submit" disabled={loadingCheckout || !canSubmitPayer} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 inline-flex items-center justify-center gap-2">
                   <CreditCard className="w-4 h-4" />
-                  {loadingCheckout ? 'Processando...' : 'Pagar com cartão'}
+                  {loadingCheckout ? 'Processando...' : checkoutMethod === 'debit_card' ? 'Pagar com débito' : 'Pagar com cartão'}
                 </button>
               </form>
             )}

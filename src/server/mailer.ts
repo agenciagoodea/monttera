@@ -64,7 +64,7 @@ export async function sendEmail({ to, templateKey, variables = {} }: SendEmailPa
     const templateVars = {
       store_logo: logo_url || '',
       store_name: site_name || 'Digital Bordados',
-      app_url: app_url || 'http://localhost:3000',
+      app_url: app_url || 'https://digitalbordados.com.br',
       ...variables
     };
 

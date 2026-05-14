@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AnimatePresence } from 'motion/react';
-import { ChevronLeft, ChevronRight, Search, SlidersHorizontal } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, SlidersHorizontal, Heart } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 import ProductCard from '../components/ProductCard';
 import { Category, Product } from '../types';
@@ -89,10 +89,18 @@ export default function ShopPage() {
 
   return (
     <main className="max-w-[1440px] mx-auto px-4 md:px-10 py-6 md:py-10">
-      <section className="mb-10 rounded-[2rem] border border-slate-100 bg-gradient-to-r from-slate-900 to-blue-900 px-6 py-8 md:px-10 md:py-10 text-white shadow-xl shadow-blue-900/15">
-        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-200">Loja oficial</p>
-        <h1 className="mt-3 text-3xl md:text-5xl font-black tracking-[-0.03em]">Matrizes Profissionais</h1>
-        <p className="mt-3 max-w-2xl text-sm md:text-base text-blue-100/90 font-semibold">{subtitle}</p>
+      <section className="mb-10 rounded-[3rem] border border-white/10 bg-primary px-6 py-10 md:px-16 md:py-14 text-white shadow-2xl shadow-blue-900/20 relative overflow-hidden group">
+        <div className="relative z-10">
+          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-100">Loja oficial</p>
+          <div className="flex flex-col md:flex-row md:items-center gap-4 mt-4">
+            <h1 className="text-4xl md:text-6xl font-black tracking-[-0.03em]">Matrizes Profissionais</h1>
+            <Heart className="w-8 h-8 md:w-10 md:h-10 text-white/30 fill-current animate-pulse shrink-0" />
+          </div>
+          <p className="mt-4 max-w-2xl text-sm md:text-lg text-blue-50/80 font-bold uppercase tracking-wide">{subtitle}</p>
+        </div>
+        
+        {/* Decorative Background Icon */}
+        <Heart className="absolute -bottom-10 -right-10 w-64 h-64 text-white/5 rotate-12 pointer-events-none group-hover:scale-110 transition-transform duration-700" />
       </section>
 
       <div className="flex flex-col lg:flex-row gap-10">
