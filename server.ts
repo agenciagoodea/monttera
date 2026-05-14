@@ -2289,14 +2289,23 @@ async function startServer() {
     }
   });
 
-  // Rota de proxy para download seguro
+  // Download seguro de matrizes compradas
   app.get('/api/customer/download-file', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
-      const filePath = String(req.query.path || '').trim();
-      if (!filePath) {
+      const rawFilePath = String(req.query.path || '').trim();
+      if (!rawFilePath) {
         return res.status(400).json({ error: 'Caminho do arquivo e obrigatorio' });
       }
+
+      const safeDecode = (value: string) => {
+        try {
+          return decodeURIComponent(value);
+        } catch {
+          return value;
+        }
+      };
+      const decodedFilePath = safeDecode(rawFilePath);
 
       const freshUser = getUserById(Number(user?.id || 0));
       if (!freshUser) {
@@ -2306,6 +2315,49 @@ async function startServer() {
         return res.status(403).json({ error: 'Confirme seu e-mail para acessar downloads.', code: 'EMAIL_NOT_VERIFIED' });
       }
 
+      const allowedDomain = String(process.env.APP_DOMAIN || 'digitalbordados.com.br')
+        .trim()
+        .toLowerCase();
+      const isAllowedHost = (host: string) => {
+        const normalized = host.toLowerCase();
+        return normalized === allowedDomain || normalized.endsWith(`.${allowedDomain}`);
+      };
+      const toAbsoluteUrl = (value: string) => {
+        if (!value) return '';
+        if (/^https?:\/\//i.test(value)) return value;
+        if (value.startsWith('//')) return `https:${value}`;
+        return `https://${allowedDomain}${value.startsWith('/') ? '' : '/'}${value}`;
+      };
+
+      const candidateValues = new Set<string>([
+        rawFilePath,
+        decodedFilePath,
+        toAbsoluteUrl(rawFilePath),
+        toAbsoluteUrl(decodedFilePath),
+      ]);
+
+      for (const candidate of Array.from(candidateValues)) {
+        if (!candidate) continue;
+        try {
+          const parsed = new URL(candidate);
+          if (!isAllowedHost(parsed.hostname)) continue;
+          if (parsed.pathname) {
+            candidateValues.add(parsed.pathname);
+            candidateValues.add(`${parsed.pathname}${parsed.search || ''}`);
+            candidateValues.add(safeDecode(parsed.pathname));
+            candidateValues.add(safeDecode(`${parsed.pathname}${parsed.search || ''}`));
+          }
+        } catch {
+          // valor nao e URL absoluta, ignora
+        }
+      }
+
+      const filePathCandidates = Array.from(candidateValues).filter(Boolean);
+      if (!filePathCandidates.length) {
+        return res.status(400).json({ error: 'Caminho do arquivo invalido' });
+      }
+
+      const placeholders = filePathCandidates.map(() => '?').join(', ');
       const ownedDownload = db.get(`
         SELECT oi.id AS order_item_id, f.file_path, f.file_name
         FROM orders o
@@ -2313,40 +2365,26 @@ async function startServer() {
         JOIN product_files f ON f.product_id = oi.product_id
         WHERE o.user_id = ?
           AND o.status = 'paid'
-          AND f.file_path = ?
+          AND f.file_path IN (${placeholders})
         LIMIT 1
-      `, Number(user.id), filePath) as any;
+      `, Number(user.id), ...filePathCandidates) as any;
 
       if (!ownedDownload) {
         return res.status(403).json({ error: 'Download nao autorizado para este usuario.' });
       }
 
-      let targetUrl = filePath;
-      if (!/^https?:\/\//i.test(targetUrl)) {
-        targetUrl = `https://digitalbordados.com.br${targetUrl.startsWith('/') ? '' : '/'}${targetUrl}`;
-      }
-
-      const allowedDomain = 'digitalbordados.com.br';
-      let targetHostname = '';
+      const targetUrl = toAbsoluteUrl(String(ownedDownload.file_path || decodedFilePath || rawFilePath));
       try {
         const urlObj = new URL(targetUrl);
-        targetHostname = urlObj.hostname;
+        if (!isAllowedHost(urlObj.hostname)) {
+          return res.status(403).json({ error: 'Download nao autorizado para este dominio.' });
+        }
       } catch {
         return res.status(400).json({ error: 'URL de arquivo invalida.' });
       }
 
-      if (!targetHostname.endsWith(allowedDomain)) {
-        return res.status(403).json({ error: 'Download nao autorizado para este dominio.' });
-      }
-
-      const response = await axios.get(targetUrl, { responseType: 'stream', timeout: 20000 });
-      const rawContentType = response.headers['content-type'];
-      const contentType = typeof rawContentType === 'string' ? rawContentType : 'application/octet-stream';
-      const fileName = String(ownedDownload.file_name || targetUrl.split('/').pop() || 'matriz.zip');
-
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-      response.data.pipe(res);
+      // Redireciona para o arquivo autorizado (evita falhas de proxy em produção).
+      return res.redirect(302, targetUrl);
     } catch (error: any) {
       console.error('Erro no proxy de download:', error?.message || error);
       return res.status(500).json({ error: 'Nao foi possivel processar o download. Tente novamente mais tarde.' });
