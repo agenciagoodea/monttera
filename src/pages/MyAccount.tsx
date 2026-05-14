@@ -582,46 +582,52 @@ export default function MyAccount() {
                         </tr>
                       </thead>
                       <tbody>
-                        {orders.map((order) => (
-                          <tr key={order.id} className="border-b border-slate-50">
-                            <td className="py-4 font-black text-slate-800">#{order.id}</td>
-                            <td className="py-4 font-semibold text-slate-600">{new Date(order.created_at).toLocaleDateString('pt-BR')}</td>
-                            <td className="py-4">
-                              <span className={`inline-flex px-3 py-1 rounded-full text-[11px] font-black ${getStatusClass(order.status)}`}>
-                                {getStatusLabel(order.status)}
-                              </span>
-                            </td>
-                            <td className="py-4 font-semibold text-slate-700">
-                              {formatCurrency(Number(order.total || 0))} de {Number(order.total_items || 0)} itens
-                            </td>
-                            <td className="py-4">
-                              <button
-                                onClick={() => openOrderDetail(order.id)}
-                                className="inline-flex items-center gap-1 text-blue-700 font-black text-xs hover:text-blue-900"
-                              >
-                                Visualizar <ChevronRight className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {orders.map((order) => {
+                          if (!order) return null;
+                          return (
+                            <tr key={order.id} className="border-b border-slate-50">
+                              <td className="py-4 font-black text-slate-800">#{order.id}</td>
+                              <td className="py-4 font-semibold text-slate-600">{order.created_at ? new Date(order.created_at).toLocaleDateString('pt-BR') : '-'}</td>
+                              <td className="py-4">
+                                <span className={`inline-flex px-3 py-1 rounded-full text-[11px] font-black ${getStatusClass(order.status)}`}>
+                                  {getStatusLabel(order.status)}
+                                </span>
+                              </td>
+                              <td className="py-4 font-semibold text-slate-700">
+                                {formatCurrency(Number(order.total || 0))} de {Number(order.total_items || 0)} itens
+                              </td>
+                              <td className="py-4">
+                                <button
+                                  onClick={() => openOrderDetail(order.id)}
+                                  className="inline-flex items-center gap-1 text-blue-700 font-black text-xs hover:text-blue-900"
+                                >
+                                  Visualizar <ChevronRight className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
 
                   <div className="md:hidden space-y-3">
-                    {orders.map((order) => (
-                      <div key={order.id} className="rounded-xl border border-slate-100 p-4 bg-slate-50">
-                        <div className="flex items-center justify-between">
-                          <p className="font-black text-slate-900">Pedido #{order.id}</p>
-                          <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black ${getStatusClass(order.status)}`}>
-                            {getStatusLabel(order.status)}
-                          </span>
+                    {orders.map((order) => {
+                      if (!order) return null;
+                      return (
+                        <div key={order.id} className="rounded-xl border border-slate-100 p-4 bg-slate-50">
+                          <div className="flex items-center justify-between">
+                            <p className="font-black text-slate-900">Pedido #{order.id}</p>
+                            <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-black ${getStatusClass(order.status)}`}>
+                              {getStatusLabel(order.status)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 font-semibold mt-2">{order.created_at ? new Date(order.created_at).toLocaleDateString('pt-BR') : '-'}</p>
+                          <p className="text-sm font-bold text-slate-700 mt-2">{formatCurrency(Number(order.total || 0))} de {Number(order.total_items || 0)} itens</p>
+                          <button onClick={() => openOrderDetail(order.id)} className="mt-3 text-xs font-black text-blue-700 inline-flex items-center gap-1">Visualizar <ChevronRight className="w-4 h-4" /></button>
                         </div>
-                        <p className="text-xs text-slate-500 font-semibold mt-2">{new Date(order.created_at).toLocaleDateString('pt-BR')}</p>
-                        <p className="text-sm font-bold text-slate-700 mt-2">{formatCurrency(Number(order.total || 0))} de {Number(order.total_items || 0)} itens</p>
-                        <button onClick={() => openOrderDetail(order.id)} className="mt-3 text-xs font-black text-blue-700 inline-flex items-center gap-1">Visualizar <ChevronRight className="w-4 h-4" /></button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               )}
@@ -633,7 +639,7 @@ export default function MyAccount() {
                       <h3 className="text-lg font-black text-slate-900">Detalhes do pedido</h3>
                       {selectedOrder?.order?.id ? (
                         <p className="text-xs font-semibold text-slate-500 mt-1">
-                          Pedido #{selectedOrder.order.id} em {new Date(selectedOrder.order.created_at).toLocaleDateString('pt-BR')}
+                          Pedido #{selectedOrder.order.id} em {selectedOrder.order.created_at ? new Date(selectedOrder.order.created_at).toLocaleDateString('pt-BR') : ''}
                         </p>
                       ) : null}
                     </div>
@@ -686,7 +692,7 @@ export default function MyAccount() {
                       ))}
                       <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
                         <span className="text-xs font-black uppercase tracking-wide text-slate-500">Total</span>
-                        <span className="text-sm font-black text-slate-900">{formatCurrency(Number(selectedOrder.order.total || 0))}</span>
+                        <span className="text-sm font-black text-slate-900">{formatCurrency(Number(selectedOrder?.order?.total || 0))}</span>
                       </div>
                     </div>
                   ) : null}

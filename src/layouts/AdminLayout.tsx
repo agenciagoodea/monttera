@@ -14,9 +14,11 @@ import {
   Mail,
   Activity
 } from 'lucide-react';
+import { useAppData } from '../contexts/AppDataContext';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, login, loading, logout } = useAuth();
+  const { settings } = useAppData();
   const location = useLocation();
 
   if (loading) return <div>Carregando...</div>;
@@ -41,11 +43,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Sidebar Admin */}
       <aside className="w-72 bg-white border-r border-slate-200 flex flex-col fixed inset-y-0 shadow-sm">
         <div className="p-8 pb-10">
-          <Link to="/" className="flex flex-col">
-            <span className="text-xl font-black text-slate-800 tracking-tighter uppercase leading-none">
-              DIGITAL<span className="text-blue-600">ADMIN</span>
+          <Link to="/" className="flex flex-col items-center">
+            {settings.logo_url ? (
+              <img 
+                src={settings.logo_url} 
+                alt={settings.site_name || 'Logo'} 
+                className="max-h-12 w-auto object-contain mb-2"
+              />
+            ) : (
+              <span className="text-xl font-black text-slate-800 tracking-tighter uppercase leading-none">
+                DIGITAL<span className="text-blue-600">ADMIN</span>
+              </span>
+            )}
+            <span className="text-[9px] font-black text-slate-400 tracking-[0.3em] mt-1 uppercase text-center w-full">
+              {settings.logo_url ? 'Painel Administrativo' : 'SISTEMA RESTRITO'}
             </span>
-            <span className="text-[9px] font-black text-slate-400 tracking-[0.3em] mt-1">SISTEMA RESTRITO</span>
           </Link>
         </div>
 

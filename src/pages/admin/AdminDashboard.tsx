@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { 
   Package, 
   ShoppingCart, 
@@ -12,7 +13,8 @@ import {
   Mail,
   UserPlus,
   ChevronRight,
-  AlertTriangle
+  AlertTriangle,
+  Activity
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -214,7 +216,7 @@ export default function AdminDashboard() {
             <div className="flex items-center justify-between mb-8">
               <div>
                 <h3 className="text-lg font-black text-slate-900 tracking-tight">Tendência de Vendas</h3>
-                <p className="text-xs font-bold text-slate-400">Faturamento bruto nos últimos 7 dias</p>
+                <p className="text-xs font-bold text-slate-400">Faturamento bruto nos últimos 30 dias</p>
               </div>
               <div className="flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-black uppercase">
                 <ArrowUpRight className="w-3 h-3" />
@@ -222,7 +224,17 @@ export default function AdminDashboard() {
               </div>
             </div>
             
-            <div className="h-[300px] w-full">
+            <div className="h-[300px] w-full relative">
+              {(!data?.salesChart || data.salesChart.length === 0) && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 backdrop-blur-[2px] z-10">
+                  <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mb-4">
+                    <TrendingUp className="w-8 h-8 text-slate-200" />
+                  </div>
+                  <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center">
+                    Nenhuma venda registrada nos últimos 30 dias
+                  </p>
+                </div>
+              )}
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={data?.salesChart || []}>
                   <defs>
@@ -339,10 +351,13 @@ export default function AdminDashboard() {
                 <CheckCircle2 className="w-6 h-6 text-white" />
               </div>
               <h3 className="text-2xl font-black tracking-tight mb-2 uppercase leading-none">Novas<br/>Possibilidades</h3>
-              <p className="text-blue-100 text-sm font-medium mb-8 leading-relaxed">Seu sistema está pronto para escalar. Que tal criar uma nova coleção?</p>
-              <button className="bg-white text-blue-600 px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-blue-50 hover:scale-105 active:scale-95 transition-all shadow-xl shadow-blue-900/20">
+              <p className="text-white/90 text-sm font-medium mb-8 leading-relaxed">Seu sistema está pronto para escalar. Que tal criar uma nova coleção?</p>
+              <Link 
+                to="/admin/produtos/novo"
+                className="inline-block bg-white text-blue-600 px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-blue-50 hover:scale-105 active:scale-95 transition-all shadow-xl shadow-blue-900/20"
+              >
                 Criar Produto
-              </button>
+              </Link>
             </div>
             <Package className="absolute -bottom-10 -right-10 w-48 h-48 text-white/10 group-hover:rotate-12 transition-transform duration-1000" />
           </div>
@@ -354,7 +369,13 @@ export default function AdminDashboard() {
               <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div>
             </div>
             
-            <div className="relative space-y-8 before:absolute before:left-5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-50">
+            <div className="relative space-y-8 before:absolute before:left-5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-50 min-h-[200px]">
+              {(!data?.activities || data.activities.length === 0) && !loading && (
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <Activity className="w-8 h-8 text-slate-200 mb-2" />
+                  <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest">Nenhuma atividade registrada</p>
+                </div>
+              )}
               {data?.activities?.map((activity, i) => (
                 <div key={i} className="relative flex gap-4 group">
                   <div className={`w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center z-10 shadow-sm border border-white ${

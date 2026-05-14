@@ -206,7 +206,7 @@ export default function AdminOrderList() {
                       {new Date(order.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td className="px-6 py-4 text-xs font-black text-slate-800">
-                      R$ {order.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      R$ {(order.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </td>
                     <td className="px-6 py-4">
                       <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-[9px] font-black uppercase tracking-widest ${statusInfo.color}`}>
@@ -282,7 +282,7 @@ export default function AdminOrderList() {
                 </div>
                 <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
                   <span className="text-xs font-black text-slate-800 uppercase tracking-widest">Total do Pedido</span>
-                  <span className="text-lg font-black text-blue-600">R$ {selectedOrder.order.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <span className="text-lg font-black text-blue-600">R$ {selectedOrder?.order?.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                 </div>
               </div>
 

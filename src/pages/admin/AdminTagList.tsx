@@ -22,8 +22,9 @@ export default function AdminTagList() {
   const [newTagName, setNewTagName] = useState('');
 
   const fetchTags = async () => {
+    setLoading(true);
     try {
-      const res = await fetch('/api/admin/tags');
+      const res = await fetch(`/api/admin/tags?q=${search}`);
       const data = await res.json();
       if (Array.isArray(data)) {
         setTags(data);
@@ -40,8 +41,11 @@ export default function AdminTagList() {
   };
 
   useEffect(() => {
-    fetchTags();
-  }, []);
+    const timer = setTimeout(() => {
+      fetchTags();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const handleDelete = async (id: number) => {
     if (!confirm('Tem certeza que deseja excluir esta tag?')) return;
@@ -75,10 +79,6 @@ export default function AdminTagList() {
     }
   };
 
-  const filteredTags = tags.filter(t => 
-    t.name.toLowerCase().includes(search.toLowerCase())
-  );
-
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -107,6 +107,11 @@ export default function AdminTagList() {
             />
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
           </div>
+          <div className="flex items-center gap-4">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-4 py-2 rounded-full border border-slate-100">
+              {tags.length} {tags.length === 100 ? 'ou mais' : ''} Tags
+            </span>
+          </div>
         </div>
 
         <div className="p-8">
@@ -118,7 +123,7 @@ export default function AdminTagList() {
              </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {filteredTags.map((tag) => (
+              {tags.map((tag) => (
                 <div key={tag.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:bg-white hover:border-blue-100 transition-all">
                   <div className="flex items-center gap-3 min-w-0">
                     <TagIcon className="w-4 h-4 text-slate-400" />
@@ -135,7 +140,7 @@ export default function AdminTagList() {
             </div>
           )}
           
-          {!loading && filteredTags.length === 0 && (
+          {!loading && tags.length === 0 && (
             <div className="text-center py-20">
               <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Nenhuma tag encontrada.</p>
             </div>

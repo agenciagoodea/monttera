@@ -97,7 +97,7 @@ export default function Home() {
             
             <div className="bg-white border border-slate-100 rounded-full py-3 px-8 flex items-center justify-between gap-6 shadow-sm">
                <p className="text-[11px] font-black text-slate-800 uppercase tracking-widest whitespace-nowrap">
-                {pagination.total} Matrizes Encontradas
+                {pagination?.total || 0} Matrizes Encontradas
                </p>
                <button className="text-primary hover:underline text-[10px] font-black uppercase tracking-widest">
                 Ordenar por: Recentes
@@ -136,7 +136,7 @@ export default function Home() {
               )}
 
               {/* Pagination */}
-              {pagination.pages > 1 && (
+              {pagination?.pages > 1 && (
                 <div className="mt-16 flex flex-wrap justify-center items-center gap-3">
                   <button 
                     onClick={() => handlePageChange(Math.max(1, pageParam - 1))}
@@ -146,7 +146,7 @@ export default function Home() {
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                   
-                  {Array.from({ length: pagination.pages }).map((_, i) => {
+                  {Array.from({ length: pagination?.pages || 0 }).map((_, i) => {
                     const p = i + 1;
                     // Only show 5 pages around current
                     if (Math.abs(p - pageParam) > 2 && p !== 1 && p !== pagination.pages) {

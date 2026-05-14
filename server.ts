@@ -657,7 +657,6 @@ async function startServer() {
           }
         });
       }
-
       res.json({ success: true });
     } catch (error) {
       console.error('Reset password error:', error);
@@ -667,13 +666,56 @@ async function startServer() {
 
   // API Routes - ADMIN PRODUCTS
   app.get('/api/admin/products', authenticate, isAdmin, (req, res) => {
-    const products = db.all(`
-      SELECT p.*, c.name as category_name 
-      FROM products p 
-      LEFT JOIN product_categories c ON p.category_id = c.id 
-      ORDER BY p.created_at DESC
-    `);
-    res.json(products);
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+      const offset = (page - 1) * limit;
+      const categoryId = req.query.category;
+      const search = req.query.q;
+
+      let whereClause = 'WHERE 1=1';
+      const params: any[] = [];
+
+      if (categoryId && categoryId !== 'all') {
+        whereClause += ' AND p.category_id = ?';
+        params.push(categoryId);
+      }
+
+      if (search) {
+        whereClause += ' AND (p.name LIKE ? OR p.slug LIKE ?)';
+        params.push(`%${search}%`, `%${search}%`);
+      }
+
+      const products = db.all(`
+        SELECT p.*, c.name as category_name 
+        FROM products p 
+        LEFT JOIN product_categories c ON p.category_id = c.id 
+        ${whereClause}
+        ORDER BY p.created_at DESC
+        LIMIT ? OFFSET ?
+      `, ...params, limit, offset);
+
+      const totalResult = db.get(`
+        SELECT COUNT(*) as total 
+        FROM products p 
+        ${whereClause}
+      `, ...params) as any;
+
+      const total = totalResult?.total || 0;
+
+      res.json({
+        products,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      });
+    } catch (error) {
+      console.error('Admin Fetch Products Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar produtos' });
+    }
   });
 
   app.post('/api/admin/products', authenticate, isAdmin, upload.fields([
@@ -1254,8 +1296,23 @@ async function startServer() {
 
   // API Routes - ADMIN TAGS
   app.get('/api/admin/tags', authenticate, isAdmin, (req, res) => {
-    const tags = db.all('SELECT * FROM product_tags ORDER BY name ASC');
-    res.json(tags);
+    try {
+      const search = req.query.q;
+      let query = 'SELECT * FROM product_tags';
+      const params: any[] = [];
+
+      if (search) {
+        query += ' WHERE name LIKE ?';
+        params.push(`%${search}%`);
+      }
+
+      query += ' ORDER BY name ASC LIMIT 100';
+      const tags = db.all(query, ...params);
+      res.json(tags);
+    } catch (error) {
+      console.error('Admin Fetch Tags Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar tags' });
+    }
   });
 
   app.get('/api/admin/tags/most-used', authenticate, isAdmin, (req, res) => {
@@ -1668,6 +1725,26 @@ async function startServer() {
     }
   });
 
+  // API Routes - ADMIN ORDERS
+  app.get('/api/admin/orders', authenticate, isAdmin, (req, res) => {
+    try {
+      const orders = db.all(`
+        SELECT 
+          o.*, 
+          COALESCE(u.name, o.customer_name) as user_name, 
+          COALESCE(u.email, o.customer_email) as user_email
+        FROM orders o
+        LEFT JOIN users u ON o.user_id = u.id
+        ORDER BY o.created_at DESC
+      `);
+      res.json(orders);
+    } catch (error) {
+      console.error('Admin Fetch Orders Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar pedidos do admin' });
+    }
+  });
+
+
   app.get('/api/customer/orders/:id', authenticate, (req, res) => {
     try {
       const user = (req as any).user;
@@ -2001,21 +2078,6 @@ async function startServer() {
     try {
       db.run('DELETE FROM product_tags WHERE id = ?', req.params.id);
       res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'Erro ao excluir tag' });
-    }
-  });
-  
-  // API Routes - ADMIN ORDERS
-  app.get('/api/admin/orders', authenticate, isAdmin, (req, res) => {
-    try {
-      const orders = db.all(`
-        SELECT o.*, u.name as user_name, u.email as user_email
-        FROM orders o
-        LEFT JOIN users u ON o.user_id = u.id
-        ORDER BY o.created_at DESC
-      `);
-      res.json(orders);
     } catch (error) {
       console.error('Admin Fetch Orders Error:', error);
       res.status(500).json({ error: 'Erro ao buscar pedidos' });
@@ -2981,20 +3043,22 @@ async function startServer() {
         SELECT DATE(created_at) as date, SUM(total) as total 
         FROM orders 
         WHERE status IN ('paid', 'completed', 'success', 'pago')
-          AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+          AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
         GROUP BY DATE(created_at)
         ORDER BY date ASC
       `);
 
       // Atividade recente combinando logs
       const activities = db.all(`
-        (SELECT 'order' as type, CONCAT('Novo pedido #', id) as message, created_at FROM orders ORDER BY created_at DESC LIMIT 5)
-        UNION ALL
-        (SELECT 'email' as type, CONCAT('E-mail enviado para ', to_email) as message, created_at FROM email_logs WHERE status = 'sent' ORDER BY created_at DESC LIMIT 5)
-        UNION ALL
-        (SELECT 'user' as type, CONCAT('Novo cliente: ', name) as message, created_at FROM users WHERE role = 'customer' ORDER BY created_at DESC LIMIT 5)
+        SELECT * FROM (
+          (SELECT 'order' as type, CONCAT('Novo pedido #', id) as message, created_at FROM orders ORDER BY created_at DESC LIMIT 5)
+          UNION ALL
+          (SELECT 'email' as type, CONCAT('E-mail enviado: ', subject) as message, created_at FROM email_logs ORDER BY created_at DESC LIMIT 5)
+          UNION ALL
+          (SELECT 'user' as type, CONCAT('Novo cliente: ', name) as message, created_at FROM users WHERE role = 'customer' ORDER BY created_at DESC LIMIT 5)
+        ) as combined_logs
         ORDER BY created_at DESC
-        LIMIT 8
+        LIMIT 10
       `);
 
       res.json({

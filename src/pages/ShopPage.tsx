@@ -114,7 +114,7 @@ export default function ShopPage() {
             <div className="rounded-2xl border border-slate-100 bg-white px-5 py-3 shadow-sm inline-flex items-center gap-3">
               <Search className="w-4 h-4 text-blue-500" />
               <p className="text-[11px] font-black uppercase tracking-widest text-slate-700">
-                {pagination.total} itens encontrados
+                {pagination?.total || 0} itens encontrados
               </p>
             </div>
             <label className="inline-flex items-center gap-3 rounded-2xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
@@ -156,7 +156,7 @@ export default function ShopPage() {
                 </div>
               )}
 
-              {pagination.pages > 1 && (
+              {pagination?.pages > 1 && (
                 <div className="mt-14 flex flex-wrap justify-center items-center gap-3">
                   <button
                     onClick={() => handlePageChange(Math.max(1, pageParam - 1))}
@@ -166,7 +166,7 @@ export default function ShopPage() {
                     <ChevronLeft className="w-5 h-5" />
                   </button>
 
-                  {Array.from({ length: pagination.pages }).map((_, i) => {
+                  {Array.from({ length: pagination?.pages || 0 }).map((_, i) => {
                     const p = i + 1;
                     if (Math.abs(p - pageParam) > 2 && p !== 1 && p !== pagination.pages) {
                       if (Math.abs(p - pageParam) === 3) return <span key={p} className="text-slate-300 font-black">...</span>;
