@@ -506,8 +506,9 @@ export function initDb() {
   createIndexIfNotExists('products', 'idx_products_category', 'CREATE INDEX idx_products_category ON products(category_id)');
   createIndexIfNotExists('product_categories', 'idx_product_categories_slug', 'CREATE INDEX idx_product_categories_slug ON product_categories(slug)');
   createIndexIfNotExists('orders', 'idx_orders_user', 'CREATE INDEX idx_orders_user ON orders(user_id)');
-  createIndexIfNotExists('orders', 'idx_orders_status_date', 'CREATE INDEX idx_orders_status_date ON orders(status, created_at)');
-  createIndexIfNotExists('users', 'idx_users_role_date', 'CREATE INDEX idx_users_role_date ON users(role, created_at)');
+  // Indices compostos desativados por causa de limite de tamanho VARCHAR no MySQL (ER_TOO_LONG_KEY)
+  // createIndexIfNotExists('orders', 'idx_orders_status_date', 'CREATE INDEX idx_orders_status_date ON orders(status, created_at)');
+  // createIndexIfNotExists('users', 'idx_users_role_date', 'CREATE INDEX idx_users_role_date ON users(role, created_at)');
   createIndexIfNotExists('order_items', 'idx_order_items_order', 'CREATE INDEX idx_order_items_order ON order_items(order_id)');
   createIndexIfNotExists('favorites', 'idx_favorites_user_product', 'CREATE UNIQUE INDEX idx_favorites_user_product ON favorites(user_id, product_id)');
 

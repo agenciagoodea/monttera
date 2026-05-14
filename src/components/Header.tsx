@@ -1,4 +1,4 @@
-import { Search, ShoppingCart, User, Heart, LogOut, LayoutDashboard, ShoppingBag } from 'lucide-react';
+import { Search, ShoppingCart, User, Heart, LogOut, LayoutDashboard, ShoppingBag, Download, ChevronRight } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCart } from '../contexts/CartContext';
@@ -6,7 +6,7 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 export default function Header() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(searchParams.get('q') || '');
   const { user, logout } = useAuth();
   const { totalItems, totalPrice } = useCart();
@@ -23,9 +23,7 @@ export default function Header() {
       try {
         const res = await fetch('/api/settings');
         const data = await res.json();
-        if (data && data.logo_url) {
-          setLogoUrl(data.logo_url);
-        }
+        if (data && data.logo_url) setLogoUrl(data.logo_url);
       } catch (err) {
         console.error('Failed to fetch logo:', err);
       }
@@ -46,6 +44,21 @@ export default function Header() {
     await logout();
     navigate('/');
   };
+
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleGlobalClick = () => setMenuOpen(false);
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, [menuOpen]);
+
+  // URL do avatar: usa a foto real se disponível, senão gera via ui-avatars
+  const avatarSrc = user
+    ? (user.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=007edb&color=fff`)
+    : null;
 
   return (
     <header className="w-full">
@@ -103,48 +116,78 @@ export default function Header() {
           </div>
 
           <div className="hidden lg:flex items-center gap-8">
+            {/* Área do usuário com dropdown */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center border border-slate-100 relative group cursor-pointer">
-                {user ? (
-                   <img 
-                    src={`https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=007edb&color=fff`} 
-                    alt={user.name}
-                    className="w-full h-full rounded-full"
-                   />
-                ) : (
-                  <User className="w-5 h-5 text-slate-400" />
-                )}
-                
-                {user && (
-                  <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-slate-100 rounded-2xl shadow-xl py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                    <div className="px-4 py-2 border-b border-slate-50">
-                      <p className="text-xs font-black text-slate-800 truncate">{user.name}</p>
-                      <p className="text-[10px] text-slate-400 font-bold truncate">{user.email}</p>
-                    </div>
-                    {(user as any).type === 'customer' && (
-                      <Link to="/minha-conta" className="w-full text-left px-4 py-2 text-[11px] font-black text-slate-600 uppercase tracking-wider hover:bg-slate-50 flex items-center gap-2">
-                        <ShoppingBag className="w-3 h-3" /> Meus Pedidos
-                      </Link>
+              {/* Avatar + Dropdown */}
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
+                {/* Trigger: avatar + texto */}
+                <div 
+                  className="flex items-center gap-2.5 cursor-pointer select-none group"
+                  onClick={() => setMenuOpen(!menuOpen)}
+                >
+                  <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-slate-100 shadow-sm flex-shrink-0 bg-slate-50 group-hover:border-blue-200 transition-colors">
+                    {user && avatarSrc ? (
+                      <img src={avatarSrc} alt={user.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <User className="w-5 h-5 text-slate-400" />
+                      </div>
                     )}
-                    {user.type === 'user' && (
-                      <Link to="/admin" className="w-full text-left px-4 py-2 text-[11px] font-black text-blue-600 uppercase tracking-wider hover:bg-slate-50 flex items-center gap-2">
-                        <LayoutDashboard className="w-3 h-3" /> Painel Admin
-                      </Link>
-                    )}
-                    <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-[11px] font-black text-red-500 uppercase tracking-wider hover:bg-slate-50 flex items-center gap-2">
-                      <LogOut className="w-3 h-3" /> Sair
-                    </button>
                   </div>
-                )}
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Minha Conta</span>
-                {user ? (
-                  <Link to={user.type === 'user' ? '/admin' : '/minha-conta'} className="text-xs font-bold text-slate-800 hover:text-blue-600 transition-colors">
-                    Olá, {user.name.split(' ')[0]}
-                  </Link>
-                ) : (
-                  <Link to="/login" className="text-xs font-bold text-slate-800 hover:text-blue-600 transition-colors">Olá, Entrar</Link>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Minha Conta</span>
+                    {user ? (
+                      <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                        Olá, {user.name.split(' ')[0]}
+                        <ChevronRight className={`w-3 h-3 transition-transform ${menuOpen ? 'rotate-90' : ''}`} />
+                      </span>
+                    ) : (
+                      <Link to="/login" className="text-xs font-bold text-slate-800 hover:text-blue-600 transition-colors">Olá, Entrar</Link>
+                    )}
+                  </div>
+                </div>
+
+                {/* Dropdown menu */}
+                {user && (
+                  <div className={`absolute top-full right-0 mt-3 w-64 bg-white border border-slate-100 rounded-2xl shadow-2xl py-2 transition-all duration-200 z-50 ${
+                    menuOpen ? 'opacity-100 visible translate-y-0' : 'opacity-0 invisible translate-y-2 pointer-events-none'
+                  }`}>
+                    {/* Cabeçalho do dropdown com foto */}
+                    <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50 rounded-t-2xl">
+                      <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-sm flex-shrink-0">
+                        <img src={avatarSrc!} alt={user.name} className="w-full h-full object-cover" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-black text-slate-800 truncate">{user.name}</p>
+                        <p className="text-[10px] text-slate-400 font-bold truncate">{user.email}</p>
+                      </div>
+                    </div>
+
+                    <div className="p-2 space-y-1">
+                      {user.type === 'user' && (
+                        <Link to="/admin" className="w-full text-left px-3 py-2 text-[11px] font-black text-blue-600 uppercase tracking-wider hover:bg-blue-50 rounded-lg flex items-center gap-2 border-b border-slate-100/50">
+                          <LayoutDashboard className="w-3.5 h-3.5" /> Painel Admin
+                        </Link>
+                      )}
+                      <Link to="/minha-conta" className="w-full text-left px-3 py-2 text-[11px] font-black text-slate-600 uppercase tracking-wider hover:bg-slate-50 rounded-lg flex items-center gap-2">
+                        <User className="w-3.5 h-3.5" /> Minha Conta
+                      </Link>
+                      <Link to="/minha-conta/pedidos" className="w-full text-left px-3 py-2 text-[11px] font-black text-slate-600 uppercase tracking-wider hover:bg-slate-50 rounded-lg flex items-center gap-2">
+                        <ShoppingBag className="w-3.5 h-3.5" /> Pedidos
+                      </Link>
+                      <Link to="/minha-conta/downloads" className="w-full text-left px-3 py-2 text-[11px] font-black text-slate-600 uppercase tracking-wider hover:bg-slate-50 rounded-lg flex items-center gap-2">
+                        <Download className="w-3.5 h-3.5" /> Matrizes Compradas
+                      </Link>
+                      <Link to="/favoritos" className="w-full text-left px-3 py-2 text-[11px] font-black text-slate-600 uppercase tracking-wider hover:bg-slate-50 rounded-lg flex items-center gap-2">
+                        <Heart className="w-3.5 h-3.5" /> Favoritos
+                      </Link>
+                      <div className="pt-1 mt-1 border-t border-slate-100">
+                        <button onClick={handleLogout} className="w-full text-left px-3 py-2 text-[11px] font-black text-red-500 uppercase tracking-wider hover:bg-red-50 rounded-lg flex items-center gap-2">
+                          <LogOut className="w-3.5 h-3.5" /> Sair
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

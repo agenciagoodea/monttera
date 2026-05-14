@@ -544,8 +544,17 @@ async function startServer() {
       res.clearCookie('auth_token');
       return res.json({ user: null });
     }
-    
-    res.json({ user: decoded });
+
+    // Consulta o DB para retornar dados atualizados (incluindo avatar_url)
+    try {
+      const fresh = db.get('SELECT id, name, email, role, avatar_url FROM users WHERE id = ?', decoded.id) as any;
+      if (!fresh) return res.json({ user: null });
+      const type = fresh.role === 'admin' ? 'user' : 'customer';
+      return res.json({ user: { id: fresh.id, name: fresh.name, email: fresh.email, type, role: fresh.role, avatar_url: fresh.avatar_url || null } });
+    } catch {
+      // fallback: retorna o token decodificado
+      return res.json({ user: decoded });
+    }
   });
 
   // API Routes - FAVORITES
@@ -1825,6 +1834,47 @@ async function startServer() {
     }
   });
 
+  // Rota de proxy para download seguro (resolve 403 em diretórios protegidos)
+  app.get('/api/customer/download-file', authenticate, async (req, res) => {
+    try {
+      const { path: filePath } = req.query;
+      if (!filePath || typeof filePath !== 'string') {
+        return res.status(400).json({ error: 'Caminho do arquivo é obrigatório' });
+      }
+
+      // Segurança: Apenas permitir downloads de domínios confiáveis ou caminhos específicos
+      // Para simplificar e resolver o erro do usuário:
+      const targetUrl = filePath.startsWith('http') ? filePath : `https://digitalbordados.com.br${filePath}`;
+      
+      console.log(`Iniciando download via proxy: ${targetUrl}`);
+
+      const response = await fetch(targetUrl);
+      if (!response.ok) {
+        throw new Error(`Falha ao buscar arquivo: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      const fileName = targetUrl.split('/').pop() || 'matriz.zip';
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+
+      // Converter ReadableStream do fetch para um stream que o Express possa enviar
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Falha ao ler stream do arquivo');
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+      res.end();
+    } catch (error) {
+      console.error('Erro no proxy de download:', error);
+      res.status(500).json({ error: 'Não foi possível processar o download. Tente novamente mais tarde.' });
+    }
+  });
+
   app.get('/api/customer/downloads', authenticate, (req, res) => {
     try {
       const user = (req as any).user;
@@ -2739,6 +2789,7 @@ async function startServer() {
     try {
       const rows = db.all('SELECT `key`, value FROM settings') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
+      apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);
     } catch (error) {
       console.error('Fetch Settings Error:', error);
@@ -3152,8 +3203,12 @@ async function startServer() {
   // API Routes - CONTENT
   app.get('/api/settings', (req, res) => {
     try {
+      const cached = apiCache.get('public_settings');
+      if (cached) return res.json(cached);
+
       const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "new_badge_days")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
+      apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);
     } catch (error) {
       console.error('Fetch Public Settings Error:', error);
@@ -3163,7 +3218,11 @@ async function startServer() {
 
   app.get('/api/categories', (req, res) => {
     try {
+      const cached = apiCache.get('public_categories');
+      if (cached) return res.json(cached);
+
       const categories = db.all("SELECT * FROM product_categories WHERE status = 'active' ORDER BY sort_order ASC, name ASC");
+      apiCache.set('public_categories', categories, 600); // 10 minutes cache
       res.json(categories);
     } catch (error) {
       console.error('Error fetching categories:', error);
@@ -3794,6 +3853,19 @@ async function startServer() {
     });
   }
   
+
+  // ===== Static Files Servicing (Production) =====
+  const distPath = path.join(process.cwd(), 'dist');
+  if (fs.existsSync(distPath)) {
+    console.log('Serving static files from:', distPath);
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      if (req.path.startsWith('/api/')) return res.status(404).json({error: 'Not found'});
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+  // ===============================================
+
   return app;
 }
 

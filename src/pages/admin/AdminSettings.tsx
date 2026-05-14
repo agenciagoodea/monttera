@@ -61,6 +61,9 @@ export default function AdminSettings() {
     email_contact: 'contato@digitalbordados.com',
     address: '',
     new_badge_days: '20',
+    // Suporte ao Cliente
+    support_whatsapp: '',
+    support_email: '',
 
     // Mercado Pago
     mp_public_key: '',
@@ -373,7 +376,7 @@ export default function AdminSettings() {
                   <div>
                     <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Informações Institucionais</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
+                    <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nome do Site</label>
                         <input 
                           type="text" 
@@ -390,6 +393,28 @@ export default function AdminSettings() {
                           value={settings.email_contact}
                           onChange={e => setSettings({...settings, email_contact: e.target.value})}
                         />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">WhatsApp de Suporte</label>
+                        <input 
+                          type="text" 
+                          placeholder="+55 11 99999-9999"
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-green-500 text-xs font-bold"
+                          value={settings.support_whatsapp}
+                          onChange={e => setSettings({...settings, support_whatsapp: e.target.value})}
+                        />
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Exibido na área "Minha Conta" do cliente.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail de Suporte</label>
+                        <input 
+                          type="email" 
+                          placeholder="suporte@seusite.com"
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                          value={settings.support_email}
+                          onChange={e => setSettings({...settings, support_email: e.target.value})}
+                        />
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Exibido na área "Minha Conta" do cliente.</p>
                       </div>
                       <div className="md:col-span-2 space-y-2">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Descrição (SEO)</label>

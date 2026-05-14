@@ -6,6 +6,7 @@ interface User {
   name: string;
   type: 'customer' | 'user';
   role?: string;
+  avatar_url?: string;
 }
 
 interface AuthContextType {
@@ -14,6 +15,7 @@ interface AuthContextType {
   login: (credentials: any) => Promise<void>;
   register: (data: any) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -77,8 +79,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   };
 
+  const refreshUser = async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      const data = await parseApiResponse(res);
+      if (data.user) {
+        setUser(data.user);
+      }
+    } catch (error) {
+      console.error('Refresh auth failed:', error);
+    }
+  };
+
   const contextValue = useMemo(() => ({
-    user, loading, login, register, logout
+    user, loading, login, register, logout, refreshUser
   }), [user, loading]);
 
   return (

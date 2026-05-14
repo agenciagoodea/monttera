@@ -20,12 +20,16 @@ import {
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppData } from '../contexts/AppDataContext';
+import { useFavorites } from '../contexts/FavoritesContext';
 import { formatCurrency } from '../lib/utils';
 
 type AccountTab = 'dashboard' | 'orders' | 'downloads' | 'address' | 'profile' | 'wishlist';
 
 type AddressForm = {
   address: string;
+  number: string;
+  complement: string;
   city: string;
   state: string;
   zip: string;
@@ -111,7 +115,9 @@ type AccountUser = {
 };
 
 export default function MyAccount() {
-  const { user, loading: authLoading, logout } = useAuth();
+  const { user, loading: authLoading, logout, refreshUser } = useAuth();
+  const { settings } = useAppData();
+  const { toggleFavorite } = useFavorites();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -121,6 +127,14 @@ export default function MyAccount() {
   const [savingPassword, setSavingPassword] = useState(false);
   const [savingAddresses, setSavingAddresses] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  // Estados para o Modal de Ajuste de Foto
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   const [accountUser, setAccountUser] = useState<AccountUser | null>(null);
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
@@ -146,6 +160,8 @@ export default function MyAccount() {
 
   const [billingAddress, setBillingAddress] = useState<AddressForm>({
     address: '',
+    number: '',
+    complement: '',
     city: '',
     state: '',
     zip: '',
@@ -252,6 +268,8 @@ export default function MyAccount() {
 
           const fallbackAddress: AddressForm = {
             address: userData.address || '',
+            number: '',
+            complement: '',
             city: userData.city || '',
             state: userData.state || '',
             zip: userData.zip || '',
@@ -301,7 +319,7 @@ export default function MyAccount() {
     { key: 'downloads', label: 'Matrizes Compradas', icon: Download },
     { key: 'address', label: 'Endereco', icon: MapPinHouse },
     { key: 'profile', label: 'Perfil', icon: UserRound },
-    { key: 'wishlist', label: 'Lista de Desejos', icon: Heart },
+    { key: 'wishlist', label: 'Favoritos', icon: Heart },
     { key: 'logout', label: 'Sair', icon: LogOut },
   ];
 
@@ -336,7 +354,10 @@ export default function MyAccount() {
       profile: '/minha-conta/perfil',
       wishlist: '/minha-conta/lista-de-desejos',
     };
-    navigate(pathByTab[key]);
+    // Troca instantânea de estado sem aguardar a rota
+    setActiveTab(key);
+    // Sincroniza a URL silenciosamente sem disparar re-renders extras pesados
+    window.history.pushState({}, '', pathByTab[key]);
   };
 
   const openOrderDetail = async (orderId: number) => {
@@ -358,35 +379,106 @@ export default function MyAccount() {
     }
   };
 
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setUploadingAvatar(true);
-    try {
-      const formData = new FormData();
-      formData.append('avatar', file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSelectedImage(reader.result as string);
+      setZoom(1);
+      setOffset({ x: 0, y: 0 });
+      setShowCropModal(true);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
-      const res = await fetch('/api/customer/avatar', {
-        method: 'POST',
-        body: formData,
+  const confirmAvatarUpload = async () => {
+    if (!selectedImage) return;
+    setUploadingAvatar(true);
+
+    try {
+      // Criar um canvas para fazer o crop da imagem baseado no zoom/offset
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      await new Promise((resolve) => {
+        img.onload = resolve;
+        img.src = selectedImage;
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setProfileMessage(data?.error || 'Erro ao enviar foto.');
-        return;
+      const size = 400; // Tamanho final da foto de perfil
+      canvas.width = size;
+      canvas.height = size;
+
+      if (ctx) {
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, size, size);
+
+        // Lógica de desenho com zoom e offset
+        const imgAspect = img.width / img.height;
+        let drawW, drawH;
+
+        if (imgAspect > 1) {
+          drawH = size * zoom;
+          drawW = drawH * imgAspect;
+        } else {
+          drawW = size * zoom;
+          drawH = drawW / imgAspect;
+        }
+
+        const x = (size - drawW) / 2 + offset.x;
+        const y = (size - drawH) / 2 + offset.y;
+
+        ctx.drawImage(img, x, y, drawW, drawH);
       }
 
-      setAccountUser((prev) => (prev ? { ...prev, avatar_url: data.avatar_url } : prev));
-      setProfileMessage('Foto atualizada com sucesso.');
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
+        const formData = new FormData();
+        formData.append('avatar', file);
+
+        const res = await fetch('/api/customer/avatar', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setProfileMessage(data?.error || 'Erro ao enviar foto.');
+        } else {
+          setAccountUser((prev) => (prev ? { ...prev, avatar_url: data.avatar_url } : prev));
+          setProfileMessage('Foto atualizada com sucesso.');
+          await refreshUser(); // Atualiza o avatar no Header
+          setShowCropModal(false);
+        }
+        setUploadingAvatar(false);
+      }, 'image/jpeg', 0.9);
+
     } catch (error) {
-      setProfileMessage('Erro ao enviar foto.');
-    } finally {
+      console.error('Avatar upload failed:', error);
+      setProfileMessage('Erro ao processar imagem.');
       setUploadingAvatar(false);
-      e.currentTarget.value = '';
     }
   };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    setOffset({
+      x: e.clientX - dragStart.x,
+      y: e.clientY - dragStart.y
+    });
+  };
+
+  const handleMouseUp = () => setIsDragging(false);
 
   const handleProfileSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -442,11 +534,16 @@ export default function MyAccount() {
     e.preventDefault();
     setSavingAddresses(true);
     setAddressMessage('');
+    const billingToSave = {
+      ...billingAddress,
+      address: `${billingAddress.address}${billingAddress.number ? ', ' + billingAddress.number : ''}${billingAddress.complement ? ' - ' + billingAddress.complement : ''}`
+    };
+
     try {
       const res = await fetch('/api/customer/addresses', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ billing: billingAddress, shipping: shippingAddress }),
+        body: JSON.stringify({ billing: billingToSave, shipping: shippingAddress }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -475,31 +572,65 @@ export default function MyAccount() {
 
   return (
     <main className="max-w-[1360px] mx-auto px-4 md:px-10 py-8 md:py-10">
-      {/* Header da conta */}
-      <section className="rounded-[2rem] border border-blue-100/70 bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 text-white p-6 md:p-8 shadow-xl shadow-blue-900/20">
-        <div className="flex flex-col items-center text-center">
-          <div className="relative">
+      {/* Header da conta - Fino, Foto esticada, Suporte à direita */}
+      <section 
+        className="rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden group"
+        style={{ backgroundColor: 'var(--brand-primary, #2563eb)' }}
+      >
+        {/* Decorative background elements */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
+        <div className="absolute bottom-0 left-0 w-48 h-48 bg-black/10 rounded-full blur-2xl translate-y-1/3 -translate-x-1/4"></div>
+        
+        <div className="flex flex-col md:flex-row relative z-10 min-h-[180px]">
+          {/* Foto de perfil - ocupa toda a altura, sem padding */}
+          <div className="md:w-48 md:self-stretch shrink-0 relative">
             {avatarUrl ? (
-              <img src={avatarUrl} alt={displayName} className="w-24 h-24 rounded-full object-cover border-4 border-white/90 shadow-lg" />
+              <img src={avatarUrl} alt={displayName} className="w-full h-full object-cover md:min-h-[180px] max-h-[220px] md:max-h-none" />
             ) : (
-              <div className="w-24 h-24 rounded-full border-4 border-white/90 bg-white/20 flex items-center justify-center shadow-lg">
-                <UserCircle2 className="w-14 h-14 text-white" />
+              <div className="w-full h-full md:min-h-[180px] bg-white/20 flex items-center justify-center">
+                <UserCircle2 className="w-24 h-24 text-white/60" />
               </div>
             )}
-            <label className="absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap bg-white text-blue-700 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider cursor-pointer shadow-md hover:bg-blue-50 transition-colors inline-flex items-center gap-1.5">
-              <Camera className="w-3.5 h-3.5" />
-              {uploadingAvatar ? 'Enviando...' : 'Alterar Foto'}
+            {/* Botão alterar foto */}
+            <label className="absolute bottom-3 right-3 bg-white/90 backdrop-blur-sm text-blue-700 p-2 rounded-full cursor-pointer shadow-lg hover:bg-white transition-all hover:scale-110 active:scale-95">
+              <Camera className="w-4 h-4" />
               <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
             </label>
           </div>
 
-          <h1 className="mt-8 text-3xl md:text-4xl font-black tracking-tight">Minha conta</h1>
-          <div className="mt-4 text-sm font-semibold text-blue-50 space-y-1">
-            <p>ID: #{accountUser?.id || user.id}</p>
-            <p>{displayName}</p>
-            <p className="inline-flex items-center gap-2"><Mail className="w-4 h-4" /> {accountUser?.email || user.email}</p>
+          {/* Informações centrais */}
+          <div className="flex-1 p-6 md:p-8 flex flex-col justify-center">
+            <h1 className="text-2xl md:text-3xl font-black tracking-tight mb-1">Olá {displayName.split(' ')[0]}, Tudo bem?</h1>
+            <p className="text-sm font-bold text-white/80 flex items-center gap-2">
+              <Mail className="w-4 h-4 shrink-0" /> {accountUser?.email || user.email}
+            </p>
+          </div>
+
+          {/* Suporte - lado direito */}
+          <div className="shrink-0 p-6 md:p-8 flex flex-col justify-center items-start md:items-end border-t md:border-t-0 md:border-l border-white/20">
+            <p className="text-[11px] font-black uppercase tracking-widest text-white/70 mb-3">Precisa de Ajuda?</p>
+            <div className="flex flex-col gap-2">
+              <a 
+                href={`https://wa.me/${(settings.support_whatsapp || settings.whatsapp || '').replace(/\D/g, '')}`} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="flex items-center gap-2 bg-white px-5 py-2.5 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-white/90 hover:scale-105 active:scale-95 transition-all shadow-lg" 
+                style={{ color: 'var(--brand-primary, #2563eb)' }}
+              >
+                Suporte WhatsApp
+              </a>
+              <a 
+                href={`mailto:${settings.support_email || settings.email_contact || settings.email || ''}`} 
+                className="flex items-center gap-2 bg-white/10 text-white border border-white/20 px-5 py-2.5 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-white/20 hover:scale-105 active:scale-95 transition-all"
+              >
+                E-mail Suporte
+              </a>
+            </div>
           </div>
         </div>
+        
+        {/* Animated Icon Background */}
+        <UserCircle2 className="absolute -bottom-10 -right-10 w-48 h-48 text-white/10 group-hover:rotate-12 group-hover:scale-110 transition-all duration-1000 pointer-events-none" />
       </section>
 
       <section className="mt-8 grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
@@ -545,18 +676,53 @@ export default function MyAccount() {
                 A partir do painel da sua conta, voce pode visualizar seus pedidos recentes, acessar suas matrizes compradas,
                 gerenciar seus enderecos e editar os detalhes da sua conta.
               </p>
-              <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-500">Pedidos</p>
-                  <p className="text-2xl font-black text-slate-900 mt-2">{orders.length}</p>
+              <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div className="group relative overflow-hidden rounded-3xl bg-blue-50 border border-blue-100 p-6 transition-all hover:shadow-xl hover:-translate-y-1">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2"></div>
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-blue-600 text-white rounded-2xl shadow-lg shadow-blue-200">
+                      <ShoppingBag className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-widest text-blue-600/70">Pedidos</p>
+                      <p className="text-3xl font-black text-slate-900 mt-1">{orders.length}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => handleMenuClick('orders')} className="mt-4 w-full py-2 bg-white/50 border border-blue-100 rounded-xl text-[10px] font-black text-blue-700 uppercase tracking-widest hover:bg-white transition-colors">
+                    Ver Histórico
+                  </button>
                 </div>
-                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-500">Matrizes compradas</p>
-                  <p className="text-2xl font-black text-slate-900 mt-2">{downloads.length}</p>
+
+                <div className="group relative overflow-hidden rounded-3xl bg-emerald-50 border border-emerald-100 p-6 transition-all hover:shadow-xl hover:-translate-y-1">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-600/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2"></div>
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-lg shadow-emerald-200">
+                      <Download className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-widest text-emerald-600/70">Arquivos</p>
+                      <p className="text-3xl font-black text-slate-900 mt-1">{downloads.length}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => handleMenuClick('downloads')} className="mt-4 w-full py-2 bg-white/50 border border-emerald-100 rounded-xl text-[10px] font-black text-emerald-700 uppercase tracking-widest hover:bg-white transition-colors">
+                    Baixar Matrizes
+                  </button>
                 </div>
-                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                  <p className="text-[11px] font-black uppercase tracking-widest text-slate-500">Favoritos</p>
-                  <p className="text-2xl font-black text-slate-900 mt-2">{favorites.length}</p>
+
+                <div className="group relative overflow-hidden rounded-3xl bg-rose-50 border border-rose-100 p-6 transition-all hover:shadow-xl hover:-translate-y-1">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-rose-600/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2"></div>
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-rose-600 text-white rounded-2xl shadow-lg shadow-rose-200">
+                      <Heart className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-widest text-rose-600/70">Favoritos</p>
+                      <p className="text-3xl font-black text-slate-900 mt-1">{favorites.length}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => handleMenuClick('wishlist')} className="mt-4 w-full py-2 bg-white/50 border border-rose-100 rounded-xl text-[10px] font-black text-rose-700 uppercase tracking-widest hover:bg-white transition-colors">
+                    Ver Lista
+                  </button>
                 </div>
               </div>
             </div>
@@ -709,7 +875,7 @@ export default function MyAccount() {
               ) : (
                 <div className="space-y-3">
                   {downloads.map((item) => (
-                    <div key={item.download_id} className="rounded-xl border border-slate-100 p-4 bg-slate-50 flex flex-col md:flex-row md:items-center gap-4">
+                      <div key={item.download_id} className="rounded-xl border border-slate-100 p-4 bg-slate-50 flex flex-col md:flex-row md:items-center gap-4">
                       <div className="w-20 h-20 rounded-lg overflow-hidden bg-white border border-slate-200 shrink-0">
                         {item.product_image ? (
                           <img src={item.product_image} alt={item.product_name} className="w-full h-full object-cover" />
@@ -720,24 +886,29 @@ export default function MyAccount() {
 
                       <div className="flex-1 min-w-0">
                         <p className="font-black text-slate-900 truncate">{item.product_name}</p>
-                        <p className="text-xs text-slate-500 font-semibold mt-1">Expira em: Nunca</p>
+                        <p className="text-xs text-slate-500 font-semibold mt-1">Compra permanente</p>
                       </div>
 
                       <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => item.file_path && window.open(item.file_path, '_blank')}
-                          disabled={!item.file_path}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black disabled:opacity-40"
+                        <a
+                          href={`/api/customer/download-file?path=${encodeURIComponent(item.file_path || '')}`}
+                          download
+                          onClick={(e) => { if (!item.file_path) e.preventDefault(); }}
+                          className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-white text-xs font-black transition-all hover:scale-105 active:scale-95 ${
+                            item.file_path ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-300 cursor-not-allowed'
+                          }`}
                         >
-                          <Download className="w-4 h-4" /> Baixar Matriz
-                        </button>
-                        <button
-                          onClick={() => item.production_sheet && window.open(item.production_sheet, '_blank')}
-                          disabled={!item.production_sheet}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-600 text-white text-xs font-black disabled:opacity-40"
-                        >
-                          <FileText className="w-4 h-4" /> Baixar PDF
-                        </button>
+                          <Download className="w-4 h-4" /> Baixar Matriz (ZIP)
+                        </a>
+                        {item.production_sheet && (
+                          <a
+                            href={item.production_sheet}
+                            download
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-black transition-all hover:scale-105 active:scale-95"
+                          >
+                            <FileText className="w-4 h-4" /> Baixar PDF
+                          </a>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -747,47 +918,21 @@ export default function MyAccount() {
           )}
 
           {activeTab === 'address' && (
-            <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 shadow-sm">
-              <h2 className="text-xl font-black text-slate-900 mb-4">Endereco</h2>
-              <form onSubmit={handleAddressSubmit} className="space-y-6">
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                  <div className="rounded-xl border border-slate-100 p-4 bg-slate-50 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-black text-slate-900">Endereco de cobranca</h3>
-                      <span className="text-[11px] font-black text-blue-700">Editar endereco</span>
-                    </div>
-                    <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="Endereco" value={billingAddress.address} onChange={(e) => setBillingAddress((prev) => ({ ...prev, address: e.target.value }))} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="Cidade" value={billingAddress.city} onChange={(e) => setBillingAddress((prev) => ({ ...prev, city: e.target.value }))} />
-                      <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="Estado" value={billingAddress.state} onChange={(e) => setBillingAddress((prev) => ({ ...prev, state: e.target.value }))} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="CEP" value={billingAddress.zip} onChange={(e) => setBillingAddress((prev) => ({ ...prev, zip: e.target.value }))} />
-                      <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="Pais" value={billingAddress.country} onChange={(e) => setBillingAddress((prev) => ({ ...prev, country: e.target.value }))} />
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-100 p-4 bg-slate-50 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-black text-slate-900">Endereco de entrega</h3>
-                      <span className="text-[11px] font-black text-blue-700">Editar endereco</span>
-                    </div>
-                    <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="Endereco" value={shippingAddress.address} onChange={(e) => setShippingAddress((prev) => ({ ...prev, address: e.target.value }))} />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="Cidade" value={shippingAddress.city} onChange={(e) => setShippingAddress((prev) => ({ ...prev, city: e.target.value }))} />
-                      <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="Estado" value={shippingAddress.state} onChange={(e) => setShippingAddress((prev) => ({ ...prev, state: e.target.value }))} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="CEP" value={shippingAddress.zip} onChange={(e) => setShippingAddress((prev) => ({ ...prev, zip: e.target.value }))} />
-                      <input className="w-full rounded-lg bg-white border border-slate-200 px-3 py-2 text-sm" placeholder="Pais" value={shippingAddress.country} onChange={(e) => setShippingAddress((prev) => ({ ...prev, country: e.target.value }))} />
-                    </div>
-                  </div>
+            <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 md:p-8 shadow-sm">
+              <h2 className="text-xl font-black text-slate-900 mb-6">Meu Endereço</h2>
+              <form onSubmit={handleAddressSubmit} className="max-w-2xl space-y-6">
+                <div className="rounded-2xl border border-slate-100 p-6 bg-slate-50/50 space-y-6">
+                  <AddressFormBlock
+                    prefix="billing"
+                    address={billingAddress}
+                    setAddress={setBillingAddress}
+                  />
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <button type="submit" disabled={savingAddresses} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-black uppercase tracking-wider disabled:opacity-60">
+                  <button type="submit" disabled={savingAddresses} className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-blue-600 text-white text-xs font-black uppercase tracking-wider disabled:opacity-60 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100">
                     {savingAddresses ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                    Salvar enderecos
+                    Salvar Alterações
                   </button>
                   {addressMessage && <p className="text-xs font-bold text-slate-600">{addressMessage}</p>}
                 </div>
@@ -798,23 +943,41 @@ export default function MyAccount() {
           {activeTab === 'profile' && (
             <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 shadow-sm space-y-8">
               <div>
-                <h2 className="text-xl font-black text-slate-900 mb-4">Perfil</h2>
-                <form onSubmit={handleProfileSubmit} className="space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nome" value={profileForm.first_name} onChange={(e) => setProfileForm((prev) => ({ ...prev, first_name: e.target.value }))} />
-                    <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="Sobrenome" value={profileForm.last_name} onChange={(e) => setProfileForm((prev) => ({ ...prev, last_name: e.target.value }))} />
+                <h2 className="text-xl font-black text-slate-900 mb-6">Perfil</h2>
+                <form onSubmit={handleProfileSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Nome</label>
+                      <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="Seu nome" value={profileForm.first_name || ''} onChange={(e) => setProfileForm((prev) => ({ ...prev, first_name: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Sobrenome</label>
+                      <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="Seu sobrenome" value={profileForm.last_name || ''} onChange={(e) => setProfileForm((prev) => ({ ...prev, last_name: e.target.value }))} />
+                    </div>
                   </div>
-                  <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="Nome de exibicao" value={profileForm.display_name} onChange={(e) => setProfileForm((prev) => ({ ...prev, display_name: e.target.value }))} />
-                  <input type="email" className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="E-mail" value={profileForm.email} onChange={(e) => setProfileForm((prev) => ({ ...prev, email: e.target.value }))} />
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="Telefone" value={profileForm.phone} onChange={(e) => setProfileForm((prev) => ({ ...prev, phone: e.target.value }))} />
-                    <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="CPF" value={profileForm.cpf} onChange={(e) => setProfileForm((prev) => ({ ...prev, cpf: e.target.value }))} />
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Nome de Exibição</label>
+                    <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="Como quer ser chamado" value={profileForm.display_name || ''} onChange={(e) => setProfileForm((prev) => ({ ...prev, display_name: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">E-mail</label>
+                    <input type="email" className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="seu@email.com" value={profileForm.email || ''} onChange={(e) => setProfileForm((prev) => ({ ...prev, email: e.target.value }))} />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Telefone / WhatsApp</label>
+                      <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="(11) 99999-9999" value={profileForm.phone || ''} onChange={(e) => setProfileForm((prev) => ({ ...prev, phone: e.target.value }))} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">CPF</label>
+                      <input className="w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm" placeholder="000.000.000-00" value={profileForm.cpf || ''} onChange={(e) => setProfileForm((prev) => ({ ...prev, cpf: e.target.value }))} />
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-4 pt-2">
                     <button type="submit" disabled={savingProfile} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-black uppercase tracking-wider disabled:opacity-60">
                       {savingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                      Salvar alteracoes
+                      Salvar Alterações
                     </button>
                     {profileMessage && <p className="text-xs font-bold text-slate-600">{profileMessage}</p>}
                   </div>
@@ -826,21 +989,21 @@ export default function MyAccount() {
                 <form onSubmit={handlePasswordSubmit} className="space-y-3">
                   <PasswordInput
                     label="Senha atual"
-                    value={passwordForm.current_password}
+                    value={passwordForm.current_password || ''}
                     show={showPassword.current}
                     onToggle={() => setShowPassword((prev) => ({ ...prev, current: !prev.current }))}
                     onChange={(value) => setPasswordForm((prev) => ({ ...prev, current_password: value }))}
                   />
                   <PasswordInput
                     label="Nova senha"
-                    value={passwordForm.new_password}
+                    value={passwordForm.new_password || ''}
                     show={showPassword.next}
                     onToggle={() => setShowPassword((prev) => ({ ...prev, next: !prev.next }))}
                     onChange={(value) => setPasswordForm((prev) => ({ ...prev, new_password: value }))}
                   />
                   <PasswordInput
                     label="Confirmar nova senha"
-                    value={passwordForm.confirm_new_password}
+                    value={passwordForm.confirm_new_password || ''}
                     show={showPassword.confirm}
                     onToggle={() => setShowPassword((prev) => ({ ...prev, confirm: !prev.confirm }))}
                     onChange={(value) => setPasswordForm((prev) => ({ ...prev, confirm_new_password: value }))}
@@ -874,8 +1037,19 @@ export default function MyAccount() {
                   {favorites.map((fav) => {
                     const price = Number(fav.sale_price ?? fav.price ?? 0);
                     return (
-                      <div key={fav.product_id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex flex-col">
-                        <div className="aspect-[4/3] rounded-lg overflow-hidden bg-white border border-slate-100">
+                      <div key={fav.product_id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex flex-col relative group">
+                        <button
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            await toggleFavorite(fav.product_id, fav.name);
+                            setFavorites(prev => prev.filter(f => f.product_id !== fav.product_id));
+                          }}
+                          className="absolute top-5 right-5 z-20 w-8 h-8 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center text-red-500 hover:scale-110 hover:bg-white transition-all shadow-sm opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                          title="Remover dos favoritos"
+                        >
+                          <Heart className="w-4 h-4 fill-current" />
+                        </button>
+                        <div className="aspect-[4/3] rounded-lg overflow-hidden bg-white border border-slate-100 relative">
                           {fav.image ? <img src={fav.image} alt={fav.name} className="w-full h-full object-cover" /> : null}
                         </div>
                         <p className="mt-3 font-black text-slate-900 text-sm line-clamp-2">{fav.name}</p>
@@ -895,7 +1069,172 @@ export default function MyAccount() {
           )}
         </section>
       </section>
+
+      {/* Modal de Crop/Zoom da Foto */}
+      {showCropModal && selectedImage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-300">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-lg font-black text-slate-900">Ajustar Foto de Perfil</h3>
+              <button onClick={() => setShowCropModal(false)} className="text-slate-400 hover:text-slate-600">
+                <LogOut className="w-5 h-5 rotate-180" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              {/* Área de Visualização */}
+              <div 
+                className="relative aspect-square w-full bg-slate-100 rounded-2xl overflow-hidden cursor-move touch-none"
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+              >
+                <div 
+                  className="absolute inset-0 flex items-center justify-center transition-transform duration-75"
+                  style={{
+                    transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
+                  }}
+                >
+                  <img src={selectedImage} alt="Preview" className="max-w-none w-full h-auto" draggable={false} />
+                </div>
+                {/* Overlay de Círculo Guia */}
+                <div className="absolute inset-0 border-[40px] border-black/40 pointer-events-none">
+                   <div className="w-full h-full border-2 border-white/50 rounded-full shadow-[0_0_0_9999px_rgba(0,0,0,0.2)]"></div>
+                </div>
+              </div>
+
+              {/* Slider de Zoom */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-400">
+                  <span>Zoom</span>
+                  <span>{Math.round(zoom * 100)}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0.5" 
+                  max="3" 
+                  step="0.1" 
+                  value={zoom} 
+                  onChange={(e) => setZoom(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer accent-blue-600"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowCropModal(false)}
+                  className="flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={confirmAvatarUpload}
+                  disabled={uploadingAvatar}
+                  className="flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  {uploadingAvatar ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Salvar Foto
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+
+
+function AddressFormBlock({
+  prefix,
+  address,
+  setAddress,
+}: {
+  prefix: string;
+  address: AddressForm;
+  setAddress: React.Dispatch<React.SetStateAction<AddressForm>>;
+}) {
+  const [loadingCep, setLoadingCep] = React.useState(false);
+
+  const handleCepBlur = async (cep: string) => {
+    const cleaned = cep.replace(/\D/g, '');
+    if (cleaned.length !== 8) return;
+    setLoadingCep(true);
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${cleaned}/json/`);
+      const data = await res.json();
+      if (data && !data.erro) {
+        setAddress(prev => ({
+          ...prev,
+          address: data.logradouro || prev.address,
+          city: data.localidade || prev.city,
+          state: data.uf || prev.state,
+          country: 'Brasil',
+        }));
+        // Foca no campo número após preencher o CEP
+        const numInput = document.getElementById(`${prefix}-number`);
+        if (numInput) numInput.focus();
+      }
+    } catch { /* silencioso */ }
+    finally { setLoadingCep(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="relative">
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">CEP</label>
+          <div className="flex gap-2">
+            <input
+              id={`${prefix}-zip`}
+              className="flex-1 rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all"
+              placeholder="00000-000"
+              value={address.zip || ''}
+              onChange={(e) => setAddress(prev => ({ ...prev, zip: e.target.value }))}
+              onBlur={(e) => handleCepBlur(e.target.value)}
+              maxLength={9}
+            />
+            {loadingCep && (
+              <div className="flex items-center px-2 text-blue-500">
+                <Loader2 className="w-4 h-4 animate-spin" />
+              </div>
+            )}
+          </div>
+        </div>
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Logradouro / Rua</label>
+          <input className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" placeholder="Ex: Av. Brasil" value={address.address || ''} onChange={(e) => setAddress(prev => ({ ...prev, address: e.target.value }))} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Número</label>
+          <input id={`${prefix}-number`} className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" placeholder="123" value={address.number || ''} onChange={(e) => setAddress(prev => ({ ...prev, number: e.target.value }))} />
+        </div>
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Complemento</label>
+          <input className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" placeholder="Apto, Bloco, etc." value={address.complement || ''} onChange={(e) => setAddress(prev => ({ ...prev, complement: e.target.value }))} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Cidade</label>
+          <input className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" placeholder="Cidade" value={address.city || ''} onChange={(e) => setAddress(prev => ({ ...prev, city: e.target.value }))} />
+        </div>
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Estado (UF)</label>
+          <input className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" placeholder="UF" value={address.state || ''} onChange={(e) => setAddress(prev => ({ ...prev, state: e.target.value }))} maxLength={2} />
+        </div>
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">País</label>
+          <input className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" placeholder="País" value={address.country || ''} onChange={(e) => setAddress(prev => ({ ...prev, country: e.target.value }))} />
+        </div>
+      </div>
+    </div>
   );
 }
 

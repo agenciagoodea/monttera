@@ -367,7 +367,10 @@ export default function AdminDashboard() {
         {/* Sidebar Section */}
         <div className="space-y-8">
           {/* Promo Card */}
-          <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[2.5rem] p-8 text-white shadow-2xl shadow-blue-500/40 relative overflow-hidden group">
+          <div 
+            className="rounded-[2.5rem] p-8 text-white shadow-2xl relative overflow-hidden group"
+            style={{ backgroundColor: 'var(--brand-primary, #2563eb)' }}
+          >
             <div className="relative z-10">
               <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mb-6">
                 <CheckCircle2 className="w-6 h-6 text-white" />
@@ -377,13 +380,14 @@ export default function AdminDashboard() {
               <div className="flex flex-col gap-3">
                 <Link 
                   to="/admin/produtos/novo"
-                  className="flex items-center justify-center bg-white text-blue-600 px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-blue-50 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-blue-900/20"
+                  className="flex items-center justify-center bg-white px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-white/90 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl"
+                  style={{ color: 'var(--brand-primary, #2563eb)' }}
                 >
                   Criar Produto
                 </Link>
                 <Link 
                   to="/admin/relatorios"
-                  className="flex items-center justify-center bg-blue-500/30 text-white border border-white/20 px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-blue-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                  className="flex items-center justify-center bg-black/10 text-white border border-white/20 px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-black/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
                 >
                   Ver Relatórios
                 </Link>

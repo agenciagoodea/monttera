@@ -44,7 +44,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Sidebar Admin */}
       <aside className="w-72 bg-white border-r border-slate-200 flex flex-col fixed inset-y-0 shadow-sm">
         <div className="p-8 pb-10">
-          <Link to="/admin" className="flex flex-col items-center group">
+          <Link to="/" className="flex flex-col items-center group">
             {settings.logo_url ? (
               <img 
                 src={settings.logo_url} 
