@@ -62,7 +62,9 @@
     "tailwindcss": "^4.1.14"
   },
   "overrides": {
-    "core-js": "^3.38.1",
+    "babel-runtime": {
+      "core-js": "2.6.12"
+    },
     "node-domexception": "^1.0.0",
     "protobufjs": "^7.4.0",
     "uuid": "^9.0.1"
