@@ -434,6 +434,39 @@ function resolveEmailVerificationRequired() {
   return raw === '1' || raw === 'true' || raw === 'yes';
 }
 
+const DOWNLOAD_ALLOWED_STATUSES = [
+  'paid',
+  'completed',
+  'success',
+  'pago',
+  'wc-completed',
+  'wc-processing',
+  'processing',
+] as const;
+
+function getDownloadStatusPlaceholders() {
+  return DOWNLOAD_ALLOWED_STATUSES.map(() => '?').join(', ');
+}
+
+function canUserAccessDownloads(userId: number, userEmail: string, emailVerifiedAt: unknown) {
+  if (!resolveEmailVerificationRequired()) return true;
+  if (emailVerifiedAt) return true;
+
+  const normalizedEmail = String(userEmail || '').trim().toLowerCase();
+  const statusPlaceholders = getDownloadStatusPlaceholders();
+  const hasPaidOrder = db.get(
+    `SELECT COUNT(1) AS total
+     FROM orders o
+     WHERE (o.user_id = ? OR (o.user_id IS NULL AND LOWER(COALESCE(o.customer_email, '')) = ?))
+       AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})`,
+    userId,
+    normalizedEmail,
+    ...DOWNLOAD_ALLOWED_STATUSES,
+  ) as any;
+
+  return Number(hasPaidOrder?.total || 0) > 0;
+}
+
 function buildBaseAppUrl(req: express.Request) {
   const settings = loadSettingsMap(['app_url']);
   return process.env.APP_URL || settings.app_url || `${req.protocol}://${req.get('host')}`;
@@ -2153,8 +2186,8 @@ async function startServer() {
           u.email,
           u.first_name,
           u.last_name,
-          u.phone,
-          u.cpf,
+          c.phone,
+          c.cpf,
           u.avatar_url,
           c.billing_address,
           c.billing_city,
@@ -2317,7 +2350,7 @@ async function startServer() {
       if (!freshUser) {
         return res.status(401).json({ error: 'Usuario nao encontrado' });
       }
-      if (resolveEmailVerificationRequired() && !freshUser.email_verified_at) {
+      if (!canUserAccessDownloads(Number(freshUser.id), String(freshUser.email || ''), freshUser.email_verified_at)) {
         return res.status(403).json({ error: 'Confirme seu e-mail para acessar downloads.', code: 'EMAIL_NOT_VERIFIED' });
       }
 
@@ -2364,16 +2397,17 @@ async function startServer() {
       }
 
       const placeholders = filePathCandidates.map(() => '?').join(', ');
+      const statusPlaceholders = getDownloadStatusPlaceholders();
       const ownedDownload = db.get(`
         SELECT oi.id AS order_item_id, f.file_path, f.file_name
         FROM orders o
         JOIN order_items oi ON oi.order_id = o.id
         JOIN product_files f ON f.product_id = oi.product_id
-        WHERE o.user_id = ?
-          AND o.status = 'paid'
+        WHERE (o.user_id = ? OR (o.user_id IS NULL AND LOWER(COALESCE(o.customer_email, '')) = ?))
+          AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})
           AND f.file_path IN (${placeholders})
         LIMIT 1
-      `, Number(user.id), ...filePathCandidates) as any;
+      `, Number(user.id), String(freshUser.email || '').trim().toLowerCase(), ...DOWNLOAD_ALLOWED_STATUSES, ...filePathCandidates) as any;
 
       if (!ownedDownload) {
         return res.status(403).json({ error: 'Download nao autorizado para este usuario.' });
@@ -2404,10 +2438,11 @@ async function startServer() {
       if (!freshUser) {
         return res.status(401).json({ error: 'Usuario nao encontrado' });
       }
-      if (resolveEmailVerificationRequired() && !freshUser.email_verified_at) {
+      if (!canUserAccessDownloads(Number(freshUser.id), String(freshUser.email || ''), freshUser.email_verified_at)) {
         return res.status(403).json({ error: 'Confirme seu e-mail para acessar downloads.', code: 'EMAIL_NOT_VERIFIED' });
       }
 
+      const statusPlaceholders = getDownloadStatusPlaceholders();
       const downloads = db.all(`
         SELECT
           oi.id AS download_id,
@@ -2423,12 +2458,12 @@ async function startServer() {
         JOIN orders o ON oi.order_id = o.id
         LEFT JOIN products p ON p.id = oi.product_id
         LEFT JOIN product_files f ON f.product_id = oi.product_id
-        WHERE o.user_id = ?
-          AND o.status = 'paid'
+        WHERE (o.user_id = ? OR (o.user_id IS NULL AND LOWER(COALESCE(o.customer_email, '')) = ?))
+          AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})
           AND f.file_path IS NOT NULL
           AND f.file_path <> ''
         ORDER BY o.created_at DESC, oi.id DESC
-      `, user.id) as any[];
+      `, user.id, String(freshUser.email || '').trim().toLowerCase(), ...DOWNLOAD_ALLOWED_STATUSES) as any[];
 
       return res.json(downloads);
     } catch (error) {
@@ -3992,17 +4027,18 @@ async function startServer() {
       if (categoryIds.length > 0) {
         const placeholders = categoryIds.map(() => '?').join(', ');
         relatedRows = db.all(`
-          SELECT DISTINCT p.*
+          SELECT DISTINCT
+            p.*,
+            CASE
+              WHEN p.category_id IN (${placeholders}) OR pcr.category_id IN (${placeholders}) THEN 2
+              ELSE 0
+            END AS relevance_score
           FROM products p
           LEFT JOIN product_category_relations pcr ON pcr.product_id = p.id
           WHERE p.id != ?
             AND p.status = 'active'
-            AND (
-              p.category_id IN (${placeholders})
-              OR pcr.category_id IN (${placeholders})
-            )
-          ORDER BY p.created_at DESC, p.id DESC
-        `, product.id, ...categoryIds, ...categoryIds) as any[];
+          ORDER BY relevance_score DESC, p.created_at DESC, p.id DESC
+        `, ...categoryIds, ...categoryIds, product.id) as any[];
       } else {
         relatedRows = db.all(`
           SELECT p.*

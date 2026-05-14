@@ -238,13 +238,12 @@ export default function MyAccount() {
           parseResponse(favoritesRes),
         ]);
 
-        if ([accountRes, ordersRes, downloadsRes, favoritesRes].some((r) => !r.ok)) {
+        if (!accountRes.ok || !ordersRes.ok || !favoritesRes.ok) {
           throw new Error(
             (accountData as any)?.error ||
             (ordersData as any)?.error ||
-            (downloadsData as any)?.error ||
             (favoritesData as any)?.error ||
-            'Não foi possível carregar os dados da conta.'
+            'N??o foi poss??vel carregar os dados da conta.'
           );
         }
 
@@ -253,7 +252,15 @@ export default function MyAccount() {
         const userData: AccountUser | null = accountData?.user || null;
         setAccountUser(userData);
         setOrders(Array.isArray(ordersData) ? ordersData : []);
-        setDownloads(Array.isArray(downloadsData) ? downloadsData : []);
+        if (downloadsRes.ok) {
+          setDownloads(Array.isArray(downloadsData) ? downloadsData : []);
+        } else {
+          setDownloads([]);
+          const downloadError =
+            (downloadsData as any)?.error ||
+            'N??o foi poss??vel carregar os downloads agora.';
+          setAccountMessage(downloadError);
+        }
         setFavorites(Array.isArray(favoritesData?.favorites) ? favoritesData.favorites : []);
 
         if (userData) {

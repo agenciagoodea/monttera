@@ -4,6 +4,16 @@ import { useAppData } from '../contexts/AppDataContext';
 
 export default function Footer() {
   const { settings } = useAppData();
+  const normalizeExternalUrl = (url?: string) => {
+    const value = String(url || '').trim();
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value)) return value;
+    return `https://${value.replace(/^\/+/, '')}`;
+  };
+
+  const facebookUrl = normalizeExternalUrl(settings.facebook_url);
+  const instagramUrl = normalizeExternalUrl(settings.instagram_url);
+  const youtubeUrl = normalizeExternalUrl(settings.youtube_url);
 
   return (
     <footer className="bg-primary text-white pt-24 pb-12 px-6 md:px-10 mt-32 relative overflow-hidden">
@@ -37,18 +47,18 @@ export default function Footer() {
             </p>
 
             <div className="flex items-center gap-4">
-              {settings.facebook_url && (
-                <a href={settings.facebook_url} target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-2xl bg-white/10 text-white flex items-center justify-center hover:bg-white hover:text-primary transition-all duration-300 shadow-lg border border-white/5">
+              {facebookUrl && (
+                <a href={facebookUrl} target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-2xl bg-white/10 text-white flex items-center justify-center hover:bg-white hover:text-primary transition-all duration-300 shadow-lg border border-white/5">
                   <Facebook className="w-6 h-6" />
                 </a>
               )}
-              {settings.instagram_url && (
-                <a href={settings.instagram_url} target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-2xl bg-white/10 text-white flex items-center justify-center hover:bg-white hover:text-primary transition-all duration-300 shadow-lg border border-white/5">
+              {instagramUrl && (
+                <a href={instagramUrl} target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-2xl bg-white/10 text-white flex items-center justify-center hover:bg-white hover:text-primary transition-all duration-300 shadow-lg border border-white/5">
                   <Instagram className="w-6 h-6" />
                 </a>
               )}
-              {settings.youtube_url && (
-                <a href={settings.youtube_url} target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-2xl bg-white/10 text-white flex items-center justify-center hover:bg-white hover:text-primary transition-all duration-300 shadow-lg border border-white/5">
+              {youtubeUrl && (
+                <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" className="w-12 h-12 rounded-2xl bg-white/10 text-white flex items-center justify-center hover:bg-white hover:text-primary transition-all duration-300 shadow-lg border border-white/5">
                   <Youtube className="w-6 h-6" />
                 </a>
               )}

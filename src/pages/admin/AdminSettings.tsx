@@ -16,6 +16,7 @@ import {
   Send,
   Wifi,
   FileText,
+  Activity,
   Plus,
   Trash2,
 } from 'lucide-react';
