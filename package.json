@@ -17,7 +17,12 @@
     "lint": "node ./node_modules/typescript/bin/tsc --noEmit",
     "start": "node dist/server.cjs",
     "start:dev": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs server.ts",
-    "verify:build": "npm run build && node -e \"const fs=require('fs');if(!fs.existsSync('dist/server.cjs')){throw new Error('dist/server.cjs nao foi gerado')}\""
+    "verify:build": "npm run build && node -e \"const fs=require('fs');if(!fs.existsSync('dist/server.cjs')){throw new Error('dist/server.cjs nao foi gerado')}\"",
+    "doctor": "node ./scripts/doctor.mjs",
+    "doctor:strict": "node ./scripts/doctor.mjs --strict",
+    "doctor:startup": "node ./scripts/doctor.mjs --startup",
+    "doctor:startup:strict": "node ./scripts/doctor.mjs --startup --strict",
+    "deploy:directadmin": "npm run doctor:strict && npm run build && npm run doctor:startup:strict"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
