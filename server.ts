@@ -1,4 +1,6 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+if (process.env.NODE_ENV !== 'production') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
@@ -14,6 +16,21 @@ import { sendEmail } from './src/server/mailer';
 import nodemailer from 'nodemailer';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
 import axios from 'axios';
+
+const isProduction = process.env.NODE_ENV === 'production';
+const EMAIL_VERIFICATION_TOKEN_TTL_HOURS = Number(process.env.EMAIL_VERIFICATION_TOKEN_TTL_HOURS || '24');
+const LOGIN_ATTEMPT_WINDOW_MINUTES = Number(process.env.LOGIN_ATTEMPT_WINDOW_MINUTES || '15');
+const LOGIN_ATTEMPT_MAX_FAILS = Number(process.env.LOGIN_ATTEMPT_MAX_FAILS || '7');
+
+function getAuthCookieOptions(req: express.Request): express.CookieOptions {
+  const secure = isProduction || req.secure || req.headers['x-forwarded-proto'] === 'https';
+  return {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  };
+}
 
 // Simple in-memory cache for extreme optimization
 class CacheProvider {
@@ -267,6 +284,237 @@ function isProductWithinNewWindow(createdAt: any, days: number) {
   return ageDays <= days;
 }
 
+function extractMercadoPagoSignature(signatureHeader: string) {
+  const parts = String(signatureHeader || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const values: Record<string, string> = {};
+  parts.forEach((part) => {
+    const idx = part.indexOf('=');
+    if (idx > 0) {
+      values[part.slice(0, idx).trim()] = part.slice(idx + 1).trim();
+    }
+  });
+  return {
+    ts: values.ts || '',
+    v1: values.v1 || '',
+  };
+}
+
+function verifyMercadoPagoWebhookSignature(req: express.Request, payload: any) {
+  const settings = loadSettingsMap(['mp_webhook_secret']);
+  const secret = String(process.env.MERCADOPAGO_WEBHOOK_SECRET || settings.mp_webhook_secret || '').trim();
+  if (!secret) {
+    return { ok: true, reason: 'secret_not_configured' };
+  }
+
+  const signatureHeader = String(req.headers['x-signature'] || '');
+  const requestId = String(req.headers['x-request-id'] || '');
+  const dataId = String(payload?.data?.id || payload?.id || '');
+  if (!signatureHeader || !requestId || !dataId) {
+    return { ok: false, reason: 'missing_signature_headers' };
+  }
+
+  const { ts, v1 } = extractMercadoPagoSignature(signatureHeader);
+  if (!ts || !v1) {
+    return { ok: false, reason: 'invalid_signature_format' };
+  }
+
+  const manifest = `id:${dataId};request-id:${requestId};ts:${ts};`;
+  const expected = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
+  if (expected !== v1) {
+    return { ok: false, reason: 'signature_mismatch' };
+  }
+
+  return { ok: true, reason: 'verified' };
+}
+
+function isWebhookAlreadyProcessed(provider: string, eventId: string) {
+  if (!eventId) return false;
+  const row = db.get('SELECT id FROM processed_webhooks WHERE provider = ? AND event_id = ? LIMIT 1', provider, eventId) as any;
+  return Boolean(row?.id);
+}
+
+function markWebhookProcessed(provider: string, eventId: string, resourceId?: string | null) {
+  if (!eventId) return;
+  db.run(
+    `INSERT IGNORE INTO processed_webhooks (provider, event_id, resource_id)
+     VALUES (?, ?, ?)`,
+    provider,
+    eventId,
+    resourceId || null,
+  );
+}
+
+async function verifyPayPalWebhookSignature(req: express.Request, payload: any) {
+  const s = loadSettingsMap([
+    'paypal_mode',
+    'paypal_sandbox_client_id',
+    'paypal_sandbox_client_secret',
+    'paypal_production_client_id',
+    'paypal_production_client_secret',
+    'paypal_webhook_id',
+  ]);
+  const mode = (process.env.PAYPAL_MODE || s.paypal_mode || 'sandbox').toLowerCase();
+  const clientId = mode === 'production'
+    ? (process.env.PAYPAL_PRODUCTION_CLIENT_ID || s.paypal_production_client_id || '')
+    : (process.env.PAYPAL_SANDBOX_CLIENT_ID || s.paypal_sandbox_client_id || '');
+  const clientSecret = mode === 'production'
+    ? (process.env.PAYPAL_PRODUCTION_CLIENT_SECRET || s.paypal_production_client_secret || '')
+    : (process.env.PAYPAL_SANDBOX_CLIENT_SECRET || s.paypal_sandbox_client_secret || '');
+  const webhookId = process.env.PAYPAL_WEBHOOK_ID || s.paypal_webhook_id || '';
+
+  if (!webhookId) {
+    return { ok: true, reason: 'webhook_id_not_configured' };
+  }
+  if (!clientId || !clientSecret) {
+    return { ok: false, reason: 'paypal_credentials_not_configured' };
+  }
+
+  const transmissionId = String(req.headers['paypal-transmission-id'] || '');
+  const transmissionTime = String(req.headers['paypal-transmission-time'] || '');
+  const certUrl = String(req.headers['paypal-cert-url'] || '');
+  const authAlgo = String(req.headers['paypal-auth-algo'] || '');
+  const transmissionSig = String(req.headers['paypal-transmission-sig'] || '');
+
+  if (!transmissionId || !transmissionTime || !certUrl || !authAlgo || !transmissionSig) {
+    return { ok: false, reason: 'missing_paypal_headers' };
+  }
+
+  try {
+    const baseUrl = mode === 'production'
+      ? 'https://api-m.paypal.com'
+      : 'https://api-m.sandbox.paypal.com';
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const tokenResponse = await axios.post(
+      `${baseUrl}/v1/oauth2/token`,
+      'grant_type=client_credentials',
+      {
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      },
+    );
+    const accessToken = String(tokenResponse?.data?.access_token || '');
+    if (!accessToken) {
+      return { ok: false, reason: 'paypal_access_token_unavailable' };
+    }
+
+    const verifyPayload = {
+      auth_algo: authAlgo,
+      cert_url: certUrl,
+      transmission_id: transmissionId,
+      transmission_sig: transmissionSig,
+      transmission_time: transmissionTime,
+      webhook_id: webhookId,
+      webhook_event: payload,
+    };
+    const verification = await axios.post(
+      `${baseUrl}/v1/notifications/verify-webhook-signature`,
+      verifyPayload,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
+    const status = String(verification?.data?.verification_status || '').toUpperCase();
+    return { ok: status === 'SUCCESS', reason: status || 'unknown' };
+  } catch (error: any) {
+    return { ok: false, reason: error?.message || 'verification_error' };
+  }
+}
+
+function resolveEmailVerificationRequired() {
+  const settings = loadSettingsMap(['email_verification_required']);
+  const raw = String(settings.email_verification_required || 'true').toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function buildBaseAppUrl(req: express.Request) {
+  const settings = loadSettingsMap(['app_url']);
+  return process.env.APP_URL || settings.app_url || `${req.protocol}://${req.get('host')}`;
+}
+
+function sha256(value: string) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function createEmailVerificationToken(userId: number, email: string) {
+  const rawToken = crypto.randomBytes(48).toString('hex');
+  const tokenHash = sha256(rawToken);
+  db.run('UPDATE email_verification_tokens SET used = 1 WHERE user_id = ? AND used = 0', userId);
+  db.run(
+    `INSERT INTO email_verification_tokens (user_id, email, token_hash, expires_at, used)
+     VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), 0)`,
+    userId,
+    email,
+    tokenHash,
+    EMAIL_VERIFICATION_TOKEN_TTL_HOURS,
+  );
+  return rawToken;
+}
+
+async function sendVerificationEmail(user: { id: number; name: string; email: string }, req: express.Request) {
+  const rawToken = createEmailVerificationToken(Number(user.id), String(user.email).trim().toLowerCase());
+  const appUrl = buildBaseAppUrl(req);
+  const verifyUrl = `${appUrl}/api/auth/verify-email?token=${encodeURIComponent(rawToken)}`;
+  return sendEmail({
+    to: user.email,
+    templateKey: 'email_verification',
+    variables: {
+      name: user.name || 'Cliente',
+      email: user.email,
+      verify_url: verifyUrl,
+      expires_in: String(EMAIL_VERIFICATION_TOKEN_TTL_HOURS),
+    },
+  });
+}
+
+function getClientIp(req: express.Request) {
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const remote = req.socket?.remoteAddress || '';
+  return (xff || remote || 'unknown').slice(0, 64);
+}
+
+function getLoginAttemptStats(email: string, ip: string) {
+  const row = db.get(
+    `SELECT
+      SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS fail_count,
+      MAX(attempted_at) AS last_attempt_at
+     FROM login_attempts
+     WHERE attempted_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE)
+       AND (email = ? OR ip = ?)`,
+    LOGIN_ATTEMPT_WINDOW_MINUTES,
+    email,
+    ip,
+  ) as any;
+
+  return {
+    failCount: Number(row?.fail_count || 0),
+    lastAttemptAt: row?.last_attempt_at || null,
+  };
+}
+
+function recordLoginAttempt(email: string, ip: string, success: boolean) {
+  db.run(
+    'INSERT INTO login_attempts (email, ip, success) VALUES (?, ?, ?)',
+    email || null,
+    ip || null,
+    success ? 1 : 0,
+  );
+}
+
+function getUserById(userId: number) {
+  return db.get(
+    'SELECT id, name, email, role, status, email_verified_at FROM users WHERE id = ? LIMIT 1',
+    userId,
+  ) as any;
+}
+
 function initSettings() {
   const defaultSettings = {
     site_name: 'Digital Bordados',
@@ -279,12 +527,14 @@ function initSettings() {
     modo_operacao: 'sandbox',
     mp_public_key: '',
     mp_access_token: '',
+    mp_webhook_secret: '',
     mercadopago_public_key: '',
     mercadopago_access_token: '',
     new_badge_days: '20',
     smtp_from_name: '',
     smtp_from_email: '',
     matrix_request_team_email: '',
+    email_verification_required: 'true',
     app_url: 'https://digitalbordados.com.br',
     paypal_enabled: 'false',
     paypal_mode: 'sandbox',
@@ -401,8 +651,23 @@ async function startServer() {
 
   const app = express();
   const PORT = 3000;
+  app.set('trust proxy', 1);
 
-  app.use(cors());
+  const settingsForCors = loadSettingsMap(['app_url']);
+  const configuredAppUrl = String(process.env.APP_URL || settingsForCors.app_url || '').trim();
+  const localOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  const allowedOrigins = new Set<string>(localOrigins);
+  if (configuredAppUrl) allowedOrigins.add(configuredAppUrl);
+
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Origin not allowed by CORS'));
+    },
+    credentials: true,
+  }));
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ extended: true, limit: '15mb' }));
   app.use(cookieParser());
@@ -446,52 +711,75 @@ async function startServer() {
   });
 
   app.post('/api/auth/register', async (req, res) => {
-    const { firstName, lastName, email, password } = req.body;
-    
+    const { firstName, lastName, email, password } = req.body || {};
+
     if (!firstName || !lastName || !email || !password) {
-      return res.status(400).json({ error: 'Todos os campos sÃ£o obrigatÃ³rios' });
+      return res.status(400).json({ error: 'Todos os campos sao obrigatorios' });
     }
 
     try {
-      const name = `${firstName} ${lastName}`;
-      const hashedPassword = await hashPassword(password);
-      
+      const normalizedEmail = String(email).trim().toLowerCase();
+      const trimmedFirstName = String(firstName).trim();
+      const trimmedLastName = String(lastName).trim();
+      const name = `${trimmedFirstName} ${trimmedLastName}`.trim();
+      const hashedPassword = await hashPassword(String(password));
+      const verificationRequired = resolveEmailVerificationRequired();
+      const emailVerifiedAt = verificationRequired ? null : new Date().toISOString().slice(0, 19).replace('T', ' ');
+
       const userResult = db.run(`
-        INSERT INTO users (name, email, password, role) 
-        VALUES (?, ?, ?, 'customer')
-      `, name, email, hashedPassword);
-      
-      const userId = userResult.lastInsertRowid;
+        INSERT INTO users (name, email, password, role, email_verified_at)
+        VALUES (?, ?, ?, 'customer', ?)
+      `, name, normalizedEmail, hashedPassword, emailVerifiedAt);
 
-      // Inserir na tabela de detalhes do cliente
-      db.run(`
-        INSERT INTO customers (user_id) 
-        VALUES (?)
-      `, userId);
-      
-      const token = generateToken({ id: userId, email, type: 'customer', name });
-      res.cookie('auth_token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 });
+      const userId = Number(userResult.lastInsertRowid);
+      db.run('INSERT INTO customers (user_id) VALUES (?)', userId);
 
-      // Trigger welcome email
-      const settings = loadSettingsMap(['app_url', 'site_name']);
-      const appUrl = process.env.APP_URL || settings.app_url || 'https://digitalbordados.com.br';
+      const tokenPayload = {
+        id: userId,
+        email: normalizedEmail,
+        type: 'customer',
+        name,
+        role: 'customer',
+        email_verified: Boolean(emailVerifiedAt),
+      };
+      const token = generateToken(tokenPayload);
+      res.cookie('auth_token', token, getAuthCookieOptions(req));
+
+      const appUrl = buildBaseAppUrl(req);
       sendEmail({
-        to: email,
+        to: normalizedEmail,
         templateKey: 'user_welcome',
         variables: {
-          name: firstName,
-          email: email,
-          login_url: `${appUrl}/login`
-        }
-      }).catch(err => console.error('Failed to send welcome email:', err));
+          name: trimmedFirstName || name,
+          email: normalizedEmail,
+          login_url: `${appUrl}/login`,
+        },
+      }).catch((err) => console.error('Failed to send welcome email:', err));
 
-      res.json({ success: true, user: { id: userId, name, email, type: 'customer' } });
+      if (verificationRequired) {
+        sendVerificationEmail({ id: userId, name, email: normalizedEmail }, req).catch((err) =>
+          console.error('Failed to send verification email:', err),
+        );
+      }
+
+      return res.json({
+        success: true,
+        verification_required: verificationRequired,
+        user: {
+          id: userId,
+          name,
+          email: normalizedEmail,
+          type: 'customer',
+          role: 'customer',
+          email_verified: !verificationRequired,
+        },
+      });
     } catch (error: any) {
       if (error?.message?.includes('UNIQUE constraint failed') || error?.code === 'ER_DUP_ENTRY') {
-        return res.status(400).json({ error: 'Este e-mail jÃ¡ estÃ¡ cadastrado' });
+        return res.status(400).json({ error: 'Este e-mail ja esta cadastrado' });
       }
       console.error('Register error:', error);
-      res.status(500).json({ error: 'Erro ao criar conta' });
+      return res.status(500).json({ error: 'Erro ao criar conta' });
     }
   });
 
@@ -500,22 +788,34 @@ async function startServer() {
       const { email, password } = req.body || {};
       const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
       const normalizedPassword = typeof password === 'string' ? password : '';
+      const ip = getClientIp(req);
+      const verificationRequired = resolveEmailVerificationRequired();
 
       if (!normalizedEmail || !normalizedPassword) {
-        return res.status(400).json({ error: 'E-mail e senha são obrigatórios' });
+        return res.status(400).json({ error: 'E-mail e senha sao obrigatorios' });
+      }
+
+      const attemptStats = getLoginAttemptStats(normalizedEmail, ip);
+      if (attemptStats.failCount >= LOGIN_ATTEMPT_MAX_FAILS) {
+        return res.status(429).json({
+          error: 'Muitas tentativas invalidas. Aguarde alguns minutos e tente novamente.',
+          retry_in_minutes: LOGIN_ATTEMPT_WINDOW_MINUTES,
+        });
       }
 
       console.log(`Tentativa de login: ${normalizedEmail}`);
       const user = db.get('SELECT * FROM users WHERE email = ?', normalizedEmail) as any;
 
       if (!user) {
-        console.log(`Falha no login: Usuário não encontrado - ${normalizedEmail}`);
+        console.log(`Falha no login: Usuario nao encontrado - ${normalizedEmail}`);
+        recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(401).json({ error: 'E-mail ou senha incorretos' });
       }
 
       if (!user.password || typeof user.password !== 'string') {
-        console.error('Falha no login: usuário sem hash de senha válido', { userId: user.id, email: normalizedEmail });
-        return res.status(500).json({ error: 'Conta sem senha válida. Redefina a senha do usuário.' });
+        console.error('Falha no login: usuario sem hash de senha valido', { userId: user.id, email: normalizedEmail });
+        recordLoginAttempt(normalizedEmail, ip, false);
+        return res.status(500).json({ error: 'Conta sem senha valida. Redefina a senha do usuario.' });
       }
 
       let passwordIsValid = false;
@@ -523,19 +823,23 @@ async function startServer() {
         passwordIsValid = await comparePassword(normalizedPassword, user.password);
       } catch (compareError) {
         console.error('Erro ao validar senha:', compareError);
+        recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(500).json({ error: 'Erro ao validar credenciais' });
       }
 
       if (!passwordIsValid) {
         console.log(`Falha no login: Senha incorreta para ${normalizedEmail}`);
+        recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(401).json({ error: 'E-mail ou senha incorretos' });
       }
 
       if (user.status !== 'ativo' && user.status !== 'active') {
-        console.log(`Falha no login: Usuário inativo (${user.status}) - ${normalizedEmail}`);
-        return res.status(403).json({ error: 'Esta conta está inativa' });
+        console.log(`Falha no login: Usuario inativo (${user.status}) - ${normalizedEmail}`);
+        recordLoginAttempt(normalizedEmail, ip, false);
+        return res.status(403).json({ error: 'Esta conta esta inativa' });
       }
 
+      const isEmailVerified = Boolean(user.email_verified_at);
       const type = user.role === 'admin' ? 'user' : 'customer';
       const tokenPayload = {
         id: user.id,
@@ -543,12 +847,19 @@ async function startServer() {
         type,
         name: user.name,
         role: user.role,
+        email_verified: isEmailVerified,
       };
 
       console.log(`Login bem-sucedido: ${normalizedEmail} como ${type}`);
       const token = generateToken(tokenPayload);
-      res.cookie('auth_token', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 });
-      return res.json({ success: true, user: tokenPayload });
+      res.cookie('auth_token', token, getAuthCookieOptions(req));
+      recordLoginAttempt(normalizedEmail, ip, true);
+      return res.json({
+        success: true,
+        verification_required: verificationRequired,
+        needs_email_verification: verificationRequired && !isEmailVerified,
+        user: tokenPayload,
+      });
     } catch (error) {
       console.error('Login error:', error);
       return res.status(500).json({ error: 'Erro interno ao processar login' });
@@ -556,7 +867,11 @@ async function startServer() {
   });
 
   app.post('/api/auth/logout', (req, res) => {
-    res.clearCookie('auth_token');
+    res.clearCookie('auth_token', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isProduction || req.secure || req.headers['x-forwarded-proto'] === 'https',
+    });
     res.json({ success: true });
   });
 
@@ -572,13 +887,96 @@ async function startServer() {
 
     // Consulta o DB para retornar dados atualizados (incluindo avatar_url)
     try {
-      const fresh = db.get('SELECT id, name, email, role, avatar_url FROM users WHERE id = ?', Number(decoded.id)) as any;
+      const fresh = db.get('SELECT id, name, email, role, avatar_url, email_verified_at FROM users WHERE id = ?', Number(decoded.id)) as any;
       if (!fresh) return res.json({ user: null });
       const type = fresh.role === 'admin' ? 'user' : 'customer';
-      return res.json({ user: { id: fresh.id, name: fresh.name, email: fresh.email, type, role: fresh.role, avatar_url: fresh.avatar_url || null } });
+      return res.json({
+        user: {
+          id: fresh.id,
+          name: fresh.name,
+          email: fresh.email,
+          type,
+          role: fresh.role,
+          avatar_url: fresh.avatar_url || null,
+          email_verified: Boolean(fresh.email_verified_at),
+        },
+      });
     } catch {
       // fallback: retorna o token decodificado
       return res.json({ user: decoded });
+    }
+  });
+
+  app.post('/api/auth/resend-verification', async (req, res) => {
+    try {
+      const { email } = req.body || {};
+      const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+      if (!normalizedEmail) {
+        return res.status(400).json({ error: 'E-mail obrigatorio' });
+      }
+
+      const verificationRequired = resolveEmailVerificationRequired();
+      if (!verificationRequired) {
+        return res.json({ success: true, message: 'Verificacao de e-mail desativada nas configuracoes.' });
+      }
+
+      const user = db.get('SELECT id, name, email, status, email_verified_at FROM users WHERE email = ? LIMIT 1', normalizedEmail) as any;
+      if (!user) {
+        return res.json({ success: true });
+      }
+      if (user.status !== 'ativo' && user.status !== 'active') {
+        return res.status(403).json({ error: 'Conta inativa' });
+      }
+      if (user.email_verified_at) {
+        return res.json({ success: true, message: 'E-mail ja confirmado.' });
+      }
+
+      const result = await sendVerificationEmail({ id: Number(user.id), name: String(user.name || ''), email: normalizedEmail }, req);
+      if (!result.success) {
+        return res.status(500).json({ error: result.error || 'Falha ao reenviar e-mail de verificacao' });
+      }
+
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Resend verification error:', error);
+      return res.status(500).json({ error: 'Erro ao reenviar verificacao' });
+    }
+  });
+
+  app.get('/api/auth/verify-email', (req, res) => {
+    try {
+      const token = String(req.query.token || '').trim();
+      if (!token) {
+        return res.status(400).json({ success: false, error: 'Token ausente' });
+      }
+
+      const tokenHash = sha256(token);
+      const verification = db.get(
+        `SELECT *
+         FROM email_verification_tokens
+         WHERE token_hash = ?
+           AND used = 0
+           AND expires_at > NOW()
+         LIMIT 1`,
+        tokenHash,
+      ) as any;
+
+      if (!verification) {
+        return res.status(400).json({ success: false, error: 'Token invalido ou expirado' });
+      }
+
+      db.transaction(() => {
+        db.run(
+          'UPDATE users SET email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          Number(verification.user_id),
+        );
+        db.run('UPDATE email_verification_tokens SET used = 1 WHERE id = ?', Number(verification.id));
+      })();
+
+      return res.json({ success: true, message: 'E-mail confirmado com sucesso' });
+    } catch (error) {
+      console.error('Verify email error:', error);
+      return res.status(500).json({ success: false, error: 'Erro ao confirmar e-mail' });
     }
   });
 
@@ -1411,6 +1809,19 @@ async function startServer() {
       payment_method_id,
     } = req.body || {};
     const user = (req as any).user;
+    const freshUser = getUserById(Number(user?.id || 0));
+    if (!freshUser) {
+      return res.status(401).json({ error: 'Usuario nao encontrado' });
+    }
+    if (freshUser.status !== 'ativo' && freshUser.status !== 'active') {
+      return res.status(403).json({ error: 'Conta inativa' });
+    }
+    if (resolveEmailVerificationRequired() && !freshUser.email_verified_at) {
+      return res.status(403).json({
+        error: 'Confirme seu e-mail para finalizar compras.',
+        code: 'EMAIL_NOT_VERIFIED',
+      });
+    }
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Carrinho vazio' });
@@ -1618,6 +2029,7 @@ async function startServer() {
 
   app.get('/api/payments/:payment_id/status', authenticate, async (req, res) => {
     try {
+      const user = (req as any).user;
       const paymentId = String(req.params.payment_id || '').trim();
       if (!paymentId) return res.status(400).json({ error: 'payment_id inválido' });
 
@@ -1625,8 +2037,11 @@ async function startServer() {
       const payment = await paymentClient.get({ id: paymentId });
       const status = String(payment?.status || 'pending');
 
-      const order = db.get('SELECT id FROM orders WHERE transaction_id = ? LIMIT 1', paymentId) as any;
+      const order = db.get('SELECT id, user_id FROM orders WHERE transaction_id = ? LIMIT 1', paymentId) as any;
       const orderId = order?.id ? Number(order.id) : null;
+      if (orderId && Number(order.user_id) !== Number(user?.id)) {
+        return res.status(403).json({ error: 'Pagamento nao pertence ao usuario autenticado' });
+      }
       if (orderId && status === 'approved') {
         db.run(`
           UPDATE orders
@@ -1646,9 +2061,19 @@ async function startServer() {
     const payload = req.body || {};
     try {
       db.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify(payload), 'received');
+      const signatureCheck = verifyMercadoPagoWebhookSignature(req, payload);
+      if (!signatureCheck.ok) {
+        db.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify({ payload, reason: signatureCheck.reason }), 'invalid_signature');
+        return res.status(401).json({ error: 'invalid_signature' });
+      }
 
-      const eventType = (payload as any)?.type || (payload as any)?.action;
-      const paymentId = (payload as any)?.data?.id || (payload as any)?.id;
+      const eventType = String((payload as any)?.type || (payload as any)?.action || '');
+      const paymentId = String((payload as any)?.data?.id || (payload as any)?.id || '');
+      const eventId = String(req.headers['x-request-id'] || `${eventType}:${paymentId || 'unknown'}`);
+      if (isWebhookAlreadyProcessed('mercadopago', eventId)) {
+        return res.sendStatus(200);
+      }
+
       if (eventType === 'payment' || eventType === 'payment.created' || eventType === 'payment.updated') {
         if (paymentId) {
           const paymentClient = createMercadoPagoPaymentClient();
@@ -1666,11 +2091,10 @@ async function startServer() {
               `, Number(order.id));
 
               if (previousStatus !== 'paid') {
-                // TRIGGER EMAIL: order_paid and downloads_available
                 const appUrl = process.env.APP_URL || `http://${req.get('host')}`;
                 const itemsList = db.all('SELECT product_name, quantity, price FROM order_items WHERE order_id = ?', order.id) as any[];
                 const itemsHtml = itemsList.map(i => `<li>${i.quantity}x ${i.product_name} - R$ ${i.price.toFixed(2)}</li>`).join('');
-                
+
                 sendEmail({
                   to: order.customer_email,
                   templateKey: 'order_paid',
@@ -1679,13 +2103,13 @@ async function startServer() {
                     order_id: order.id,
                     order_total: `R$ ${order.total.toFixed(2)}`,
                     items: `<ul>${itemsHtml}</ul>`,
-                    downloads_url: `${appUrl}/conta`
-                  }
+                    downloads_url: `${appUrl}/conta`,
+                  },
                 }).catch(err => console.error('Failed to send order_paid email:', err));
               }
             } else if (paymentStatus === 'rejected' || paymentStatus === 'cancelled') {
-              db.run(`UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, paymentStatus, Number(order.id));
-              
+              db.run('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', paymentStatus, Number(order.id));
+
               if (previousStatus !== 'rejected' && previousStatus !== 'cancelled') {
                 const appUrl = process.env.APP_URL || `http://${req.get('host')}`;
                 sendEmail({
@@ -1695,13 +2119,15 @@ async function startServer() {
                     name: order.customer_name || 'Cliente',
                     order_id: order.id,
                     order_total: `R$ ${order.total.toFixed(2)}`,
-                    retry_url: `${appUrl}/checkout`
-                  }
+                    retry_url: `${appUrl}/checkout`,
+                  },
                 }).catch(err => console.error('Failed to send payment_failed email:', err));
               }
             }
           }
-          db.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify({ eventType, paymentStatus, paymentId }), 'processed');
+
+          markWebhookProcessed('mercadopago', eventId, paymentId);
+          db.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify({ eventType, paymentStatus, paymentId, eventId }), 'processed');
         }
       }
     } catch (error) {
@@ -1863,47 +2289,81 @@ async function startServer() {
     }
   });
 
-  // Rota de proxy para download seguro (resolve 403 em diretórios protegidos)
+  // Rota de proxy para download seguro
   app.get('/api/customer/download-file', authenticate, async (req, res) => {
     try {
-      const { path: filePath } = req.query;
-      if (!filePath || typeof filePath !== 'string') {
-        return res.status(400).json({ error: 'Caminho do arquivo é obrigatório' });
+      const user = (req as any).user;
+      const filePath = String(req.query.path || '').trim();
+      if (!filePath) {
+        return res.status(400).json({ error: 'Caminho do arquivo e obrigatorio' });
       }
 
-      // Segurança: Prevenir SSRF garantindo que apenas arquivos do domínio oficial sejam baixados
-      let targetUrl = filePath.startsWith('http') ? filePath : `https://digitalbordados.com.br${filePath.startsWith('/') ? '' : '/'}${filePath}`;
-      
+      const freshUser = getUserById(Number(user?.id || 0));
+      if (!freshUser) {
+        return res.status(401).json({ error: 'Usuario nao encontrado' });
+      }
+      if (resolveEmailVerificationRequired() && !freshUser.email_verified_at) {
+        return res.status(403).json({ error: 'Confirme seu e-mail para acessar downloads.', code: 'EMAIL_NOT_VERIFIED' });
+      }
+
+      const ownedDownload = db.get(`
+        SELECT oi.id AS order_item_id, f.file_path, f.file_name
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        JOIN product_files f ON f.product_id = oi.product_id
+        WHERE o.user_id = ?
+          AND o.status = 'paid'
+          AND f.file_path = ?
+        LIMIT 1
+      `, Number(user.id), filePath) as any;
+
+      if (!ownedDownload) {
+        return res.status(403).json({ error: 'Download nao autorizado para este usuario.' });
+      }
+
+      let targetUrl = filePath;
+      if (!/^https?:\/\//i.test(targetUrl)) {
+        targetUrl = `https://digitalbordados.com.br${targetUrl.startsWith('/') ? '' : '/'}${targetUrl}`;
+      }
+
       const allowedDomain = 'digitalbordados.com.br';
+      let targetHostname = '';
       try {
         const urlObj = new URL(targetUrl);
-        if (!urlObj.hostname.includes(allowedDomain)) {
-          return res.status(403).json({ error: 'Download não autorizado para este domínio.' });
-        }
-      } catch (e) {
-        return res.status(400).json({ error: 'URL de arquivo inválida.' });
+        targetHostname = urlObj.hostname;
+      } catch {
+        return res.status(400).json({ error: 'URL de arquivo invalida.' });
       }
 
-      console.log(`Iniciando download via proxy seguro: ${targetUrl}`);
+      if (!targetHostname.endsWith(allowedDomain)) {
+        return res.status(403).json({ error: 'Download nao autorizado para este dominio.' });
+      }
 
-      const response = await axios.get(targetUrl, { responseType: 'stream' });
+      const response = await axios.get(targetUrl, { responseType: 'stream', timeout: 20000 });
       const rawContentType = response.headers['content-type'];
       const contentType = typeof rawContentType === 'string' ? rawContentType : 'application/octet-stream';
-      const fileName = targetUrl.split('/').pop() || 'matriz.zip';
+      const fileName = String(ownedDownload.file_name || targetUrl.split('/').pop() || 'matriz.zip');
 
       res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-
       response.data.pipe(res);
     } catch (error: any) {
-      console.error('Erro no proxy de download:', error.message);
-      res.status(500).json({ error: 'Não foi possível processar o download. Tente novamente mais tarde.' });
+      console.error('Erro no proxy de download:', error?.message || error);
+      return res.status(500).json({ error: 'Nao foi possivel processar o download. Tente novamente mais tarde.' });
     }
   });
 
   app.get('/api/customer/downloads', authenticate, (req, res) => {
     try {
       const user = (req as any).user;
+      const freshUser = getUserById(Number(user?.id || 0));
+      if (!freshUser) {
+        return res.status(401).json({ error: 'Usuario nao encontrado' });
+      }
+      if (resolveEmailVerificationRequired() && !freshUser.email_verified_at) {
+        return res.status(403).json({ error: 'Confirme seu e-mail para acessar downloads.', code: 'EMAIL_NOT_VERIFIED' });
+      }
+
       const downloads = db.all(`
         SELECT
           oi.id AS download_id,
@@ -1919,9 +2379,13 @@ async function startServer() {
         JOIN orders o ON oi.order_id = o.id
         LEFT JOIN products p ON p.id = oi.product_id
         LEFT JOIN product_files f ON f.product_id = oi.product_id
-        WHERE o.user_id = ? AND o.status = 'paid'
+        WHERE o.user_id = ?
+          AND o.status = 'paid'
+          AND f.file_path IS NOT NULL
+          AND f.file_path <> ''
         ORDER BY o.created_at DESC, oi.id DESC
       `, user.id) as any[];
+
       return res.json(downloads);
     } catch (error) {
       console.error('Customer Downloads Error:', error);
@@ -3597,6 +4061,15 @@ async function startServer() {
   app.post('/api/paypal/create-order', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
+      const freshUser = getUserById(Number(user?.id || 0));
+      if (!freshUser) return res.status(401).json({ error: 'Usuario nao encontrado' });
+      if (freshUser.status !== 'ativo' && freshUser.status !== 'active') {
+        return res.status(403).json({ error: 'Conta inativa' });
+      }
+      if (resolveEmailVerificationRequired() && !freshUser.email_verified_at) {
+        return res.status(403).json({ error: 'Confirme seu e-mail para finalizar compras.', code: 'EMAIL_NOT_VERIFIED' });
+      }
+
       const { items } = req.body || {};
       if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Carrinho vazio' });
@@ -3689,11 +4162,15 @@ async function startServer() {
   // POST /api/paypal/capture-order
   app.post('/api/paypal/capture-order', authenticate, async (req, res) => {
     try {
+      const user = (req as any).user;
       const { paypal_order_id } = req.body || {};
       if (!paypal_order_id) return res.status(400).json({ error: 'paypal_order_id é obrigatório' });
 
       const order = db.get('SELECT * FROM orders WHERE paypal_order_id = ?', paypal_order_id) as any;
-      if (!order) return res.status(404).json({ error: 'Pedido não encontrado' });
+      if (!order) return res.status(404).json({ error: 'Pedido nao encontrado' });
+      if (Number(order.user_id) !== Number(user?.id)) {
+        return res.status(403).json({ error: 'Pedido nao pertence ao usuario autenticado' });
+      }
 
       const cfg = getPayPalConfig();
       const baseUrl = getPayPalBaseUrl(cfg.mode);
@@ -3738,8 +4215,22 @@ async function startServer() {
       const eventType = payload?.event_type || '';
       const resourceId = payload?.resource?.id || '';
 
+      if (!eventId) {
+        return res.status(400).json({ received: false, error: 'missing_event_id' });
+      }
+      if (isWebhookAlreadyProcessed('paypal', String(eventId))) {
+        return res.status(200).json({ received: true, duplicated: true });
+      }
+
+      const signatureCheck = await verifyPayPalWebhookSignature(req, payload);
+      if (!signatureCheck.ok) {
+        db.run(`INSERT INTO paypal_webhook_logs (event_id, event_type, resource_id, payload_json, verification_status)
+          VALUES (?, ?, ?, ?, ?)`, String(eventId), String(eventType), String(resourceId), JSON.stringify(payload), `invalid:${signatureCheck.reason}`);
+        return res.status(401).json({ received: false, error: 'invalid_signature' });
+      }
+
       db.run(`INSERT INTO paypal_webhook_logs (event_id, event_type, resource_id, payload_json, verification_status)
-        VALUES (?, ?, ?, ?, 'unverified')`, eventId, eventType, resourceId, JSON.stringify(payload));
+        VALUES (?, ?, ?, ?, 'verified')`, eventId, eventType, resourceId, JSON.stringify(payload));
 
       if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
         const captureId = resourceId;
@@ -3759,11 +4250,12 @@ async function startServer() {
             'paypal', order.id, captureId, 'denied', 'Captura negada via webhook PAYMENT.CAPTURE.DENIED');
         }
       }
-      // CHECKOUT.ORDER.APPROVED: só registra log, não libera download sem captura
+
+      markWebhookProcessed('paypal', String(eventId), String(resourceId || ''));
       return res.status(200).json({ received: true });
     } catch (error) {
       console.error('PayPal webhook error:', error);
-      return res.status(200).json({ received: true }); // Always 200 to PayPal
+      return res.status(200).json({ received: true });
     }
   });
 

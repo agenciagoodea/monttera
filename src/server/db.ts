@@ -149,6 +149,7 @@ export function initDb() {
       role ENUM('admin','customer') NOT NULL,
       status VARCHAR(50) DEFAULT 'ativo',
       woo_user_id VARCHAR(50) NULL,
+      email_verified_at DATETIME NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -350,7 +351,7 @@ export function initDb() {
       name VARCHAR(200) NOT NULL,
       subject VARCHAR(300) NOT NULL,
       body LONGTEXT NOT NULL,
-      variables TEXT COMMENT 'JSON array com as variáveis disponíveis',
+      variables TEXT COMMENT 'JSON array com as variÃ¡veis disponÃ­veis',
       active TINYINT(1) DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -381,6 +382,54 @@ export function initDb() {
   `);
 
   query(`
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      token_hash VARCHAR(255) NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      used TINYINT(1) DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_email_verification_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS login_attempts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      email VARCHAR(255) NULL,
+      ip VARCHAR(64) NULL,
+      attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      success TINYINT(1) DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS download_tokens (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      order_item_id INT NOT NULL,
+      token_hash VARCHAR(255) NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      used TINYINT(1) DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_download_tokens_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      CONSTRAINT fk_download_tokens_item FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS processed_webhooks (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      provider VARCHAR(50) NOT NULL,
+      event_id VARCHAR(255) NOT NULL,
+      resource_id VARCHAR(255) NULL,
+      processed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_processed_webhook_event (provider, event_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
     CREATE TABLE IF NOT EXISTS matrix_requests (
       id INT AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
@@ -396,80 +445,87 @@ export function initDb() {
   const defaultTemplates = [
     {
       key: 'user_welcome',
-      name: 'Novo Usuário Cadastrado',
-      subject: 'Bem-vindo(a) à {{store_name}}!',
+      name: 'Novo UsuÃ¡rio Cadastrado',
+      subject: 'Bem-vindo(a) Ã  {{store_name}}!',
       variables: JSON.stringify(['name', 'email', 'store_name', 'login_url']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Olá, {{name}}!</h2><p>Bem-vindo(a) à <strong>{{store_name}}</strong>. Estamos muito felizes em ter você conosco.</p><p>Para acessar sua conta, clique no botão abaixo:</p><p style="text-align: center; margin: 30px 0;"><a href="{{login_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acessar Minha Conta</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>OlÃ¡, {{name}}!</h2><p>Bem-vindo(a) Ã  <strong>{{store_name}}</strong>. Estamos muito felizes em ter vocÃª conosco.</p><p>Para acessar sua conta, clique no botÃ£o abaixo:</p><p style="text-align: center; margin: 30px 0;"><a href="{{login_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acessar Minha Conta</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+    },
+    {
+      key: 'email_verification',
+      name: 'Confirmacao de E-mail',
+      subject: 'Confirme seu e-mail para ativar sua conta - {{store_name}}',
+      variables: JSON.stringify(['name', 'email', 'verify_url', 'expires_in', 'store_name']),
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Confirme seu e-mail</h2><p>Ola, {{name}}!</p><p>Para liberar compras, downloads e acesso completo da sua conta, confirme seu e-mail clicando no botao abaixo.</p><p style="text-align: center; margin: 30px 0;"><a href="{{verify_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Confirmar E-mail</a></p><p style="font-size: 12px; color: #666;">Este link expira em {{expires_in}} horas.</p><p>Se voce nao solicitou este cadastro, ignore este e-mail.</p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'password_reset',
-      name: 'Lembrete/Recuperação de Senha',
-      subject: 'Redefinição de senha — {{store_name}}',
+      name: 'Lembrete/RecuperaÃ§Ã£o de Senha',
+      subject: 'RedefiniÃ§Ã£o de senha â€” {{store_name}}',
       variables: JSON.stringify(['name', 'reset_url', 'store_name', 'expires_in']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Recuperação de Senha</h2><p>Olá, {{name}}!</p><p>Recebemos uma solicitação para redefinir a senha da sua conta na <strong>{{store_name}}</strong>. Se você não fez essa solicitação, pode ignorar este e-mail.</p><p>Para criar uma nova senha, clique no botão abaixo:</p><p style="text-align: center; margin: 30px 0;"><a href="{{reset_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Redefinir Minha Senha</a></p><p style="font-size: 12px; color: #666;">Este link expira em {{expires_in}} horas.</p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>RecuperaÃ§Ã£o de Senha</h2><p>OlÃ¡, {{name}}!</p><p>Recebemos uma solicitaÃ§Ã£o para redefinir a senha da sua conta na <strong>{{store_name}}</strong>. Se vocÃª nÃ£o fez essa solicitaÃ§Ã£o, pode ignorar este e-mail.</p><p>Para criar uma nova senha, clique no botÃ£o abaixo:</p><p style="text-align: center; margin: 30px 0;"><a href="{{reset_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Redefinir Minha Senha</a></p><p style="font-size: 12px; color: #666;">Este link expira em {{expires_in}} horas.</p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'password_changed',
       name: 'Senha Alterada com Sucesso',
-      subject: 'Sua senha foi alterada — {{store_name}}',
+      subject: 'Sua senha foi alterada â€” {{store_name}}',
       variables: JSON.stringify(['name', 'store_name', 'login_url']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Senha Atualizada</h2><p>Olá, {{name}}!</p><p>A senha da sua conta na <strong>{{store_name}}</strong> foi alterada com sucesso.</p><p>Se não foi você quem realizou esta alteração, por favor, entre em contato conosco imediatamente.</p><p style="text-align: center; margin: 30px 0;"><a href="{{login_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Fazer Login</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Senha Atualizada</h2><p>OlÃ¡, {{name}}!</p><p>A senha da sua conta na <strong>{{store_name}}</strong> foi alterada com sucesso.</p><p>Se nÃ£o foi vocÃª quem realizou esta alteraÃ§Ã£o, por favor, entre em contato conosco imediatamente.</p><p style="text-align: center; margin: 30px 0;"><a href="{{login_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Fazer Login</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'order_created',
       name: 'Pedido Realizado com Sucesso',
-      subject: 'Pedido #{{order_id}} recebido — {{store_name}}',
+      subject: 'Pedido #{{order_id}} recebido â€” {{store_name}}',
       variables: JSON.stringify(['name', 'order_id', 'order_total', 'order_status', 'items', 'payment_method', 'account_url', 'store_name']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Pedido Recebido!</h2><p>Olá, {{name}}!</p><p>Recebemos o seu pedido <strong>#{{order_id}}</strong>. Obrigado por comprar na <strong>{{store_name}}</strong>!</p><p>Forma de pagamento: <strong>{{payment_method}}</strong></p><h3>Resumo do Pedido</h3><div style="background: #f9fafb; padding: 15px; border-radius: 5px;">{{{items}}}</div><p style="text-align: right; font-size: 18px; font-weight: bold; margin-top: 15px;">Total: {{order_total}}</p><p style="text-align: center; margin: 30px 0;"><a href="{{account_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acompanhar Pedido</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Pedido Recebido!</h2><p>OlÃ¡, {{name}}!</p><p>Recebemos o seu pedido <strong>#{{order_id}}</strong>. Obrigado por comprar na <strong>{{store_name}}</strong>!</p><p>Forma de pagamento: <strong>{{payment_method}}</strong></p><h3>Resumo do Pedido</h3><div style="background: #f9fafb; padding: 15px; border-radius: 5px;">{{{items}}}</div><p style="text-align: right; font-size: 18px; font-weight: bold; margin-top: 15px;">Total: {{order_total}}</p><p style="text-align: center; margin: 30px 0;"><a href="{{account_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acompanhar Pedido</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'order_paid',
       name: 'Pagamento Confirmado / Downloads Liberados',
-      subject: '✅ Pagamento confirmado! Seus arquivos estão prontos — {{store_name}}',
+      subject: 'âœ… Pagamento confirmado! Seus arquivos estÃ£o prontos â€” {{store_name}}',
       variables: JSON.stringify(['name', 'order_id', 'order_total', 'items', 'downloads_url', 'store_name']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Pagamento Confirmado!</h2><p>Olá, {{name}}!</p><p>Temos boas notícias: o pagamento do seu pedido <strong>#{{order_id}}</strong> foi aprovado.</p><p>Seus arquivos já estão liberados e prontos para download!</p><p style="text-align: center; margin: 30px 0;"><a href="{{downloads_url}}" style="display: inline-block; padding: 12px 25px; background: #10b981; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acessar Meus Downloads</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Pagamento Confirmado!</h2><p>OlÃ¡, {{name}}!</p><p>Temos boas notÃ­cias: o pagamento do seu pedido <strong>#{{order_id}}</strong> foi aprovado.</p><p>Seus arquivos jÃ¡ estÃ£o liberados e prontos para download!</p><p style="text-align: center; margin: 30px 0;"><a href="{{downloads_url}}" style="display: inline-block; padding: 12px 25px; background: #10b981; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acessar Meus Downloads</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'order_cancelled',
       name: 'Pedido Cancelado',
-      subject: 'Pedido #{{order_id}} cancelado — {{store_name}}',
+      subject: 'Pedido #{{order_id}} cancelado â€” {{store_name}}',
       variables: JSON.stringify(['name', 'order_id', 'order_total', 'store_name']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Pedido Cancelado</h2><p>Olá, {{name}}.</p><p>Gostaríamos de informar que o seu pedido <strong>#{{order_id}}</strong> na <strong>{{store_name}}</strong> foi cancelado.</p><p>Se você não solicitou este cancelamento ou acha que houve algum erro com o pagamento, entre em contato conosco ou realize uma nova compra em nosso site.</p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Pedido Cancelado</h2><p>OlÃ¡, {{name}}.</p><p>GostarÃ­amos de informar que o seu pedido <strong>#{{order_id}}</strong> na <strong>{{store_name}}</strong> foi cancelado.</p><p>Se vocÃª nÃ£o solicitou este cancelamento ou acha que houve algum erro com o pagamento, entre em contato conosco ou realize uma nova compra em nosso site.</p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'payment_failed',
       name: 'Pagamento Recusado',
-      subject: 'Pagamento não aprovado — tente novamente',
+      subject: 'Pagamento nÃ£o aprovado â€” tente novamente',
       variables: JSON.stringify(['name', 'order_id', 'order_total', 'retry_url', 'store_name']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Problema no Pagamento</h2><p>Olá, {{name}}.</p><p>Infelizmente o pagamento do seu pedido <strong>#{{order_id}}</strong> não foi aprovado pela operadora do cartão ou instituição financeira.</p><p>Para garantir seus itens, por favor tente realizar o pagamento novamente usando outro método ou cartão.</p><p style="text-align: center; margin: 30px 0;"><a href="{{retry_url}}" style="display: inline-block; padding: 12px 25px; background: #f59e0b; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Tentar Novamente</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Problema no Pagamento</h2><p>OlÃ¡, {{name}}.</p><p>Infelizmente o pagamento do seu pedido <strong>#{{order_id}}</strong> nÃ£o foi aprovado pela operadora do cartÃ£o ou instituiÃ§Ã£o financeira.</p><p>Para garantir seus itens, por favor tente realizar o pagamento novamente usando outro mÃ©todo ou cartÃ£o.</p><p style="text-align: center; margin: 30px 0;"><a href="{{retry_url}}" style="display: inline-block; padding: 12px 25px; background: #f59e0b; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Tentar Novamente</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'payment_pending_pix',
       name: 'Lembrete de PIX Pendente',
-      subject: '⏳ Seu PIX ainda não foi pago — Pedido #{{order_id}}',
+      subject: 'â³ Seu PIX ainda nÃ£o foi pago â€” Pedido #{{order_id}}',
       variables: JSON.stringify(['name', 'order_id', 'order_total', 'pix_code', 'expires_at', 'store_name']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Aguardando Pagamento</h2><p>Olá, {{name}}!</p><p>Notamos que você gerou um pedido via PIX (Pedido <strong>#{{order_id}}</strong>), mas o pagamento ainda não foi identificado.</p><p>Lembre-se que o código PIX expira em: <strong>{{expires_at}}</strong>.</p><div style="background: #f9fafb; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; text-align: center; margin: 20px 0;">{{pix_code}}</div><p>Caso já tenha efetuado o pagamento, desconsidere este e-mail. A confirmação deve ocorrer em instantes.</p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Aguardando Pagamento</h2><p>OlÃ¡, {{name}}!</p><p>Notamos que vocÃª gerou um pedido via PIX (Pedido <strong>#{{order_id}}</strong>), mas o pagamento ainda nÃ£o foi identificado.</p><p>Lembre-se que o cÃ³digo PIX expira em: <strong>{{expires_at}}</strong>.</p><div style="background: #f9fafb; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; text-align: center; margin: 20px 0;">{{pix_code}}</div><p>Caso jÃ¡ tenha efetuado o pagamento, desconsidere este e-mail. A confirmaÃ§Ã£o deve ocorrer em instantes.</p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'downloads_available',
-      name: 'Downloads Disponíveis na Conta',
-      subject: 'Seus arquivos estão disponíveis para download',
+      name: 'Downloads DisponÃ­veis na Conta',
+      subject: 'Seus arquivos estÃ£o disponÃ­veis para download',
       variables: JSON.stringify(['name', 'order_id', 'items', 'downloads_url', 'store_name']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Downloads Liberados!</h2><p>Olá, {{name}}!</p><p>Os arquivos do seu pedido <strong>#{{order_id}}</strong> já estão disponíveis na sua área de cliente.</p><h3>Arquivos Disponíveis:</h3><div style="background: #f9fafb; padding: 15px; border-radius: 5px;">{{{items}}}</div><p style="text-align: center; margin: 30px 0;"><a href="{{downloads_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acessar Meus Downloads</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Downloads Liberados!</h2><p>OlÃ¡, {{name}}!</p><p>Os arquivos do seu pedido <strong>#{{order_id}}</strong> jÃ¡ estÃ£o disponÃ­veis na sua Ã¡rea de cliente.</p><h3>Arquivos DisponÃ­veis:</h3><div style="background: #f9fafb; padding: 15px; border-radius: 5px;">{{{items}}}</div><p style="text-align: center; margin: 30px 0;"><a href="{{downloads_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acessar Meus Downloads</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'password_migration',
-      name: 'Aviso de Migração de Senha',
-      subject: 'Sua conta foi migrada — acesse com sua nova senha',
+      name: 'Aviso de MigraÃ§Ã£o de Senha',
+      subject: 'Sua conta foi migrada â€” acesse com sua nova senha',
       variables: JSON.stringify(['name', 'temp_password', 'login_url', 'change_password_url', 'store_name']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Conta Atualizada</h2><p>Olá, {{name}}!</p><p>A <strong>{{store_name}}</strong> está de cara nova! Migramos para um novo sistema mais rápido e seguro para você.</p><p>Por questões de segurança, geramos uma senha provisória para o seu primeiro acesso:</p><p style="font-size: 20px; text-align: center; font-weight: bold; margin: 20px 0; padding: 10px; background: #f9fafb; border-radius: 5px;">{{temp_password}}</p><p>Recomendamos que você altere esta senha assim que acessar a sua conta.</p><p style="text-align: center; margin: 30px 0;"><a href="{{login_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acessar Minha Conta</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Conta Atualizada</h2><p>OlÃ¡, {{name}}!</p><p>A <strong>{{store_name}}</strong> estÃ¡ de cara nova! Migramos para um novo sistema mais rÃ¡pido e seguro para vocÃª.</p><p>Por questÃµes de seguranÃ§a, geramos uma senha provisÃ³ria para o seu primeiro acesso:</p><p style="font-size: 20px; text-align: center; font-weight: bold; margin: 20px 0; padding: 10px; background: #f9fafb; border-radius: 5px;">{{temp_password}}</p><p>Recomendamos que vocÃª altere esta senha assim que acessar a sua conta.</p><p style="text-align: center; margin: 30px 0;"><a href="{{login_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Acessar Minha Conta</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'first_purchase',
-      name: 'Pós-primeira Compra',
-      subject: 'Obrigado pela sua primeira compra! 🎉',
+      name: 'PÃ³s-primeira Compra',
+      subject: 'Obrigado pela sua primeira compra! ðŸŽ‰',
       variables: JSON.stringify(['name', 'store_name', 'downloads_url', 'account_url']),
-      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Que alegria ter você aqui! 🎉</h2><p>Olá, {{name}}!</p><p>Vimos que você acabou de realizar a sua primeira compra na <strong>{{store_name}}</strong>. Muito obrigado por confiar em nosso trabalho!</p><p>Na sua <a href="{{account_url}}">conta</a>, você pode acompanhar seus pedidos e baixar os arquivos adquiridos a qualquer momento.</p><p style="text-align: center; margin: 30px 0;"><a href="{{downloads_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Ir Para Meus Downloads</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Que alegria ter vocÃª aqui! ðŸŽ‰</h2><p>OlÃ¡, {{name}}!</p><p>Vimos que vocÃª acabou de realizar a sua primeira compra na <strong>{{store_name}}</strong>. Muito obrigado por confiar em nosso trabalho!</p><p>Na sua <a href="{{account_url}}">conta</a>, vocÃª pode acompanhar seus pedidos e baixar os arquivos adquiridos a qualquer momento.</p><p style="text-align: center; margin: 30px 0;"><a href="{{downloads_url}}" style="display: inline-block; padding: 12px 25px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Ir Para Meus Downloads</a></p><p>Atenciosamente,<br>Equipe {{store_name}}</p></div>'
     },
     {
       key: 'matrix_request_submitted',
@@ -511,6 +567,12 @@ export function initDb() {
   // createIndexIfNotExists('users', 'idx_users_role_date', 'CREATE INDEX idx_users_role_date ON users(role, created_at)');
   createIndexIfNotExists('order_items', 'idx_order_items_order', 'CREATE INDEX idx_order_items_order ON order_items(order_id)');
   createIndexIfNotExists('favorites', 'idx_favorites_user_product', 'CREATE UNIQUE INDEX idx_favorites_user_product ON favorites(user_id, product_id)');
+  createIndexIfNotExists('email_verification_tokens', 'idx_email_verification_user', 'CREATE INDEX idx_email_verification_user ON email_verification_tokens(user_id)');
+  createIndexIfNotExists('email_verification_tokens', 'idx_email_verification_expires', 'CREATE INDEX idx_email_verification_expires ON email_verification_tokens(expires_at)');
+  createIndexIfNotExists('login_attempts', 'idx_login_attempts_email_time', 'CREATE INDEX idx_login_attempts_email_time ON login_attempts(email, attempted_at)');
+  createIndexIfNotExists('login_attempts', 'idx_login_attempts_ip_time', 'CREATE INDEX idx_login_attempts_ip_time ON login_attempts(ip, attempted_at)');
+  createIndexIfNotExists('download_tokens', 'idx_download_tokens_user_item', 'CREATE INDEX idx_download_tokens_user_item ON download_tokens(user_id, order_item_id)');
+  createIndexIfNotExists('download_tokens', 'idx_download_tokens_expires', 'CREATE INDEX idx_download_tokens_expires ON download_tokens(expires_at)');
 
   ensureColumn('products', 'short_description', 'TEXT NULL');
   ensureColumn('products', 'production_sheet', 'TEXT NULL');
@@ -518,6 +580,7 @@ export function initDb() {
   ensureColumn('products', 'colors', 'VARCHAR(255) NULL');
   ensureColumn('product_images', 'file_type', "VARCHAR(50) NULL DEFAULT 'gallery'");
   ensureColumn('settings', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+  ensureColumn('users', 'email_verified_at', 'DATETIME NULL');
 
   // WooCommerce migration compatibility expansions
   query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20) NULL`);
@@ -527,6 +590,7 @@ export function initDb() {
   query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_registered DATETIME NULL`);
   query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS woo_user_id VARCHAR(50) NULL`);
   query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT NULL`);
+  query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at DATETIME NULL`);
 
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone VARCHAR(20) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS cpf VARCHAR(14) NULL`);
@@ -600,3 +664,4 @@ export default {
   run,
   transaction,
 };
+
