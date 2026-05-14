@@ -523,6 +523,12 @@ function initSettings() {
     primary_color: '#3b82f6',
     secondary_color: '#1e293b',
     email_contact: 'contato@digitalbordados.com',
+    phone: '',
+    address: 'Atendimento online em todo o Brasil',
+    contact_hours: 'Seg a Sex, 8h as 18h',
+    contact_whatsapp: '',
+    support_whatsapp: '',
+    support_email: '',
     mp_mode: 'sandbox',
     modo_operacao: 'sandbox',
     mp_public_key: '',
@@ -3735,7 +3741,7 @@ async function startServer() {
       const cached = apiCache.get('public_settings');
       if (cached) return res.json(cached);
 
-      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "new_badge_days", "brand_logos", "facebook_url", "instagram_url", "youtube_url")') as any[];
+      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "brand_logos", "facebook_url", "instagram_url", "youtube_url")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);
@@ -3967,12 +3973,47 @@ async function startServer() {
         is_new: (Number(productRow.is_new) === 1 || isProductWithinNewWindow(productRow.created_at || productRow.updated_at, newBadgeDays)) ? 1 : 0,
       };
 
-      // Related products (same category)
-      const relatedProducts = (db.all(`
-        SELECT * FROM products 
-        WHERE category_id = ? AND id != ? AND status = 'active'
-        LIMIT 4
-      `, product.category_id, product.id) as any[]).map((relatedProduct) => ({
+      // Related products (all shared categories: primary + extra relations)
+      const categoryRows = db.all(`
+        SELECT DISTINCT category_id
+        FROM product_category_relations
+        WHERE product_id = ? AND category_id IS NOT NULL
+      `, product.id) as any[];
+
+      const categoryIds = Array.from(
+        new Set(
+          [product.category_id, ...categoryRows.map((row) => row.category_id)]
+            .map((value) => Number(value))
+            .filter((value) => Number.isFinite(value) && value > 0),
+        ),
+      );
+
+      let relatedRows: any[] = [];
+      if (categoryIds.length > 0) {
+        const placeholders = categoryIds.map(() => '?').join(', ');
+        relatedRows = db.all(`
+          SELECT DISTINCT p.*
+          FROM products p
+          LEFT JOIN product_category_relations pcr ON pcr.product_id = p.id
+          WHERE p.id != ?
+            AND p.status = 'active'
+            AND (
+              p.category_id IN (${placeholders})
+              OR pcr.category_id IN (${placeholders})
+            )
+          ORDER BY p.created_at DESC, p.id DESC
+        `, product.id, ...categoryIds, ...categoryIds) as any[];
+      } else {
+        relatedRows = db.all(`
+          SELECT p.*
+          FROM products p
+          WHERE p.id != ?
+            AND p.status = 'active'
+          ORDER BY p.created_at DESC, p.id DESC
+        `, product.id) as any[];
+      }
+
+      const relatedProducts = relatedRows.map((relatedProduct) => ({
         ...relatedProduct,
         is_new: (Number(relatedProduct.is_new) === 1 || isProductWithinNewWindow(relatedProduct.created_at || relatedProduct.updated_at, newBadgeDays)) ? 1 : 0,
       }));

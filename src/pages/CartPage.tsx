@@ -439,6 +439,16 @@ export default function CartPage() {
             </div>
           </div>
 
+          <div className="flex">
+            <Link
+              to="/"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[11px] font-black uppercase tracking-wider text-slate-700 hover:border-blue-300 hover:text-blue-600 transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Adicionar mais produtos
+            </Link>
+          </div>
+
           <div className="bg-[#eaf4fc] border border-blue-100 rounded-[2rem] p-6 text-[13px] text-blue-900 leading-relaxed shadow-sm">
             <p className="font-bold mb-2 text-blue-950">Neste pacote contém arquivos: PES - JEF - DST - EXP - XXX</p>
             <p>

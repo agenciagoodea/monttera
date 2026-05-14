@@ -61,6 +61,8 @@ export default function AdminSettings() {
     phone: '',
     email_contact: 'contato@digitalbordados.com',
     address: '',
+    contact_hours: 'Seg a Sex, 8h as 18h',
+    contact_whatsapp: '',
     new_badge_days: '20',
     // Suporte ao Cliente
     support_whatsapp: '',
@@ -394,6 +396,47 @@ export default function AdminSettings() {
                           className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
                           value={settings.email_contact}
                           onChange={e => setSettings({...settings, email_contact: e.target.value})}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Telefone de Contato</label>
+                        <input
+                          type="text"
+                          placeholder="(11) 99999-9999"
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                          value={settings.phone}
+                          onChange={e => setSettings({ ...settings, phone: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">WhatsApp dos Canais Oficiais</label>
+                        <input
+                          type="text"
+                          placeholder="+55 11 99999-9999"
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-green-500 text-xs font-bold"
+                          value={settings.contact_whatsapp}
+                          onChange={e => setSettings({ ...settings, contact_whatsapp: e.target.value })}
+                        />
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Usado na página de Contato (bloco Canais Oficiais).</p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Area de Atendimento</label>
+                        <input
+                          type="text"
+                          placeholder="Atendimento online em todo o Brasil"
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                          value={settings.address}
+                          onChange={e => setSettings({ ...settings, address: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Horario de Atendimento</label>
+                        <input
+                          type="text"
+                          placeholder="Seg a Sex, 8h as 18h"
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                          value={settings.contact_hours}
+                          onChange={e => setSettings({ ...settings, contact_hours: e.target.value })}
                         />
                       </div>
                       <div className="space-y-2">

@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ChevronLeft, FileText, ShoppingCart, Bolt, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileText, ShoppingCart, Bolt, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send } from 'lucide-react';
 import { Product } from '../types';
 import { formatCurrency } from '../lib/utils';
 import { useCart } from '../contexts/CartContext';
@@ -23,6 +23,9 @@ export default function ProductDetail() {
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'description' | 'reviews'>('description');
+  const relatedTrackRef = useRef<HTMLDivElement | null>(null);
+  const relatedAutoplaySpeed = 4200;
+  const [relatedPaused, setRelatedPaused] = useState(false);
   
   // Reviews state
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -58,6 +61,12 @@ export default function ProductDetail() {
 
     fetchProduct();
   }, [slug]);
+
+  useEffect(() => {
+    if (relatedTrackRef.current) {
+      relatedTrackRef.current.scrollTo({ left: 0, behavior: 'auto' });
+    }
+  }, [product?.id]);
 
   async function fetchReviews(productSlug: string) {
     try {
@@ -100,6 +109,25 @@ export default function ProductDetail() {
       setSubmittingReview(false);
     }
   }
+
+  const relatedProducts = product?.relatedProducts || [];
+
+  useEffect(() => {
+    if (relatedPaused || relatedProducts.length <= 1) return;
+    const timer = window.setInterval(() => {
+      const track = relatedTrackRef.current;
+      if (!track) return;
+      const firstCard = track.querySelector<HTMLElement>('[data-related-card="true"]');
+      const step = firstCard ? firstCard.getBoundingClientRect().width + 24 : 320;
+      const maxLeft = Math.max(0, track.scrollWidth - track.clientWidth);
+      if (track.scrollLeft + step >= maxLeft - 8) {
+        track.scrollTo({ left: 0, behavior: 'smooth' });
+      } else {
+        track.scrollBy({ left: step, behavior: 'smooth' });
+      }
+    }, relatedAutoplaySpeed);
+    return () => window.clearInterval(timer);
+  }, [relatedAutoplaySpeed, relatedPaused, relatedProducts.length]);
 
   if (loading) {
     return (
@@ -145,6 +173,15 @@ export default function ProductDetail() {
   const gallery = Array.from(
     new Set([product.image, ...(product.gallery || [])].filter((img): img is string => Boolean(img)))
   );
+
+  const getRelatedStep = () => {
+    const track = relatedTrackRef.current;
+    if (!track) return 320;
+    const firstCard = track.querySelector<HTMLElement>('[data-related-card="true"]');
+    if (!firstCard) return 320;
+    const gap = 24;
+    return firstCard.getBoundingClientRect().width + gap;
+  };
 
   const formatShortDescription = (html: string) => {
     let formatted = html || '';
@@ -523,19 +560,27 @@ export default function ProductDetail() {
       </section>
 
       {/* Related Products */}
-      {product.relatedProducts && product.relatedProducts.length > 0 && (
+      {relatedProducts.length > 0 && (
         <section className="mt-24">
           <div className="flex items-center justify-between mb-10">
             <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Produtos Relacionados</h2>
             <div className="h-1 flex-1 bg-slate-100 ml-8" />
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {product.relatedProducts.map((rel) => (
+          <div
+            ref={relatedTrackRef}
+            onMouseEnter={() => setRelatedPaused(true)}
+            onMouseLeave={() => setRelatedPaused(false)}
+            onTouchStart={() => setRelatedPaused(true)}
+            onTouchEnd={() => setRelatedPaused(false)}
+            className="flex gap-6 overflow-x-auto scroll-smooth snap-x snap-mandatory pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {relatedProducts.map((rel) => (
               <Link 
                 key={rel.id} 
                 to={`/produto/${rel.slug}`}
-                className="group bg-white border border-slate-100 rounded-3xl p-4 transition-all hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1"
+                data-related-card="true"
+                className="group snap-start shrink-0 basis-[82%] sm:basis-[46%] lg:basis-[31%] xl:basis-[24%] bg-white border border-slate-100 rounded-3xl p-4 transition-all hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1"
               >
                 <div className="aspect-square bg-slate-50 rounded-2xl overflow-hidden mb-4 p-4 relative">
                   <img src={rel.image} alt={rel.name} loading="lazy" className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" />
@@ -555,6 +600,7 @@ export default function ProductDetail() {
               </Link>
             ))}
           </div>
+
         </section>
       )}
     </main>
