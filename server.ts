@@ -564,15 +564,15 @@ async function startServer() {
     const token = req.cookies.auth_token;
     if (!token) return res.json({ user: null });
 
-    const decoded = verifyToken(token);
-    if (!decoded) {
+    const decoded = verifyToken(token) as any;
+    if (!decoded || typeof decoded === 'string' || !decoded.id) {
       res.clearCookie('auth_token');
       return res.json({ user: null });
     }
 
     // Consulta o DB para retornar dados atualizados (incluindo avatar_url)
     try {
-      const fresh = db.get('SELECT id, name, email, role, avatar_url FROM users WHERE id = ?', decoded.id) as any;
+      const fresh = db.get('SELECT id, name, email, role, avatar_url FROM users WHERE id = ?', Number(decoded.id)) as any;
       if (!fresh) return res.json({ user: null });
       const type = fresh.role === 'admin' ? 'user' : 'customer';
       return res.json({ user: { id: fresh.id, name: fresh.name, email: fresh.email, type, role: fresh.role, avatar_url: fresh.avatar_url || null } });
@@ -1712,8 +1712,8 @@ async function startServer() {
     return res.sendStatus(200);
   });
   app.get('/api/customer/account', authenticate, (req, res) => {
+    const user = (req as any).user;
     try {
-      const user = (req as any).user;
       const profile = db.get(`
         SELECT
           u.id,
@@ -1769,7 +1769,7 @@ async function startServer() {
       console.error('Customer Account Error Detail:', {
         message: error.message,
         stack: error.stack,
-        userId: user.id
+        userId: user?.id || null
       });
       return res.status(500).json({ error: `Erro ao carregar dados da conta: ${error.message}` });
     }
@@ -1887,7 +1887,8 @@ async function startServer() {
       console.log(`Iniciando download via proxy seguro: ${targetUrl}`);
 
       const response = await axios.get(targetUrl, { responseType: 'stream' });
-      const contentType = response.headers['content-type'] || 'application/octet-stream';
+      const rawContentType = response.headers['content-type'];
+      const contentType = typeof rawContentType === 'string' ? rawContentType : 'application/octet-stream';
       const fileName = targetUrl.split('/').pop() || 'matriz.zip';
 
       res.setHeader('Content-Type', contentType);
