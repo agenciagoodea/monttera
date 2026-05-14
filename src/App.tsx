@@ -1,35 +1,46 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
-import Home from './pages/Home';
-import ShopPage from './pages/ShopPage';
-import BudgetPage from './pages/BudgetPage';
-import ContactPage from './pages/ContactPage';
-import ProductDetail from './pages/ProductDetail';
-import CartPage from './pages/CartPage';
-import FavoritesPage from './pages/FavoritesPage';
-import MyAccount from './pages/MyAccount';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import ForgotPassword from './pages/ForgotPassword';
-import ResetPassword from './pages/ResetPassword';
-import PayPalSuccess from './pages/PayPalSuccess';
-import PayPalCancel from './pages/PayPalCancel';
-import AdminDashboard from './pages/admin/AdminDashboard';
-import AdminProductList from './pages/admin/AdminProductList';
-import AdminProductForm from './pages/admin/AdminProductForm';
-import AdminCategoryList from './pages/admin/AdminCategoryList';
-import AdminTagList from './pages/admin/AdminTagList';
-import AdminOrderList from './pages/admin/AdminOrderList';
-import AdminUserList from './pages/admin/AdminUserList';
-import AdminReports from './pages/admin/AdminReports';
-import AdminSettings from './pages/admin/AdminSettings';
+
+// Lazy load pages
+const Home = lazy(() => import('./pages/Home'));
+const ShopPage = lazy(() => import('./pages/ShopPage'));
+const BudgetPage = lazy(() => import('./pages/BudgetPage'));
+const ContactPage = lazy(() => import('./pages/ContactPage'));
+const ProductDetail = lazy(() => import('./pages/ProductDetail'));
+const CartPage = lazy(() => import('./pages/CartPage'));
+const FavoritesPage = lazy(() => import('./pages/FavoritesPage'));
+const MyAccount = lazy(() => import('./pages/MyAccount'));
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const PayPalSuccess = lazy(() => import('./pages/PayPalSuccess'));
+const PayPalCancel = lazy(() => import('./pages/PayPalCancel'));
+
+// Admin Pages (Lazy)
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
+const AdminProductList = lazy(() => import('./pages/admin/AdminProductList'));
+const AdminProductForm = lazy(() => import('./pages/admin/AdminProductForm'));
+const AdminCategoryList = lazy(() => import('./pages/admin/AdminCategoryList'));
+const AdminTagList = lazy(() => import('./pages/admin/AdminTagList'));
+const AdminOrderList = lazy(() => import('./pages/admin/AdminOrderList'));
+const AdminUserList = lazy(() => import('./pages/admin/AdminUserList'));
+const AdminReports = lazy(() => import('./pages/admin/AdminReports'));
+const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'));
+
 import AdminLayout from './layouts/AdminLayout';
 import { AuthProvider } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import { FavoritesProvider } from './contexts/FavoritesContext';
 import { AppDataProvider } from './contexts/AppDataContext';
+
+const PageLoader = () => (
+  <div className="min-h-screen flex items-center justify-center bg-white/50 backdrop-blur-sm fixed inset-0 z-50">
+    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin shadow-lg shadow-blue-600/20"></div>
+  </div>
+);
 
 export default function App() {
 
@@ -39,10 +50,12 @@ export default function App() {
         <AppDataProvider>
           <FavoritesProvider>
             <CartProvider>
+              <Suspense fallback={<PageLoader />}>
               <Routes>
           {/* Admin Routes */}
           <Route path="/admin/*" element={
             <AdminLayout>
+              <Suspense fallback={<PageLoader />}>
               <Routes>
                 <Route path="/" element={<AdminDashboard />} />
                 <Route path="/produtos" element={<AdminProductList />} />
@@ -55,6 +68,7 @@ export default function App() {
                 <Route path="/relatorios" element={<AdminReports />} />
                 <Route path="/configuracoes" element={<AdminSettings />} />
               </Routes>
+            </Suspense>
             </AdminLayout>
           } />
 
@@ -63,7 +77,8 @@ export default function App() {
             <div className="min-h-screen bg-white font-sans text-gray-900 scroll-smooth flex flex-col">
               <Header />
               <div className="flex-1">
-                <Routes>
+                <Suspense fallback={<PageLoader />}>
+              <Routes>
                   <Route path="/" element={<Home />} />
                   <Route path="/loja" element={<ShopPage />} />
                   <Route path="/orcamento" element={<BudgetPage />} />
@@ -84,11 +99,13 @@ export default function App() {
                   <Route path="/checkout/paypal/success" element={<PayPalSuccess />} />
                   <Route path="/checkout/paypal/cancel" element={<PayPalCancel />} />
                 </Routes>
+            </Suspense>
               </div>
               <Footer />
             </div>
           } />
           </Routes>
+            </Suspense>
             </CartProvider>
           </FavoritesProvider>
         </AppDataProvider>

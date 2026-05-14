@@ -226,14 +226,21 @@ export default function AdminOrderList() {
                   </tr>
                 );
               })}
+              {!loading && filteredOrders.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-6 py-20 text-center">
+                    <div className="flex flex-col items-center">
+                      <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mb-4">
+                        <ShoppingCart className="w-8 h-8 text-slate-200" />
+                      </div>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nenhum pedido encontrado</p>
+                      <p className="text-[9px] font-bold text-slate-300 uppercase mt-1">Tente ajustar seus filtros de busca</p>
+                    </div>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-          {!loading && filteredOrders.length === 0 && (
-            <div className="p-20 text-center">
-              <Package className="w-12 h-12 text-slate-200 mx-auto mb-4" />
-              <p className="text-slate-400 text-xs font-black uppercase tracking-widest">Nenhum pedido encontrado</p>
-            </div>
-          )}
         </div>
       </div>
 

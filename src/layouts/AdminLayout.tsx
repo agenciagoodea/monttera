@@ -12,7 +12,8 @@ import {
   LogOut,
   ChevronRight,
   Mail,
-  Activity
+  Activity,
+  ShieldCheck
 } from 'lucide-react';
 import { useAppData } from '../contexts/AppDataContext';
 
@@ -43,20 +44,23 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Sidebar Admin */}
       <aside className="w-72 bg-white border-r border-slate-200 flex flex-col fixed inset-y-0 shadow-sm">
         <div className="p-8 pb-10">
-          <Link to="/" className="flex flex-col items-center">
+          <Link to="/admin" className="flex flex-col items-center group">
             {settings.logo_url ? (
               <img 
                 src={settings.logo_url} 
                 alt={settings.site_name || 'Logo'} 
-                className="max-h-12 w-auto object-contain mb-2"
+                className="max-h-12 w-auto object-contain transition-transform group-hover:scale-105"
               />
             ) : (
-              <span className="text-xl font-black text-slate-800 tracking-tighter uppercase leading-none">
-                DIGITAL<span className="text-blue-600">ADMIN</span>
-              </span>
+              <div className="flex items-center gap-2 bg-slate-900 px-4 py-2 rounded-xl shadow-lg">
+                <ShieldCheck className="w-5 h-5 text-blue-500" />
+                <span className="text-sm font-black text-white tracking-tighter uppercase">
+                  Digital<span className="text-blue-500">Admin</span>
+                </span>
+              </div>
             )}
-            <span className="text-[9px] font-black text-slate-400 tracking-[0.3em] mt-1 uppercase text-center w-full">
-              {settings.logo_url ? 'Painel Administrativo' : 'SISTEMA RESTRITO'}
+            <span className="text-[8px] font-black text-slate-400 tracking-[0.4em] mt-3 uppercase text-center w-full opacity-60">
+              Gestão Profissional
             </span>
           </Link>
         </div>

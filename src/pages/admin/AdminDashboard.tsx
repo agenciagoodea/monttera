@@ -33,6 +33,11 @@ interface DashboardData {
     paidOrders: number;
     activeProducts: number;
     totalCustomers: number;
+    trends?: {
+      sales: string;
+      orders: string;
+      customers: string;
+    };
   };
   recentOrders: any[];
   salesChart: any[];
@@ -64,12 +69,29 @@ export default function AdminDashboard() {
 
   if (loading && !data) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-        <div className="relative">
-          <RefreshCcw className="w-12 h-12 text-blue-500 animate-spin" />
-          <div className="absolute inset-0 bg-blue-500/20 blur-xl animate-pulse rounded-full"></div>
+      <div className="space-y-8 animate-in fade-in duration-500">
+        {/* Stats Skeletons */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-xl shadow-slate-200/30 relative overflow-hidden">
+              <div className="w-12 h-12 bg-slate-100 rounded-2xl mb-6 animate-pulse" />
+              <div className="h-2 w-20 bg-slate-100 rounded mb-2 animate-pulse" />
+              <div className="h-8 w-32 bg-slate-100 rounded animate-pulse" />
+              <div className="absolute top-0 right-0 p-4">
+                <div className="w-16 h-6 bg-slate-50 rounded-full animate-pulse" />
+              </div>
+            </div>
+          ))}
         </div>
-        <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest animate-pulse">Sincronizando métricas...</p>
+
+        {/* Chart Skeleton */}
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/30">
+          <div className="flex justify-between mb-8">
+            <div className="h-4 w-40 bg-slate-100 rounded animate-pulse" />
+            <div className="h-4 w-24 bg-slate-100 rounded animate-pulse" />
+          </div>
+          <div className="h-80 w-full bg-slate-50/50 rounded-3xl animate-pulse" />
+        </div>
       </div>
     );
   }
@@ -100,8 +122,8 @@ export default function AdminDashboard() {
       icon: TrendingUp, 
       color: 'text-emerald-500', 
       bg: 'bg-emerald-500/10',
-      trend: '+12.5%',
-      description: 'Vendas aprovadas'
+      trend: data?.stats?.trends?.sales || '0%',
+      description: 'Vendas aprovadas (30d)'
     },
     { 
       label: 'Pedidos Pagos', 
@@ -109,8 +131,8 @@ export default function AdminDashboard() {
       icon: CheckCircle2, 
       color: 'text-blue-500', 
       bg: 'bg-blue-500/10',
-      trend: '+5.2%',
-      description: 'Total acumulado'
+      trend: data?.stats?.trends?.orders || '0%',
+      description: 'Total aprovado (30d)'
     },
     { 
       label: 'Matrizes Ativas', 
@@ -118,8 +140,8 @@ export default function AdminDashboard() {
       icon: Package, 
       color: 'text-amber-500', 
       bg: 'bg-amber-500/10',
-      trend: 'Estável',
-      description: 'Catálogo atual'
+      trend: 'Catálogo',
+      description: 'Matrizes cadastradas'
     },
     { 
       label: 'Base de Clientes', 
@@ -127,8 +149,8 @@ export default function AdminDashboard() {
       icon: Users, 
       color: 'text-indigo-500', 
       bg: 'bg-indigo-500/10',
-      trend: '+18',
-      description: 'Usuários ativos'
+      trend: data?.stats?.trends?.customers || '0',
+      description: 'Total de usuários'
     },
   ];
 
@@ -352,12 +374,20 @@ export default function AdminDashboard() {
               </div>
               <h3 className="text-2xl font-black tracking-tight mb-2 uppercase leading-none">Novas<br/>Possibilidades</h3>
               <p className="text-white/90 text-sm font-medium mb-8 leading-relaxed">Seu sistema está pronto para escalar. Que tal criar uma nova coleção?</p>
-              <Link 
-                to="/admin/produtos/novo"
-                className="inline-block bg-white text-blue-600 px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-blue-50 hover:scale-105 active:scale-95 transition-all shadow-xl shadow-blue-900/20"
-              >
-                Criar Produto
-              </Link>
+              <div className="flex flex-col gap-3">
+                <Link 
+                  to="/admin/produtos/novo"
+                  className="flex items-center justify-center bg-white text-blue-600 px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-blue-50 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xl shadow-blue-900/20"
+                >
+                  Criar Produto
+                </Link>
+                <Link 
+                  to="/admin/relatorios"
+                  className="flex items-center justify-center bg-blue-500/30 text-white border border-white/20 px-8 py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest hover:bg-blue-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                >
+                  Ver Relatórios
+                </Link>
+              </div>
             </div>
             <Package className="absolute -bottom-10 -right-10 w-48 h-48 text-white/10 group-hover:rotate-12 transition-transform duration-1000" />
           </div>

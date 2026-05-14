@@ -14,6 +14,38 @@ import { sendEmail } from './src/server/mailer';
 import nodemailer from 'nodemailer';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
 
+// Simple in-memory cache for extreme optimization
+class CacheProvider {
+  private cache: Map<string, { value: any; expiry: number }> = new Map();
+
+  set(key: string, value: any, ttlSeconds: number = 300) {
+    this.cache.set(key, {
+      value,
+      expiry: Date.now() + ttlSeconds * 1000,
+    });
+  }
+
+  get<T>(key: string): T | null {
+    const item = this.cache.get(key);
+    if (!item) return null;
+    if (Date.now() > item.expiry) {
+      this.cache.delete(key);
+      return null;
+    }
+    return item.value as T;
+  }
+
+  delete(key: string) {
+    this.cache.delete(key);
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
+const apiCache = new CacheProvider();
+
 console.log('--- SERVER.TS EXECUTING ---');
 
 process.on('uncaughtException', (err) => {
@@ -687,7 +719,7 @@ async function startServer() {
       }
 
       const products = db.all(`
-        SELECT p.*, c.name as category_name 
+        SELECT p.id, p.name, p.slug, p.price, p.sale_price, p.image, p.status, p.created_at, p.category_id, c.name as category_name 
         FROM products p 
         LEFT JOIN product_categories c ON p.category_id = c.id 
         ${whereClause}
@@ -2275,99 +2307,6 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/reports', authenticate, isAdmin, (req, res) => {
-    const period = req.query.period as string || '30d';
-    let days = 30;
-    if (period === '7d') days = 7;
-    else if (period === '90d') days = 90;
-    else if (period === '12m') days = 365;
-
-    const dateLimit = new Date();
-    dateLimit.setDate(dateLimit.getDate() - days);
-    const dateLimitStr = dateLimit.toISOString();
-
-    try {
-      // 1. Revenue & Orders Summary
-      const summary = db.get(`
-        SELECT 
-          COUNT(*) as total_orders,
-          SUM(total) as total_revenue,
-          AVG(total) as avg_ticket
-        FROM orders
-        WHERE status = 'paid' AND created_at >= ?
-      `, dateLimitStr) as any;
-
-      // 2. Sales Chart (Daily)
-      // For simplicity, we'll return daily data for the selected period
-      const salesHistory = db.all(`
-        SELECT 
-          date(created_at) as date,
-          SUM(total) as value
-        FROM orders 
-        WHERE status = 'paid' AND created_at >= ?
-        GROUP BY date(created_at)
-        ORDER BY date ASC
-      `, dateLimitStr);
-
-      // 3. Top Products
-      const topProducts = db.all(`
-        SELECT p.name, SUM(oi.quantity) as sales
-        FROM order_items oi
-        JOIN products p ON oi.product_id = p.id
-        JOIN orders o ON oi.order_id = o.id
-        WHERE o.status = 'paid' AND o.created_at >= ?
-        GROUP BY p.id
-        ORDER BY sales DESC
-        LIMIT 5
-      `, dateLimitStr);
-
-      // 4. Payment Methods
-      const paymentMethods = db.all(`
-        SELECT payment_method as name, COUNT(*) as value
-        FROM orders
-        WHERE status = 'paid' AND created_at >= ?
-        GROUP BY payment_method
-      `, dateLimitStr);
-
-      // 5. Category Performance
-      const categoryUsage = db.all(`
-        SELECT c.name, COUNT(*) as count
-        FROM order_items oi
-        JOIN products p ON oi.product_id = p.id
-        JOIN product_category_relations pc ON p.id = pc.product_id
-        JOIN product_categories c ON pc.category_id = c.id
-        JOIN orders o ON oi.order_id = o.id
-        WHERE o.status = 'paid' AND o.created_at >= ?
-        GROUP BY c.id
-        ORDER BY count DESC
-        LIMIT 5
-      `, dateLimitStr);
-
-      res.json({
-        revenue: {
-          total: summary.total_revenue || 0,
-          average: summary.avg_ticket || 0
-        },
-        orders: {
-          total: summary.total_orders || 0
-        },
-        salesChart: salesHistory.map((s: any) => ({
-          name: new Date(s.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
-          value: s.value
-        })),
-        topProducts,
-        paymentMethods: paymentMethods.map((pm: any) => ({
-          name: pm.name || 'Outro',
-          value: pm.value
-        })),
-        categoryUsage
-      });
-    } catch (error) {
-      console.error('Admin Reports Error:', error);
-      res.status(500).json({ error: 'Erro ao gerar relatÃ³rios' });
-    }
-  });
-
   // API Routes - ADMIN USERS
   app.get('/api/admin/users', authenticate, isAdmin, (req, res) => {
     try {
@@ -3025,11 +2964,46 @@ async function startServer() {
   });
 
   app.get('/api/admin/dashboard/stats', authenticate, isAdmin, (req, res) => {
+    const cached = apiCache.get('admin_dashboard_stats');
+    if (cached) return res.json(cached);
+
     try {
-      const totalSales = db.get("SELECT SUM(total) as total FROM orders WHERE status IN ('paid', 'completed', 'success', 'pago')") as any;
-      const paidOrders = db.get("SELECT COUNT(*) as count FROM orders WHERE status IN ('paid', 'completed', 'success', 'pago')") as any;
+      // Período Atual (30 dias)
+      const currentStats = db.get(`
+        SELECT 
+          SUM(total) as totalSales,
+          COUNT(*) as paidOrders
+        FROM orders 
+        WHERE status IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
+          AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+      `) as any;
+
+      // Período Anterior (30-60 dias atrás) para cálculo de tendência
+      const previousStats = db.get(`
+        SELECT 
+          SUM(total) as totalSales,
+          COUNT(*) as paidOrders
+        FROM orders 
+        WHERE status IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
+          AND created_at >= DATE_SUB(CURDATE(), INTERVAL 60 DAY)
+          AND created_at < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+      `) as any;
+
       const activeProducts = db.get("SELECT COUNT(*) as count FROM products WHERE status = 'active'") as any;
       const totalCustomers = db.get("SELECT COUNT(*) as count FROM users WHERE role = 'customer'") as any;
+      
+      const prevCustomers = db.get(`
+        SELECT COUNT(*) as count FROM users 
+        WHERE role = 'customer' 
+        AND created_at < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+      `) as any;
+
+      // Funções de cálculo de tendência
+      const calcTrend = (curr: number, prev: number) => {
+        if (!prev || prev === 0) return curr > 0 ? '+100%' : '0%';
+        const diff = ((curr - prev) / prev) * 100;
+        return (diff >= 0 ? '+' : '') + diff.toFixed(1) + '%';
+      };
 
       const recentOrders = db.all(`
         SELECT o.*, COALESCE(o.customer_name, u.name) as display_name, u.email as customer_email
@@ -3040,15 +3014,14 @@ async function startServer() {
       `);
 
       const salesChart = db.all(`
-        SELECT DATE(created_at) as date, SUM(total) as total 
+        SELECT DATE_FORMAT(created_at, '%d/%m') as date, SUM(total) as total 
         FROM orders 
-        WHERE status IN ('paid', 'completed', 'success', 'pago')
+        WHERE status IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
           AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-        GROUP BY DATE(created_at)
-        ORDER BY date ASC
+        GROUP BY date
+        ORDER BY MIN(created_at) ASC
       `);
 
-      // Atividade recente combinando logs
       const activities = db.all(`
         SELECT * FROM (
           (SELECT 'order' as type, CONCAT('Novo pedido #', id) as message, created_at FROM orders ORDER BY created_at DESC LIMIT 5)
@@ -3061,20 +3034,27 @@ async function startServer() {
         LIMIT 10
       `);
 
-      res.json({
+      const responseData = {
         stats: {
-          totalSales: totalSales?.total || 0,
-          paidOrders: paidOrders?.count || 0,
+          totalSales: currentStats?.totalSales || 0,
+          paidOrders: currentStats?.paidOrders || 0,
           activeProducts: activeProducts?.count || 0,
           totalCustomers: totalCustomers?.count || 0,
+          trends: {
+            sales: calcTrend(currentStats?.totalSales || 0, previousStats?.totalSales || 0),
+            orders: calcTrend(currentStats?.paidOrders || 0, previousStats?.paidOrders || 0),
+            customers: (totalCustomers?.count - prevCustomers?.count >= 0 ? '+' : '') + (totalCustomers?.count - prevCustomers?.count)
+          }
         },
         recentOrders,
         salesChart,
         activities
-      });
+      };
+      apiCache.set('admin_dashboard_stats', responseData, 300); // Cache por 5 minutos
+      res.json(responseData);
     } catch (error) {
-      console.error('Dashboard Stats Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar dados do dashboard' });
+      console.error('Admin Dashboard Stats Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar dados reais do dashboard' });
     }
   });
 

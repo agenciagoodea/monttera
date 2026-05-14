@@ -168,10 +168,6 @@ export default function AdminReports() {
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Receita no Período</p>
               <div className="flex items-baseline gap-2">
                 <h2 className="text-2xl font-black text-slate-900">R$ {(stats?.revenue?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h2>
-                <span className="text-[10px] font-black text-emerald-500 flex items-center gap-0.5 bg-emerald-50 px-2 py-0.5 rounded-full">
-                  <TrendingUp className="w-3 h-3" />
-                  12%
-                </span>
               </div>
             </div>
           </div>
@@ -184,10 +180,6 @@ export default function AdminReports() {
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pedidos no Período</p>
               <div className="flex items-baseline gap-2">
                 <h2 className="text-2xl font-black text-slate-900">{(stats?.orders?.total || 0)}</h2>
-                <span className="text-[10px] font-black text-emerald-500 flex items-center gap-0.5 bg-emerald-50 px-2 py-0.5 rounded-full">
-                  <TrendingUp className="w-3 h-3" />
-                  8%
-                </span>
               </div>
             </div>
           </div>
@@ -209,13 +201,9 @@ export default function AdminReports() {
               <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-600/30">
                 <FileText className="w-6 h-6" />
               </div>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Conversão Estimada</p>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status do Sistema</p>
               <div className="flex items-baseline gap-2">
-                <h2 className="text-2xl font-black text-slate-900">3.4%</h2>
-                <span className="text-[10px] font-black text-rose-500 flex items-center gap-0.5 bg-rose-50 px-2 py-0.5 rounded-full">
-                  <TrendingDown className="w-3 h-3" />
-                  2%
-                </span>
+                <h2 className="text-2xl font-black text-emerald-500 uppercase tracking-tighter">Online</h2>
               </div>
             </div>
           </div>
