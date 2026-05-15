@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, FileText, ShoppingCart, Bolt, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, FileText, ShoppingCart, Zap, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send } from 'lucide-react';
 import { Product } from '../types';
 import { formatCurrency } from '../lib/utils';
 import { useCart } from '../contexts/CartContext';
 import { useFavorites } from '../contexts/FavoritesContext';
+import { useAppData } from '../contexts/AppDataContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface Review {
@@ -16,7 +17,9 @@ interface Review {
 }
 
 export default function ProductDetail() {
+  const navigate = useNavigate();
   const { slug } = useParams();
+  const { settings } = useAppData();
   const { addToCart, items } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
   const [product, setProduct] = useState<Product | null>(null);
@@ -33,6 +36,7 @@ export default function ProductDetail() {
   const [newRating, setNewRating] = useState(5);
   const [newComment, setNewComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
+  const redirectToCheckout = String(settings.redirect_to_checkout_after_add_to_cart || 'false') === 'true';
 
   useEffect(() => {
     async function fetchProduct() {
@@ -286,34 +290,8 @@ export default function ProductDetail() {
             {product.name}
           </h1>
 
-          <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
-            <div className="flex flex-wrap items-center gap-3">
-              {product.production_sheet && (
-                <a
-                  href={product.production_sheet}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex w-fit items-center gap-2 px-5 py-2.5 bg-white border-2 border-red-500 text-red-500 rounded-xl font-bold text-sm hover:bg-red-50 hover:shadow-sm transition-all"
-                >
-                  <FileText className="w-4 h-4" />
-                  Folha de Produção
-                </a>
-              )}
-
-              <button
-                onClick={() => toggleFavorite(product.id, product.name)}
-                className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all border-2 ${
-                  isProductFavorite
-                    ? 'border-pink-500 bg-pink-50 text-pink-600'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-pink-300 hover:text-pink-600'
-                }`}
-              >
-                <Heart className={`w-4 h-4 ${isProductFavorite ? 'fill-current' : ''}`} />
-                {isProductFavorite ? 'Nos Favoritos' : 'Favoritar'}
-              </button>
-            </div>
-
-            <div className="flex flex-col md:items-end">
+          <div className="flex flex-wrap items-end gap-3 mb-8">
+            <div className="flex flex-col mr-2">
               {product.sale_price && (
                 <span className="text-base text-slate-400 line-through font-bold">{formatCurrency(product.price)}</span>
               )}
@@ -321,12 +299,36 @@ export default function ProductDetail() {
                 {formatCurrency(currentPrice)}
               </span>
             </div>
+
+            {product.production_sheet && (
+              <a
+                href={product.production_sheet}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex w-fit items-center gap-2 px-5 py-2.5 bg-white border-2 border-red-500 text-red-500 rounded-xl font-bold text-sm hover:bg-red-50 hover:shadow-sm transition-all"
+              >
+                <FileText className="w-4 h-4" />
+                Folha de Producao
+              </a>
+            )}
+
+            <button
+              onClick={() => toggleFavorite(product.id, product.name)}
+              className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all border-2 ${
+                isProductFavorite
+                  ? 'border-pink-500 bg-pink-50 text-pink-600'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-pink-300 hover:text-pink-600'
+              }`}
+            >
+              <Heart className={`w-4 h-4 ${isProductFavorite ? 'fill-current' : ''}`} />
+              {isProductFavorite ? 'Nos Favoritos' : 'Favoritar'}
+            </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
             <div className="flex items-center gap-3 p-4 bg-sky-50 border border-sky-100 rounded-2xl">
               <div className="w-10 h-10 bg-sky-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-sky-200">
-                <Bolt className="w-5 h-5 fill-current" />
+                <Zap className="w-5 h-5 fill-current" />
               </div>
               <div>
                 <p className="text-sm font-black text-sky-900 uppercase tracking-wide">Flash</p>
@@ -394,7 +396,12 @@ export default function ProductDetail() {
           </div>
 
           <button
-            onClick={() => addToCart(product)}
+            onClick={() => {
+              addToCart(product);
+              if (redirectToCheckout) {
+                navigate('/carrinho');
+              }
+            }}
             disabled={isInCart}
             className={`w-full md:w-auto min-w-[280px] h-16 rounded-2xl flex items-center justify-center gap-3 text-sm font-black uppercase tracking-widest transition-all shadow-xl ${
               isInCart

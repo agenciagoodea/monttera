@@ -134,18 +134,21 @@ export default function CartPage() {
       fetch('/api/customer/account')
         .then(res => res.ok ? res.json() : null)
         .then(data => {
-          if (data && !data.error) {
-            const [firstName, ...rest] = (data.name || '').split(' ');
+          const profile = data?.user ?? data;
+          if (profile && !profile.error) {
+            const [firstName, ...rest] = String(profile.name || '').split(' ');
             setPayer(prev => ({
               ...prev,
-              email: data.email || user.email || prev.email,
-              first_name: data.first_name || firstName || prev.first_name,
-              last_name: data.last_name || rest.join(' ') || prev.last_name,
-              cpf: data.cpf || prev.cpf,
-              zip_code: data.billing_zip || data.zip || prev.zip_code,
-              street: data.billing_address || data.address || prev.street,
-              city: data.billing_city || data.city || prev.city,
-              state: data.billing_state || data.state || prev.state,
+              email: String(profile.email || user.email || prev.email),
+              first_name: String(profile.first_name || firstName || prev.first_name),
+              last_name: String(profile.last_name || rest.join(' ') || prev.last_name),
+              cpf: String(profile.cpf || prev.cpf),
+              zip_code: String(profile.billing_zip || profile.zip || prev.zip_code),
+              street: String(profile.billing_address || profile.address || prev.street),
+              number: String(profile.billing_number || profile.number || prev.number),
+              neighborhood: String(profile.billing_neighborhood || profile.neighborhood || profile.district || prev.neighborhood),
+              city: String(profile.billing_city || profile.city || prev.city),
+              state: String(profile.billing_state || profile.state || prev.state),
             }));
           } else {
             setPayer((prev) => ({ ...prev, email: prev.email || user.email || '' }));
@@ -275,7 +278,8 @@ export default function CartPage() {
             setCheckoutResult(data);
             if (data.status === 'approved') {
               clearCart();
-              setStatusMessage('Pagamento aprovado com sucesso.');
+              navigate(`/obrigado-compra?order_id=${encodeURIComponent(String(data.order_id || ''))}&payment_method=${encodeURIComponent(checkoutMethod)}`);
+              return;
             } else {
               setStatusMessage(`Pagamento em status: ${data.status}`);
             }
@@ -287,7 +291,7 @@ export default function CartPage() {
         },
       },
     });
-  }, [checkoutMethod, publicKey, totalPrice, payer, items, clearCart]);
+  }, [checkoutMethod, publicKey, totalPrice, payer, items, clearCart, navigate, checkoutConsent]);
 
   useEffect(() => {
     if (!checkoutResult?.payment_id || checkoutResult.payment_method !== 'pix') return;
@@ -301,7 +305,9 @@ export default function CartPage() {
           setCheckoutResult((prev) => (prev ? { ...prev, status: data.status } : prev));
           if (data.status === 'approved') {
             clearCart();
-            setStatusMessage('Pagamento PIX aprovado.');
+            const approvedOrderId = Number(data?.order_id || checkoutResult?.order_id || 0);
+            navigate(`/obrigado-compra?order_id=${encodeURIComponent(String(approvedOrderId || ''))}&payment_method=pix`);
+            return;
           }
         }
       } catch (error) {
@@ -310,7 +316,7 @@ export default function CartPage() {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [checkoutResult?.payment_id, checkoutResult?.payment_method, checkoutResult?.status, clearCart]);
+  }, [checkoutResult?.payment_id, checkoutResult?.payment_method, checkoutResult?.status, checkoutResult?.order_id, clearCart, navigate]);
 
   useEffect(() => {
     if (!pixExpiresAt) return;
@@ -351,6 +357,11 @@ export default function CartPage() {
         return;
       }
       setCheckoutResult(data);
+      if (data.status === 'approved') {
+        clearCart();
+        navigate(`/obrigado-compra?order_id=${encodeURIComponent(String(data.order_id || ''))}&payment_method=pix`);
+        return;
+      }
       setPixExpiresAt(Date.now() + 30 * 60 * 1000);
       setSecondsLeft(30 * 60);
     } catch (error) {
@@ -592,26 +603,8 @@ export default function CartPage() {
                 />
               </div>
             </div>
-
-            {payerErrors.length > 0 && (
-              <ul className="text-[11px] text-rose-600 font-semibold space-y-0.5 pt-2">
-                {payerErrors.map((error) => (
-                  <li key={error}>• {error}</li>
-                ))}
-              </ul>
-            )}
           </div>
 
-          <div className="bg-[#eef8f6] border border-emerald-100 rounded-[2rem] p-6 text-[13px] text-emerald-900 leading-relaxed shadow-sm">
-            <p className="font-bold mb-2 flex items-center gap-2 text-emerald-950"><span className="text-lg">🔒</span> Uso exclusivo para quem adquiriu</p>
-            <p className="mb-2">
-              Essa matriz foi desenvolvida com muito carinho e dedicação. Por isso, pedimos que <strong>não compartilhe, doe ou revenda</strong> este arquivo em nenhuma plataforma, rede social ou mídia digital.
-            </p>
-            <p className="mb-3 flex items-start gap-2">
-              <span className="text-lg leading-none">📜</span> <span>A redistribuição sem autorização é proibida pela <strong>Lei de Direitos Autorais (Lei 9.610/98)</strong>.</span>
-            </p>
-            <p className="font-bold text-emerald-950">Contamos com seu apoio para valorizar o trabalho de quem cria!💛</p>
-          </div>
         </div>
 
         <div className="space-y-6">

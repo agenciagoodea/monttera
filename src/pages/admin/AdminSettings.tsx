@@ -19,6 +19,8 @@ import {
   Activity,
   Plus,
   Trash2,
+  Pencil,
+  X,
   ShieldCheck,
   Scale,
   Cookie,
@@ -55,6 +57,7 @@ export default function AdminSettings() {
   const [lgpdLogs, setLgpdLogs] = useState<any[]>([]);
   const [loadingLgpdData, setLoadingLgpdData] = useState(false);
   const [loadingPolicyDiff, setLoadingPolicyDiff] = useState(false);
+  const [updatingConsentId, setUpdatingConsentId] = useState<number | null>(null);
   const [lgpdPagination, setLgpdPagination] = useState({
     consents: { page: 1, limit: 50, total: 0, totalPages: 1 },
     requests: { page: 1, limit: 50, total: 0, totalPages: 1 },
@@ -80,6 +83,7 @@ export default function AdminSettings() {
     is_active: true,
     force_reaccept: false,
   });
+  const [editingPolicyId, setEditingPolicyId] = useState<number | null>(null);
   const [policyDiffSelection, setPolicyDiffSelection] = useState({ leftId: '', rightId: '' });
   const [policyDiffResult, setPolicyDiffResult] = useState<any | null>(null);
   const [lgpdExportUserId, setLgpdExportUserId] = useState('');
@@ -108,6 +112,7 @@ export default function AdminSettings() {
     contact_hours: 'Seg a Sex, 8h às 18h',
     contact_whatsapp: '',
     new_badge_days: '20',
+    redirect_to_checkout_after_add_to_cart: 'false',
     // Suporte ao Cliente
     support_whatsapp: '',
     support_email: '',
@@ -315,6 +320,29 @@ export default function AdminSettings() {
         fetch(`/api/admin/lgpd/logs?${logsParams.toString()}`),
       ]);
 
+      const responses = [policiesRes, consentsRes, requestsRes, logsRes];
+      const firstFailure = responses.find((response) => !response.ok);
+      if (firstFailure) {
+        if (firstFailure.status === 404) {
+          setMessage({
+            type: 'error',
+            text: 'Módulo LGPD não encontrado no backend atual. Reinicie o servidor e gere novo build.',
+          });
+        } else if (firstFailure.status === 401 || firstFailure.status === 403) {
+          setMessage({
+            type: 'error',
+            text: 'Sua sessão não possui permissão para carregar o módulo LGPD.',
+          });
+        } else {
+          const err = await firstFailure.json().catch(() => ({}));
+          setMessage({
+            type: 'error',
+            text: err?.error || 'Erro ao carregar dados LGPD.',
+          });
+        }
+        return;
+      }
+
       const [policiesData, consentsData, requestsData, logsData] = await Promise.all([
         policiesRes.json().catch(() => []),
         consentsRes.json().catch(() => []),
@@ -423,6 +451,84 @@ export default function AdminSettings() {
     { id: 'payment', label: 'Meios de Pagamento', icon: CreditCard },
     { id: 'lgpd', label: 'LGPD', icon: ShieldCheck },
   ];
+
+  const lgpdRequestStatusLabel = (status?: string) => {
+    const normalized = String(status || '').toLowerCase();
+    const labels: Record<string, string> = {
+      pending: 'Pendente',
+      in_review: 'Em análise',
+      completed: 'Concluída',
+      refused: 'Recusada',
+    };
+    return labels[normalized] || status || '-';
+  };
+
+  const lgpdRequestTypeLabel = (requestType?: string) => {
+    const normalized = String(requestType || '').toLowerCase();
+    const labels: Record<string, string> = {
+      export: 'Exportação',
+      delete: 'Exclusão',
+      correction: 'Correção',
+      revoke: 'Revogação',
+    };
+    return labels[normalized] || requestType || '-';
+  };
+
+  const lgpdLogEventLabel = (eventType?: string) => {
+    const normalized = String(eventType || '').toLowerCase();
+    const labels: Record<string, string> = {
+      consent: 'Consentimento',
+      policy: 'Política',
+      request: 'Solicitação',
+      export: 'Exportação',
+      account: 'Conta',
+      auth: 'Autenticação',
+      cookie: 'Cookies',
+    };
+    return labels[normalized] || eventType || '-';
+  };
+
+  const lgpdLogActionLabel = (action?: string) => {
+    const normalized = String(action || '').toLowerCase();
+    const labels: Record<string, string> = {
+      create: 'Criação',
+      update: 'Atualização',
+      delete: 'Exclusão',
+      revoke: 'Revogação',
+      accept: 'Aceite',
+      submit: 'Envio',
+      download: 'Download',
+      approve: 'Aprovação',
+      reject: 'Recusa',
+      login: 'Login',
+      logout: 'Logout',
+    };
+    return labels[normalized] || action || '-';
+  };
+
+  const lgpdConsentKeyLabel = (consentKey?: string) => {
+    const normalized = String(consentKey || '').toLowerCase();
+    const labels: Record<string, string> = {
+      marketing_communications: 'Comunicações de marketing',
+      privacy_policy: 'Política de privacidade',
+      terms_of_use: 'Termos de uso',
+      cookie_policy: 'Política de cookies',
+      checkout_data_processing: 'Processamento de dados no checkout',
+    };
+    return labels[normalized] || consentKey || '-';
+  };
+
+  const lgpdConsentSourceLabel = (source?: string) => {
+    const normalized = String(source || '').toLowerCase();
+    const labels: Record<string, string> = {
+      web: 'Site',
+      my_account: 'Minha Conta',
+      admin_panel: 'Painel Admin',
+      checkout: 'Checkout',
+      register: 'Cadastro',
+    };
+    return labels[normalized] || source || '-';
+  };
 
   const webhookUrl = `${window.location.origin}/api/webhooks/mercadopago`;
 
@@ -537,28 +643,53 @@ export default function AdminSettings() {
     }
   };
 
-  const createLgpdPolicy = async () => {
+  const resetPolicyForm = () => {
+    setEditingPolicyId(null);
+    setNewPolicy({ policy_type: 'privacy', version: '', title: '', content: '', is_active: true, force_reaccept: false });
+  };
+
+  const upsertLgpdPolicy = async () => {
     if (!newPolicy.version || !newPolicy.title || !newPolicy.content) {
       setMessage({ text: 'Preencha versão, título e conteúdo da política.', type: 'error' });
       return;
     }
     try {
-      const res = await fetch('/api/admin/lgpd/policies', {
-        method: 'POST',
+      const isEditing = editingPolicyId !== null;
+      const endpoint = isEditing ? `/api/admin/lgpd/policies/${editingPolicyId}` : '/api/admin/lgpd/policies';
+      const method = isEditing ? 'PUT' : 'POST';
+      const res = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newPolicy),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status === 404) {
+          setMessage({ text: 'Endpoint LGPD não encontrado no backend. Reinicie o servidor e publique o build atualizado.', type: 'error' });
+          return;
+        }
         setMessage({ text: data?.error || 'Erro ao criar política LGPD.', type: 'error' });
         return;
       }
-      setMessage({ text: 'Política LGPD criada com sucesso.', type: 'success' });
-      setNewPolicy({ policy_type: 'privacy', version: '', title: '', content: '', is_active: true, force_reaccept: false });
+      setMessage({ text: isEditing ? 'Política LGPD atualizada com sucesso.' : 'Política LGPD criada com sucesso.', type: 'success' });
+      resetPolicyForm();
       loadLgpdData();
     } catch {
-      setMessage({ text: 'Erro de rede ao criar política LGPD.', type: 'error' });
+      setMessage({ text: editingPolicyId ? 'Erro de rede ao atualizar política LGPD.' : 'Erro de rede ao criar política LGPD.', type: 'error' });
     }
+  };
+
+  const startEditLgpdPolicy = (policy: any) => {
+    setEditingPolicyId(Number(policy.id));
+    setNewPolicy({
+      policy_type: String(policy.policy_type || 'privacy'),
+      version: String(policy.version || ''),
+      title: String(policy.title || ''),
+      content: String(policy.content || ''),
+      is_active: Number(policy.is_active) === 1 || Boolean(policy.is_active),
+      force_reaccept: Number(policy.force_reaccept) === 1 || Boolean(policy.force_reaccept),
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const activateLgpdPolicy = async (policyId: number) => {
@@ -581,6 +712,32 @@ export default function AdminSettings() {
     }
   };
 
+  const deleteLgpdPolicy = async (policy: any) => {
+    const label = `${policy?.title || 'Política'} v${policy?.version || '-'}`;
+    const confirmed = window.confirm(`Deseja realmente excluir ${label}? Esta ação não pode ser desfeita.`);
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/admin/lgpd/policies/${policy.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage({ text: data?.error || 'Erro ao excluir política.', type: 'error' });
+        return;
+      }
+
+      if (editingPolicyId === Number(policy.id)) {
+        resetPolicyForm();
+      }
+      setMessage({ text: 'Política excluída com sucesso.', type: 'success' });
+      loadLgpdData();
+      fetchSettings();
+    } catch {
+      setMessage({ text: 'Erro de rede ao excluir política.', type: 'error' });
+    }
+  };
+
   const updateLgpdRequestStatus = async (id: number, status: string) => {
     try {
       const res = await fetch(`/api/admin/lgpd/requests/${id}`, {
@@ -590,13 +747,35 @@ export default function AdminSettings() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMessage({ text: data?.error || 'Erro ao atualizar solicitacao.', type: 'error' });
+        setMessage({ text: data?.error || 'Erro ao atualizar solicitação.', type: 'error' });
         return;
       }
-      setMessage({ text: `Solicitacao #${id} atualizada para ${status}.`, type: 'success' });
+      setMessage({ text: `Solicitação #${id} atualizada para ${lgpdRequestStatusLabel(status)}.`, type: 'success' });
       loadLgpdData();
     } catch {
-      setMessage({ text: 'Erro de rede ao atualizar solicitacao.', type: 'error' });
+      setMessage({ text: 'Erro de rede ao atualizar solicitação.', type: 'error' });
+    }
+  };
+
+  const updateLgpdConsentStatus = async (id: number, granted: boolean) => {
+    try {
+      setUpdatingConsentId(id);
+      const res = await fetch(`/api/admin/lgpd/consents/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ granted }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage({ text: data?.error || 'Erro ao atualizar consentimento.', type: 'error' });
+        return;
+      }
+      setMessage({ text: `Consentimento atualizado para ${granted ? 'concedido' : 'revogado'}.`, type: 'success' });
+      loadLgpdData();
+    } catch {
+      setMessage({ text: 'Erro de rede ao atualizar consentimento.', type: 'error' });
+    } finally {
+      setUpdatingConsentId(null);
     }
   };
 
@@ -828,6 +1007,31 @@ export default function AdminSettings() {
                         />
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
                           Produtos cadastrados nos últimos X dias exibirão o badge "Novo".
+                        </p>
+                      </div>
+                      <div className="md:col-span-2 space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+                          Redirecionar para checkout ao adicionar no carrinho
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSettings({
+                              ...settings,
+                              redirect_to_checkout_after_add_to_cart:
+                                settings.redirect_to_checkout_after_add_to_cart === 'true' ? 'false' : 'true',
+                            })
+                          }
+                          className={`w-full px-5 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all border ${
+                            settings.redirect_to_checkout_after_add_to_cart === 'true'
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                              : 'bg-slate-50 border-slate-200 text-slate-500'
+                          }`}
+                        >
+                          {settings.redirect_to_checkout_after_add_to_cart === 'true' ? 'Ativado' : 'Desativado'}
+                        </button>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                          Quando ativado, o cliente será enviado direto para o checkout ao clicar em comprar.
                         </p>
                       </div>
                     </div>
@@ -1312,7 +1516,7 @@ export default function AdminSettings() {
                           <>
                             <input
                               type="text"
-                              placeholder="consent_key"
+                              placeholder="Chave do consentimento"
                               value={lgpdFilters.consent_key}
                               onChange={(e) => setLgpdFilters((prev) => ({ ...prev, consent_key: e.target.value }))}
                               className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold"
@@ -1337,10 +1541,10 @@ export default function AdminSettings() {
                               className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold"
                             >
                               <option value="">Status (todos)</option>
-                              <option value="pending">pending</option>
-                              <option value="in_review">in_review</option>
-                              <option value="completed">completed</option>
-                              <option value="refused">refused</option>
+                              <option value="pending">Pendente</option>
+                              <option value="in_review">Em análise</option>
+                              <option value="completed">Concluída</option>
+                              <option value="refused">Recusada</option>
                             </select>
                             <select
                               value={lgpdFilters.request_type}
@@ -1348,10 +1552,10 @@ export default function AdminSettings() {
                               className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold"
                             >
                               <option value="">Tipo (todos)</option>
-                              <option value="export">export</option>
-                              <option value="delete">delete</option>
-                              <option value="correction">correction</option>
-                              <option value="revoke">revoke</option>
+                              <option value="export">Exportação</option>
+                              <option value="delete">Exclusão</option>
+                              <option value="correction">Correção</option>
+                              <option value="revoke">Revogação</option>
                             </select>
                           </>
                         )}
@@ -1360,14 +1564,14 @@ export default function AdminSettings() {
                           <>
                             <input
                               type="text"
-                              placeholder="event_type"
+                              placeholder="Tipo de evento"
                               value={lgpdFilters.event_type}
                               onChange={(e) => setLgpdFilters((prev) => ({ ...prev, event_type: e.target.value }))}
                               className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold"
                             />
                             <input
                               type="text"
-                              placeholder="action"
+                              placeholder="Ação"
                               value={lgpdFilters.action}
                               onChange={(e) => setLgpdFilters((prev) => ({ ...prev, action: e.target.value }))}
                               className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold"
@@ -1477,16 +1681,35 @@ export default function AdminSettings() {
                         <div className="space-y-3">
                           {lgpdConsents.map((c) => (
                             <div key={c.id} className="rounded-2xl border border-slate-200 p-4">
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                {c.consent_key} • {c.granted ? 'Concedido' : 'Revogado'}
-                              </p>
-                              <p className="text-sm font-black text-slate-800 mt-1">
-                                {c.user_name || 'Usuário removido'} <span className="text-slate-500">({c.user_email || 'sem e-mail'})</span>
-                              </p>
-                              <p className="text-xs text-slate-500 mt-1">
-                                Versão: {c.policy_version || '-'} • Origem: {c.source || '-'} • Atualizado: {c.updated_at}
-                              </p>
-                              <p className="text-xs text-slate-500">IP: {c.ip || '-'} • Navegador: {c.user_agent || '-'}</p>
+                              <div className="flex flex-col md:flex-row md:items-center gap-3">
+                                <div className="flex-1">
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    {lgpdConsentKeyLabel(c.consent_key)}
+                                  </p>
+                                  <p className="text-sm font-black text-slate-800 mt-1">
+                                    {c.user_name || 'Usuário removido'} <span className="text-slate-500">({c.user_email || 'sem e-mail'})</span>
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    Versão: {c.policy_version || '-'} • Origem: {lgpdConsentSourceLabel(c.source)} • Atualizado: {c.updated_at}
+                                  </p>
+                                  <p className="text-xs text-slate-500">IP: {c.ip || '-'} • Base legal: {c.legal_basis || '-'}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-widest ${Number(c.granted) ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                                    {Number(c.granted) ? 'Concedido' : 'Revogado'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateLgpdConsentStatus(Number(c.id), !Boolean(Number(c.granted)))}
+                                    disabled={updatingConsentId === Number(c.id)}
+                                    className="px-3 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                                  >
+                                    {updatingConsentId === Number(c.id)
+                                      ? 'Atualizando...'
+                                      : Number(c.granted) ? 'Revogar' : 'Conceder'}
+                                  </button>
+                                </div>
+                              </div>
                             </div>
                           ))}
                           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
@@ -1520,7 +1743,9 @@ export default function AdminSettings() {
                   {lgpdSubTab === 'policies' && (
                     <div className="space-y-6">
                       <div className="rounded-2xl border border-slate-200 p-5 space-y-4">
-                        <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Nova Versão de Política</h4>
+                        <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">
+                          {editingPolicyId ? `Editar Política #${editingPolicyId}` : 'Nova Versão de Política'}
+                        </h4>
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                           <select className="px-4 py-3 rounded-xl bg-slate-50 text-xs font-bold" value={newPolicy.policy_type} onChange={(e) => setNewPolicy({ ...newPolicy, policy_type: e.target.value })}>
                             <option value="privacy">Privacidade</option>
@@ -1538,7 +1763,15 @@ export default function AdminSettings() {
                           <button type="button" onClick={() => setNewPolicy({ ...newPolicy, force_reaccept: !newPolicy.force_reaccept })} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${newPolicy.force_reaccept ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
                             {newPolicy.force_reaccept ? 'Forçar reaceite ligado' : 'Forçar reaceite desligado'}
                           </button>
-                          <button type="button" onClick={createLgpdPolicy} className="ml-auto px-5 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest">Criar política</button>
+                          {editingPolicyId && (
+                            <button type="button" onClick={resetPolicyForm} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-[10px] font-black uppercase tracking-widest inline-flex items-center gap-2">
+                              <X className="w-3.5 h-3.5" />
+                              Cancelar edição
+                            </button>
+                          )}
+                          <button type="button" onClick={upsertLgpdPolicy} className="ml-auto px-5 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest">
+                            {editingPolicyId ? 'Salvar edição' : 'Criar política'}
+                          </button>
                         </div>
                       </div>
 
@@ -1554,6 +1787,22 @@ export default function AdminSettings() {
                               <h5 className="text-sm font-black text-slate-800">{p.title} <span className="text-slate-500">v{p.version}</span></h5>
                               <p className="text-xs text-slate-500 mt-1">{p.is_active ? 'Ativa' : 'Inativa'} • {p.force_reaccept ? 'Força reaceite' : 'Sem reaceite'}</p>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => startEditLgpdPolicy(p)}
+                              className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-[10px] font-black uppercase tracking-widest inline-flex items-center gap-2"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteLgpdPolicy(p)}
+                              className="px-4 py-2 rounded-xl bg-rose-100 text-rose-700 text-[10px] font-black uppercase tracking-widest inline-flex items-center gap-2"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Excluir
+                            </button>
                             {!p.is_active && (
                               <button type="button" onClick={() => activateLgpdPolicy(Number(p.id))} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest">
                                 Ativar
@@ -1666,14 +1915,14 @@ export default function AdminSettings() {
                             <div key={r.id} className="rounded-2xl border border-slate-200 p-4">
                               <div className="flex flex-col md:flex-row md:items-center gap-2">
                                 <div className="flex-1">
-                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{r.id} • {r.request_type}</p>
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{r.id} • {lgpdRequestTypeLabel(r.request_type)}</p>
                                   <h5 className="text-sm font-black text-slate-800">{r.user_name} <span className="text-slate-500 font-bold">({r.user_email})</span></h5>
-                                  <p className="text-xs text-slate-500 mt-1">Status atual: <strong>{r.status}</strong></p>
+                                  <p className="text-xs text-slate-500 mt-1">Status atual: <strong>{lgpdRequestStatusLabel(r.status)}</strong></p>
                                 </div>
                                 <div className="flex gap-2">
                                   {['pending', 'in_review', 'completed', 'refused'].map((st) => (
                                     <button key={st} type="button" onClick={() => updateLgpdRequestStatus(Number(r.id), st)} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${r.status === st ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                                      {st}
+                                      {lgpdRequestStatusLabel(st)}
                                     </button>
                                   ))}
                                 </div>
@@ -1718,7 +1967,7 @@ export default function AdminSettings() {
                         <>
                           {lgpdLogs.map((l) => (
                             <div key={l.id} className="rounded-2xl border border-slate-200 p-4">
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{l.event_type} • {l.action}</p>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{lgpdLogEventLabel(l.event_type)} • {lgpdLogActionLabel(l.action)}</p>
                               <p className="text-sm font-black text-slate-800 mt-1">{l.user_name || 'Sistema'} <span className="text-slate-500 font-bold">({l.user_email || 'sem e-mail'})</span></p>
                               <p className="text-xs text-slate-500 mt-1">IP: {l.ip || '-'} • {l.created_at}</p>
                             </div>
@@ -1771,7 +2020,7 @@ export default function AdminSettings() {
                       </p>
                       <ul className="space-y-2 text-sm text-slate-600 font-semibold">
                         <li>• Exportação protegida por autenticação e vínculo com o usuário logado.</li>
-                        <li>• Solicitações com workflow: pending, in_review, completed, refused.</li>
+                        <li>• Solicitações com fluxo: pendente, em análise, concluída e recusada.</li>
                         <li>• Conclusão de exclusão executa anonimização e revoga consentimentos.</li>
                       </ul>
                       <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-3">

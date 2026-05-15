@@ -8,7 +8,7 @@
     "npm": ">=10"
   },
   "scripts": {
-    "dev": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs server.ts",
+    "dev": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs watch --clear-screen=false server.ts",
     "build": "npm run clean && npm run build:client && npm run build:server",
     "build:client": "node --max-old-space-size=2048 ./scripts/build-client.mjs",
     "build:server": "node ./node_modules/typescript/bin/tsc -p tsconfig.server.json && node ./scripts/postbuild-server.mjs",
@@ -16,7 +16,7 @@
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});\"",
     "lint": "node ./node_modules/typescript/bin/tsc --noEmit",
     "start": "node dist/server.cjs",
-    "start:dev": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs server.ts",
+    "start:dev": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs watch --clear-screen=false server.ts",
     "verify:build": "npm run build && node -e \"const fs=require('fs');if(!fs.existsSync('dist/server.cjs')){throw new Error('dist/server.cjs nao foi gerado')}\"",
     "doctor": "node ./scripts/doctor.mjs",
     "doctor:strict": "node ./scripts/doctor.mjs --strict",

@@ -4,8 +4,9 @@ import { Product } from '../types';
 import { formatCurrency } from '../lib/utils';
 import { motion } from 'motion/react';
 import { useCart } from '../contexts/CartContext';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useFavorites } from '../contexts/FavoritesContext';
+import { useAppData } from '../contexts/AppDataContext';
 
 interface ProductCardProps {
   product: Product;
@@ -13,11 +14,14 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product }: ProductCardProps) {
+  const navigate = useNavigate();
   const { addToCart, items } = useCart();
+  const { settings } = useAppData();
   const { isFavorite, toggleFavorite } = useFavorites();
   const isInCart = items.some(item => item.product_id === product.id);
   const isProductFavorite = isFavorite(product.id);
   const showNewBadge = Number(product.is_new) === 1;
+  const redirectToCheckout = String(settings.redirect_to_checkout_after_add_to_cart || 'false') === 'true';
 
   const discount = product.sale_price 
     ? Math.round(((product.price - product.sale_price) / product.price) * 100)
@@ -95,7 +99,12 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
           
           <button 
-            onClick={() => addToCart(product)}
+            onClick={() => {
+              addToCart(product);
+              if (redirectToCheckout) {
+                navigate('/carrinho');
+              }
+            }}
             disabled={isInCart}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-widest ${
               isInCart 

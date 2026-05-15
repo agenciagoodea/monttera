@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { CheckCircle2, Loader2, AlertCircle, ShoppingBag } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useCart } from '../contexts/CartContext';
@@ -8,6 +8,7 @@ type CaptureState = 'loading' | 'success' | 'error';
 
 export default function PayPalSuccess() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { clearCart } = useCart();
   const [state, setState] = useState<CaptureState>('loading');
   const [orderId, setOrderId] = useState<number | null>(null);
@@ -32,7 +33,8 @@ export default function PayPalSuccess() {
         if (res.ok && data.success) {
           clearCart();
           setOrderId(data.order_id);
-          setState('success');
+          navigate(`/obrigado-compra?order_id=${encodeURIComponent(String(data.order_id || ''))}&payment_method=paypal`, { replace: true });
+          return;
         } else {
           setState('error');
           setErrorMsg(data?.error || 'Falha ao confirmar pagamento. Entre em contato com o suporte.');
@@ -44,7 +46,7 @@ export default function PayPalSuccess() {
     }
 
     capturePayment();
-  }, [searchParams, clearCart]);
+  }, [searchParams, clearCart, navigate]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">

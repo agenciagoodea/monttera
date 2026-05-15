@@ -19,6 +19,7 @@ const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const PayPalSuccess = lazy(() => import('./pages/PayPalSuccess'));
 const PayPalCancel = lazy(() => import('./pages/PayPalCancel'));
+const ThankYouPage = lazy(() => import('./pages/ThankYouPage'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
 
@@ -102,6 +103,7 @@ export default function App() {
                   <Route path="/redefinir-senha" element={<ResetPassword />} />
                   <Route path="/checkout/paypal/success" element={<PayPalSuccess />} />
                   <Route path="/checkout/paypal/cancel" element={<PayPalCancel />} />
+                  <Route path="/obrigado-compra" element={<ThankYouPage />} />
                   <Route path="/politica" element={<PrivacyPolicy />} />
                   <Route path="/ajuda" element={<HelpPage />} />
                 </Routes>

@@ -458,7 +458,10 @@ function canUserAccessDownloads(userId: number, userEmail: string, emailVerified
   const hasPaidOrder = db.get(
     `SELECT COUNT(1) AS total
      FROM orders o
-     WHERE (o.user_id = ? OR (o.user_id IS NULL AND COALESCE(o.customer_email, '') = ?))
+     WHERE (
+       o.user_id = ?
+       OR LOWER(TRIM(COALESCE(o.customer_email, ''))) = LOWER(TRIM(?))
+     )
        AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})`,
     userId,
     normalizedEmail,
@@ -750,6 +753,28 @@ function resolveLgpdSettings() {
   };
 }
 
+function getActivePolicyVersion(policyType: 'privacy' | 'terms' | 'cookies') {
+  const row = db.get(
+    `SELECT version
+     FROM lgpd_policies
+     WHERE policy_type = ?
+       AND is_active = 1
+     ORDER BY updated_at DESC, id DESC
+     LIMIT 1`,
+    policyType,
+  ) as any;
+  const version = String(row?.version || '').trim();
+  return version || null;
+}
+
+function resolveRequiredPolicyVersions(lgpd = resolveLgpdSettings()) {
+  return {
+    privacy: getActivePolicyVersion('privacy') || lgpd.policyVersionPrivacy,
+    terms: getActivePolicyVersion('terms') || lgpd.policyVersionTerms,
+    cookies: getActivePolicyVersion('cookies') || lgpd.policyVersionCookies,
+  };
+}
+
 function logLgpdEvent(params: {
   req?: express.Request;
   userId?: number | null;
@@ -852,14 +877,96 @@ function recordPolicyAcceptance(params: {
   });
 }
 
+function normalizePolicyVersion(value: any) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^v+/, '');
+}
+
 function userHasAcceptedPolicyVersion(userId: number, policyType: 'privacy' | 'terms' | 'cookies', policyVersion: string) {
+  const normalizedTarget = normalizePolicyVersion(policyVersion);
+  if (!normalizedTarget) return false;
+
+  const candidateVersions = Array.from(new Set([
+    String(policyVersion || '').trim().toLowerCase(),
+    normalizedTarget,
+    `v${normalizedTarget}`,
+  ])).filter(Boolean);
+  const placeholders = candidateVersions.map(() => '?').join(', ');
+
   const row = db.get(
-    `SELECT id FROM lgpd_user_acceptances
-     WHERE user_id = ? AND policy_type = ? AND policy_version = ?
-     ORDER BY accepted_at DESC LIMIT 1`,
+    `SELECT id
+     FROM lgpd_user_acceptances
+     WHERE user_id = ?
+       AND policy_type = ?
+       AND LOWER(TRIM(COALESCE(policy_version, ''))) IN (${placeholders})
+     ORDER BY accepted_at DESC
+     LIMIT 1`,
     userId,
     policyType,
-    policyVersion,
+    ...candidateVersions,
+  ) as any;
+
+  return Boolean(row?.id);
+}
+
+function userHasGrantedConsentVersion(
+  userId: number,
+  consentKeys: string[],
+  policyVersion: string,
+) {
+  const normalizedTarget = normalizePolicyVersion(policyVersion);
+  if (!consentKeys.length || !normalizedTarget) return false;
+
+  const consentPlaceholders = consentKeys.map(() => '?').join(', ');
+  const rows = db.all(
+    `SELECT consent_key, policy_version
+     FROM lgpd_consents
+     WHERE user_id = ?
+       AND granted = 1
+       AND LOWER(TRIM(COALESCE(consent_key, ''))) IN (${consentPlaceholders})
+     ORDER BY updated_at DESC`,
+    userId,
+    ...consentKeys.map((key) => String(key || '').trim().toLowerCase()),
+  ) as any[];
+
+  return rows.some((row) => {
+    const normalizedStored = normalizePolicyVersion(row?.policy_version);
+    return normalizedStored === normalizedTarget;
+  });
+}
+
+function hasAnyGrantedConsent(userId: number, consentKeys: string[]) {
+  if (!Array.isArray(consentKeys) || consentKeys.length === 0) return false;
+  const placeholders = consentKeys.map(() => '?').join(', ');
+  const row = db.get(
+    `SELECT id
+     FROM lgpd_consents
+     WHERE user_id = ?
+       AND granted = 1
+       AND LOWER(TRIM(COALESCE(consent_key, ''))) IN (${placeholders})
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    userId,
+    ...consentKeys.map((key) => String(key || '').trim().toLowerCase()),
+  ) as any;
+  return Boolean(row?.id);
+}
+
+function hasAnyPolicyAcceptance(
+  userId: number,
+  policyType: 'privacy' | 'terms' | 'cookies',
+) {
+  const row = db.get(
+    `SELECT id
+     FROM lgpd_user_acceptances
+     WHERE user_id = ?
+       AND policy_type = ?
+     ORDER BY accepted_at DESC
+     LIMIT 1`,
+    userId,
+    policyType,
   ) as any;
   return Boolean(row?.id);
 }
@@ -880,14 +987,51 @@ function ensureUserLgpdCompliance(userId: number) {
     return { ok: true };
   }
 
+  const userRow = db.get(
+    'SELECT id, privacy_reaccept_required FROM users WHERE id = ? LIMIT 1',
+    userId,
+  ) as any;
+  const userRequiresReaccept = Number(userRow?.privacy_reaccept_required || 0) === 1;
+  const enforceVersionMatch = lgpd.requireReacceptOnPolicyUpdate && userRequiresReaccept;
+
+  const requiredVersions = resolveRequiredPolicyVersions(lgpd);
   const missing: string[] = [];
-  if (lgpd.requireTermsAcceptance && !userHasAcceptedPolicyVersion(userId, 'terms', lgpd.policyVersionTerms)) {
+  const hasTermsAccepted = enforceVersionMatch
+    ? (
+      userHasAcceptedPolicyVersion(userId, 'terms', requiredVersions.terms) ||
+      userHasGrantedConsentVersion(userId, ['terms_of_use', 'terms'], requiredVersions.terms)
+    )
+    : (
+      hasAnyGrantedConsent(userId, ['terms_of_use', 'terms']) ||
+      hasAnyPolicyAcceptance(userId, 'terms')
+    );
+  if (lgpd.requireTermsAcceptance && !hasTermsAccepted) {
     missing.push('terms');
   }
-  if (!userHasAcceptedPolicyVersion(userId, 'privacy', lgpd.policyVersionPrivacy)) {
+
+  const hasPrivacyAccepted = enforceVersionMatch
+    ? (
+      userHasAcceptedPolicyVersion(userId, 'privacy', requiredVersions.privacy) ||
+      userHasGrantedConsentVersion(userId, ['privacy_policy', 'privacy'], requiredVersions.privacy)
+    )
+    : (
+      hasAnyGrantedConsent(userId, ['privacy_policy', 'privacy']) ||
+      hasAnyPolicyAcceptance(userId, 'privacy')
+    );
+  if (!hasPrivacyAccepted) {
     missing.push('privacy');
   }
-  if (lgpd.requireCookieConsent && !userHasAcceptedPolicyVersion(userId, 'cookies', lgpd.policyVersionCookies)) {
+
+  const hasCookiesAccepted = enforceVersionMatch
+    ? (
+      userHasAcceptedPolicyVersion(userId, 'cookies', requiredVersions.cookies) ||
+      userHasGrantedConsentVersion(userId, ['cookies_policy', 'cookie_consent', 'cookies'], requiredVersions.cookies)
+    )
+    : (
+      hasAnyGrantedConsent(userId, ['cookies_policy', 'cookie_consent', 'cookies']) ||
+      hasAnyPolicyAcceptance(userId, 'cookies')
+    );
+  if (lgpd.requireCookieConsent && !hasCookiesAccepted) {
     missing.push('cookies');
   }
 
@@ -1050,6 +1194,7 @@ function initSettings() {
     mercadopago_public_key: '',
     mercadopago_access_token: '',
     new_badge_days: '20',
+    redirect_to_checkout_after_add_to_cart: 'false',
     smtp_from_name: '',
     smtp_from_email: '',
     matrix_request_team_email: '',
@@ -1371,6 +1516,16 @@ async function startServer() {
             policyVersion: lgpd.policyVersionCookies,
             req,
             source: 'register',
+          });
+          upsertUserConsent({
+            userId,
+            consentKey: 'cookies_policy',
+            granted: true,
+            req,
+            source: 'register',
+            legalBasis: 'consent',
+            purpose: 'Aceite da politica de cookies.',
+            policyVersion: lgpd.policyVersionCookies,
           });
         }
 
@@ -2842,11 +2997,13 @@ async function startServer() {
           u.avatar_url,
           c.billing_address,
           c.billing_city,
+          c.billing_neighborhood,
           c.billing_state,
           c.billing_zip,
           c.billing_country,
           c.shipping_address,
           c.shipping_city,
+          c.shipping_neighborhood,
           c.shipping_state,
           c.shipping_zip,
           c.shipping_country,
@@ -2863,15 +3020,37 @@ async function startServer() {
 
       const summary = db.get(`
         SELECT
-          (SELECT COUNT(*) FROM orders WHERE user_id = ?) AS orders_count,
+          (
+            SELECT COUNT(*)
+            FROM orders
+            WHERE user_id = ?
+               OR LOWER(TRIM(COALESCE(customer_email, ''))) = LOWER(TRIM(?))
+          ) AS orders_count,
           (SELECT COUNT(*) FROM favorites WHERE user_id = ?) AS favorites_count,
           (
             SELECT COUNT(*)
-            FROM order_items oi
-            JOIN orders o ON o.id = oi.order_id
-            WHERE o.user_id = ? AND o.status = 'paid'
+            FROM (
+              SELECT DISTINCT oi.id
+              FROM order_items oi
+              JOIN orders o ON o.id = oi.order_id
+              LEFT JOIN products p_by_id ON p_by_id.id = oi.product_id
+              LEFT JOIN products p_by_slug ON oi.product_id IS NULL
+                AND LOWER(TRIM(COALESCE(p_by_slug.slug, ''))) = LOWER(TRIM(COALESCE(oi.product_slug, '')))
+              LEFT JOIN products p_by_name ON oi.product_id IS NULL
+                AND (oi.product_slug IS NULL OR TRIM(oi.product_slug) = '')
+                AND LOWER(TRIM(COALESCE(p_by_name.name, ''))) = LOWER(TRIM(COALESCE(oi.product_name, '')))
+              LEFT JOIN product_files f
+                ON f.product_id = COALESCE(p_by_id.id, p_by_slug.id, p_by_name.id)
+              WHERE (
+                o.user_id = ?
+                OR LOWER(TRIM(COALESCE(o.customer_email, ''))) = LOWER(TRIM(?))
+              )
+                AND LOWER(COALESCE(o.status, '')) IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
+                AND f.file_path IS NOT NULL
+                AND f.file_path <> ''
+            ) purchased
           ) AS purchased_items
-      `, user.id, user.id, user.id) as any;
+      `, user.id, profile?.email || '', user.id, user.id, profile?.email || '') as any;
 
       return res.json({
         user: profile || null,
@@ -3093,14 +3272,24 @@ async function startServer() {
         SELECT
           o.id AS order_id,
           oi.id AS order_item_id,
-          oi.product_id,
+          COALESCE(p_by_id.id, p_by_slug.id, p_by_name.id, oi.product_id) AS product_id,
           o.status AS order_status,
           f.file_path,
           f.file_name
         FROM orders o
         JOIN order_items oi ON oi.order_id = o.id
-        JOIN product_files f ON f.product_id = oi.product_id
-        WHERE (o.user_id = ? OR (o.user_id IS NULL AND LOWER(TRIM(COALESCE(o.customer_email, ''))) = ?))
+        LEFT JOIN products p_by_id ON p_by_id.id = oi.product_id
+        LEFT JOIN products p_by_slug ON oi.product_id IS NULL
+          AND LOWER(TRIM(COALESCE(p_by_slug.slug, ''))) = LOWER(TRIM(COALESCE(oi.product_slug, '')))
+        LEFT JOIN products p_by_name ON oi.product_id IS NULL
+          AND (oi.product_slug IS NULL OR TRIM(oi.product_slug) = '')
+          AND LOWER(TRIM(COALESCE(p_by_name.name, ''))) = LOWER(TRIM(COALESCE(oi.product_name, '')))
+        JOIN product_files f
+          ON f.product_id = COALESCE(p_by_id.id, p_by_slug.id, p_by_name.id)
+        WHERE (
+          o.user_id = ?
+          OR LOWER(TRIM(COALESCE(o.customer_email, ''))) = LOWER(TRIM(?))
+        )
           AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})
           AND f.file_path IN (${placeholders})
         ORDER BY o.created_at DESC, oi.id DESC
@@ -3237,18 +3426,27 @@ async function startServer() {
         SELECT
           oi.id AS download_id,
           o.id AS order_id,
-          oi.product_id,
-          COALESCE(oi.product_name, p.name) AS product_name,
-          p.slug AS product_slug,
-          p.image AS product_image,
-          p.production_sheet,
+          COALESCE(p_by_id.id, p_by_slug.id, p_by_name.id, oi.product_id) AS product_id,
+          COALESCE(oi.product_name, p_by_id.name, p_by_slug.name, p_by_name.name) AS product_name,
+          COALESCE(oi.product_slug, p_by_id.slug, p_by_slug.slug, p_by_name.slug) AS product_slug,
+          COALESCE(p_by_id.image, p_by_slug.image, p_by_name.image) AS product_image,
+          COALESCE(p_by_id.production_sheet, p_by_slug.production_sheet, p_by_name.production_sheet) AS production_sheet,
           f.file_path,
           f.file_name
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.id
-        LEFT JOIN products p ON p.id = oi.product_id
-        LEFT JOIN product_files f ON f.product_id = oi.product_id
-        WHERE (o.user_id = ? OR (o.user_id IS NULL AND COALESCE(o.customer_email, '') = ?))
+        LEFT JOIN products p_by_id ON p_by_id.id = oi.product_id
+        LEFT JOIN products p_by_slug ON oi.product_id IS NULL
+          AND LOWER(TRIM(COALESCE(p_by_slug.slug, ''))) = LOWER(TRIM(COALESCE(oi.product_slug, '')))
+        LEFT JOIN products p_by_name ON oi.product_id IS NULL
+          AND (oi.product_slug IS NULL OR TRIM(oi.product_slug) = '')
+          AND LOWER(TRIM(COALESCE(p_by_name.name, ''))) = LOWER(TRIM(COALESCE(oi.product_name, '')))
+        LEFT JOIN product_files f
+          ON f.product_id = COALESCE(p_by_id.id, p_by_slug.id, p_by_name.id)
+        WHERE (
+          o.user_id = ?
+          OR LOWER(TRIM(COALESCE(o.customer_email, ''))) = LOWER(TRIM(?))
+        )
           AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})
           AND f.file_path IS NOT NULL
           AND f.file_path <> ''
@@ -3371,11 +3569,13 @@ async function startServer() {
       const payload = {
         billing_address: String(billing.address || '').trim() || null,
         billing_city: String(billing.city || '').trim() || null,
+        billing_neighborhood: String(billing.neighborhood || '').trim() || null,
         billing_state: String(billing.state || '').trim() || null,
         billing_zip: String(billing.zip || '').trim() || null,
         billing_country: String(billing.country || '').trim() || null,
         shipping_address: String(shipping.address || '').trim() || null,
         shipping_city: String(shipping.city || '').trim() || null,
+        shipping_neighborhood: String(shipping.neighborhood || '').trim() || null,
         shipping_state: String(shipping.state || '').trim() || null,
         shipping_zip: String(shipping.zip || '').trim() || null,
         shipping_country: String(shipping.country || '').trim() || null,
@@ -3388,11 +3588,13 @@ async function startServer() {
           SET
             billing_address = ?,
             billing_city = ?,
+            billing_neighborhood = ?,
             billing_state = ?,
             billing_zip = ?,
             billing_country = ?,
             shipping_address = ?,
             shipping_city = ?,
+            shipping_neighborhood = ?,
             shipping_state = ?,
             shipping_zip = ?,
             shipping_country = ?,
@@ -3406,11 +3608,13 @@ async function startServer() {
         `,
           payload.billing_address,
           payload.billing_city,
+          payload.billing_neighborhood,
           payload.billing_state,
           payload.billing_zip,
           payload.billing_country,
           payload.shipping_address,
           payload.shipping_city,
+          payload.shipping_neighborhood,
           payload.shipping_state,
           payload.shipping_zip,
           payload.shipping_country,
@@ -3425,20 +3629,22 @@ async function startServer() {
         db.run(`
           INSERT INTO customers (
             user_id, phone, cpf,
-            billing_address, billing_city, billing_state, billing_zip, billing_country,
-            shipping_address, shipping_city, shipping_state, shipping_zip, shipping_country,
+            billing_address, billing_city, billing_neighborhood, billing_state, billing_zip, billing_country,
+            shipping_address, shipping_city, shipping_neighborhood, shipping_state, shipping_zip, shipping_country,
             address, city, state, zip, country
           )
-          VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
           user.id,
           payload.billing_address,
           payload.billing_city,
+          payload.billing_neighborhood,
           payload.billing_state,
           payload.billing_zip,
           payload.billing_country,
           payload.shipping_address,
           payload.shipping_city,
+          payload.shipping_neighborhood,
           payload.shipping_state,
           payload.shipping_zip,
           payload.shipping_country,
@@ -3534,6 +3740,16 @@ async function startServer() {
           req,
           source: 'cookie_banner',
         });
+        upsertUserConsent({
+          userId: Number(user.id),
+          consentKey: 'cookies_policy',
+          granted: true,
+          req,
+          source: 'cookie_banner',
+          legalBasis: 'consent',
+          purpose: 'Aceite da politica de cookies via banner.',
+          policyVersion: lgpd.policyVersionCookies,
+        });
       }
       return res.json({ success: true, consent_id: consentId });
     } catch (error) {
@@ -3584,63 +3800,147 @@ async function startServer() {
   app.put('/api/customer/privacy/consents', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
-      const { marketing = false, policy_accept = false, terms_accept = false, cookies_accept = false } = req.body || {};
+      const body = req.body || {};
       const lgpd = resolveLgpdSettings();
+      const requiredVersions = resolveRequiredPolicyVersions(lgpd);
 
-      upsertUserConsent({
-        userId: Number(user.id),
-        consentKey: 'marketing_communications',
-        granted: parseBooleanSetting(marketing, false),
-        req,
-        source: 'my_account',
-        legalBasis: 'consent',
-        purpose: 'Envio de comunicacoes e ofertas.',
-        policyVersion: lgpd.policyVersionPrivacy,
-      });
+      const hasMarketingInput =
+        Object.prototype.hasOwnProperty.call(body, 'marketing') ||
+        Object.prototype.hasOwnProperty.call(body, 'marketing_accepted');
 
-      if (parseBooleanSetting(policy_accept, false)) {
+      const marketingAccepted = parseBooleanSetting(
+        Object.prototype.hasOwnProperty.call(body, 'marketing')
+          ? body.marketing
+          : body.marketing_accepted,
+        false,
+      );
+
+      // "aceitar politicas obrigatorias" aceita privacidade + termos + cookies
+      const acceptRequired = parseBooleanSetting(
+        Object.prototype.hasOwnProperty.call(body, 'accept_required')
+          ? body.accept_required
+          : (Object.prototype.hasOwnProperty.call(body, 'accept_policies_required') ? body.accept_policies_required : body.policy_accept),
+        false,
+      );
+
+      const privacyAccepted = acceptRequired || parseBooleanSetting(
+        Object.prototype.hasOwnProperty.call(body, 'policy_accept')
+          ? body.policy_accept
+          : body.privacy_accepted,
+        false,
+      );
+      const termsAccepted = acceptRequired || parseBooleanSetting(
+        Object.prototype.hasOwnProperty.call(body, 'terms_accept')
+          ? body.terms_accept
+          : body.terms_accepted,
+        false,
+      );
+      const cookiesAccepted = acceptRequired || parseBooleanSetting(
+        Object.prototype.hasOwnProperty.call(body, 'cookies_accept')
+          ? body.cookies_accept
+          : (Object.prototype.hasOwnProperty.call(body, 'cookie_accepted') ? body.cookie_accepted : body.cookies_accepted),
+        false,
+      );
+
+      if (hasMarketingInput) {
+        upsertUserConsent({
+          userId: Number(user.id),
+          consentKey: 'marketing_communications',
+          granted: marketingAccepted,
+          req,
+          source: 'my_account',
+          legalBasis: 'consent',
+          purpose: 'Envio de comunicacoes e ofertas.',
+          policyVersion: lgpd.policyVersionPrivacy,
+        });
+      }
+
+      const shouldAcceptPrivacy = acceptRequired ? true : privacyAccepted;
+      const shouldAcceptTerms = acceptRequired ? lgpd.requireTermsAcceptance : termsAccepted;
+      const shouldAcceptCookies = acceptRequired ? lgpd.requireCookieConsent : cookiesAccepted;
+
+      if (shouldAcceptPrivacy) {
         recordPolicyAcceptance({
           userId: Number(user.id),
           policyType: 'privacy',
-          policyVersion: lgpd.policyVersionPrivacy,
+          policyVersion: requiredVersions.privacy,
           req,
           source: 'my_account',
+        });
+        upsertUserConsent({
+          userId: Number(user.id),
+          consentKey: 'privacy_policy',
+          granted: true,
+          req,
+          source: 'my_account',
+          legalBasis: 'consent',
+          purpose: 'Aceite da politica de privacidade.',
+          policyVersion: requiredVersions.privacy,
         });
       }
 
-      if (parseBooleanSetting(terms_accept, false)) {
+      if (shouldAcceptTerms) {
         recordPolicyAcceptance({
           userId: Number(user.id),
           policyType: 'terms',
-          policyVersion: lgpd.policyVersionTerms,
+          policyVersion: requiredVersions.terms,
           req,
           source: 'my_account',
         });
+        upsertUserConsent({
+          userId: Number(user.id),
+          consentKey: 'terms_of_use',
+          granted: true,
+          req,
+          source: 'my_account',
+          legalBasis: 'consent',
+          purpose: 'Aceite dos termos de uso da plataforma.',
+          policyVersion: requiredVersions.terms,
+        });
       }
-      if (parseBooleanSetting(cookies_accept, false)) {
+      if (shouldAcceptCookies) {
         recordPolicyAcceptance({
           userId: Number(user.id),
           policyType: 'cookies',
-          policyVersion: lgpd.policyVersionCookies,
+          policyVersion: requiredVersions.cookies,
           req,
           source: 'my_account',
+        });
+        upsertUserConsent({
+          userId: Number(user.id),
+          consentKey: 'cookies_policy',
+          granted: true,
+          req,
+          source: 'my_account',
+          legalBasis: 'consent',
+          purpose: 'Aceite da politica de cookies.',
+          policyVersion: requiredVersions.cookies,
         });
       }
 
       const freshUser = db.get('SELECT id, name, email FROM users WHERE id = ?', Number(user.id)) as any;
-      if (freshUser?.email) {
+      if (hasMarketingInput && freshUser?.email) {
         sendEmail({
           to: freshUser.email,
           templateKey: 'lgpd_consent_confirmation',
           variables: {
             name: freshUser.name || 'Cliente',
             consent_key: 'marketing_communications',
-            consent_status: parseBooleanSetting(marketing, false) ? 'aceito' : 'revogado',
+            consent_status: marketingAccepted ? 'aceito' : 'revogado',
           },
         }).catch((err) => console.error('LGPD consent email error:', err));
       }
 
-      res.json({ success: true });
+      res.json({
+        success: true,
+        accepted: {
+          privacy: shouldAcceptPrivacy,
+          terms: shouldAcceptTerms,
+          cookies: shouldAcceptCookies,
+          marketing: hasMarketingInput ? marketingAccepted : null,
+        },
+        compliance: ensureUserLgpdCompliance(Number(user.id)),
+      });
     } catch (error) {
       console.error('Update privacy consents error:', error);
       res.status(500).json({ error: 'Erro ao atualizar consentimentos' });
@@ -4051,6 +4351,181 @@ async function startServer() {
     }
   });
 
+  app.put('/api/admin/lgpd/policies/:id', authenticate, isAdmin, (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const policyId = Number(req.params.id);
+      if (!Number.isFinite(policyId) || policyId <= 0) {
+        return res.status(400).json({ error: 'ID da politica invalido' });
+      }
+
+      const currentPolicy = db.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', policyId) as any;
+      if (!currentPolicy) {
+        return res.status(404).json({ error: 'Politica nao encontrada' });
+      }
+
+      const {
+        policy_type = currentPolicy.policy_type,
+        version = currentPolicy.version,
+        title = currentPolicy.title,
+        content = currentPolicy.content,
+        is_active = Number(currentPolicy.is_active) === 1,
+        force_reaccept = Number(currentPolicy.force_reaccept) === 1,
+      } = req.body || {};
+
+      const normalizedType = String(policy_type || '').trim().toLowerCase();
+      const normalizedVersion = String(version || '').trim();
+      const normalizedTitle = String(title || '').trim();
+      const normalizedContent = String(content || '');
+
+      if (!['privacy', 'terms', 'cookies'].includes(normalizedType)) {
+        return res.status(400).json({ error: 'Tipo de politica invalido' });
+      }
+      if (!normalizedVersion || !normalizedTitle || !normalizedContent) {
+        return res.status(400).json({ error: 'version, title e content sao obrigatorios' });
+      }
+
+      const duplicated = db.get(
+        'SELECT id FROM lgpd_policies WHERE policy_type = ? AND version = ? AND id <> ? LIMIT 1',
+        normalizedType,
+        normalizedVersion,
+        policyId,
+      ) as any;
+      if (duplicated) {
+        return res.status(409).json({ error: 'Ja existe outra politica com este tipo e versao' });
+      }
+
+      db.run(
+        `UPDATE lgpd_policies
+         SET policy_type = ?, version = ?, title = ?, content = ?, is_active = ?, force_reaccept = ?
+         WHERE id = ?`,
+        normalizedType,
+        normalizedVersion,
+        normalizedTitle,
+        normalizedContent,
+        parseBooleanSetting(is_active, false) ? 1 : 0,
+        parseBooleanSetting(force_reaccept, false) ? 1 : 0,
+        policyId,
+      );
+
+      if (parseBooleanSetting(is_active, false)) {
+        db.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ? AND id <> ?', normalizedType, policyId);
+        if (normalizedType === 'privacy') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', normalizedVersion);
+        if (normalizedType === 'terms') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', normalizedVersion);
+        if (normalizedType === 'cookies') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', normalizedVersion);
+      }
+
+      if (parseBooleanSetting(force_reaccept, false)) {
+        db.run('UPDATE users SET privacy_reaccept_required = 1 WHERE role = "customer"');
+      }
+
+      if (parseBooleanSetting(is_active, false)) {
+        const lgpd = resolveLgpdSettings();
+        const policyUrl =
+          normalizedType === 'privacy'
+            ? lgpd.privacyUrl
+            : normalizedType === 'terms'
+              ? lgpd.termsUrl
+              : lgpd.cookiePolicyUrl;
+        notifyCustomersPolicyUpdated({
+          policyType: normalizedType as 'privacy' | 'terms' | 'cookies',
+          policyVersion: normalizedVersion,
+          policyUrl,
+          actorUserId: Number(adminUser.id),
+          req,
+        });
+      }
+
+      logLgpdEvent({
+        req,
+        actorUserId: Number(adminUser.id),
+        eventType: 'policy',
+        action: 'policy_updated',
+        details: {
+          policy_id: policyId,
+          policy_type: normalizedType,
+          version: normalizedVersion,
+          force_reaccept: parseBooleanSetting(force_reaccept, false),
+        },
+      });
+
+      return res.json({ success: true, id: policyId });
+    } catch (error: any) {
+      console.error('Update policy error:', error);
+      if (String(error?.message || '').includes('uq_lgpd_policy_type_version') || error?.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ error: 'Ja existe outra politica com este tipo e versao' });
+      }
+      return res.status(500).json({ error: 'Erro ao atualizar politica LGPD' });
+    }
+  });
+
+  app.delete('/api/admin/lgpd/policies/:id', authenticate, isAdmin, (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const policyId = Number(req.params.id);
+      if (!Number.isFinite(policyId) || policyId <= 0) {
+        return res.status(400).json({ error: 'ID da politica invalido' });
+      }
+
+      const policy = db.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', policyId) as any;
+      if (!policy) {
+        return res.status(404).json({ error: 'Politica nao encontrada' });
+      }
+
+      const policyType = String(policy.policy_type || '');
+      const isActive = Number(policy.is_active) === 1;
+
+      if (isActive) {
+        const replacement = db.get(
+          `SELECT id
+             FROM lgpd_policies
+            WHERE policy_type = ?
+              AND id <> ?
+            ORDER BY is_active DESC, updated_at DESC, id DESC
+            LIMIT 1`,
+          policyType,
+          policyId,
+        ) as any;
+
+        if (!replacement?.id) {
+          return res.status(409).json({
+            error: 'Nao e possivel excluir a unica politica deste tipo. Crie ou ative outra versao antes de excluir.',
+          });
+        }
+
+        db.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ?', policyType);
+        db.run('UPDATE lgpd_policies SET is_active = 1 WHERE id = ?', Number(replacement.id));
+
+        const replacementPolicy = db.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', Number(replacement.id)) as any;
+        if (replacementPolicy) {
+          if (policyType === 'privacy') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', String(replacementPolicy.version || '1.0'));
+          if (policyType === 'terms') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', String(replacementPolicy.version || '1.0'));
+          if (policyType === 'cookies') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', String(replacementPolicy.version || '1.0'));
+        }
+      }
+
+      db.run('DELETE FROM lgpd_policies WHERE id = ?', policyId);
+
+      logLgpdEvent({
+        req,
+        actorUserId: Number(adminUser.id),
+        eventType: 'policy',
+        action: 'policy_deleted',
+        details: {
+          policy_id: policyId,
+          policy_type: policyType,
+          version: String(policy.version || ''),
+          was_active: isActive,
+        },
+      });
+
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Delete policy error:', error);
+      return res.status(500).json({ error: 'Erro ao excluir politica LGPD' });
+    }
+  });
+
   app.post('/api/admin/lgpd/policies/:id/activate', authenticate, isAdmin, (req, res) => {
     try {
       const adminUser = (req as any).user;
@@ -4187,6 +4662,63 @@ async function startServer() {
     }
   });
 
+  app.put('/api/admin/lgpd/consents/:id', authenticate, isAdmin, (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const consentId = Number(req.params.id);
+      if (!Number.isFinite(consentId) || consentId <= 0) {
+        return res.status(400).json({ error: 'ID de consentimento inválido' });
+      }
+
+      const consent = db.get(
+        `SELECT c.*, u.email AS user_email
+         FROM lgpd_consents c
+         LEFT JOIN users u ON u.id = c.user_id
+         WHERE c.id = ?
+         LIMIT 1`,
+        consentId,
+      ) as any;
+
+      if (!consent) {
+        return res.status(404).json({ error: 'Consentimento não encontrado' });
+      }
+
+      const granted = parseBooleanSetting(req.body?.granted, false);
+      const reason = String(req.body?.reason || '').trim().slice(0, 300);
+
+      upsertUserConsent({
+        userId: Number(consent.user_id),
+        consentKey: String(consent.consent_key || ''),
+        granted,
+        req,
+        source: 'admin_panel',
+        legalBasis: String(consent.legal_basis || 'consent'),
+        purpose: reason || String(consent.purpose || 'atualizacao administrativa'),
+        policyVersion: consent.policy_version ? String(consent.policy_version) : null,
+      });
+
+      logLgpdEvent({
+        req,
+        userId: Number(consent.user_id),
+        actorUserId: Number(adminUser.id),
+        eventType: 'consent',
+        action: 'admin_consent_update',
+        details: {
+          consent_id: consentId,
+          consent_key: String(consent.consent_key || ''),
+          previous_granted: Number(consent.granted) ? 1 : 0,
+          new_granted: granted ? 1 : 0,
+          reason: reason || null,
+        },
+      });
+
+      return res.json({ success: true, granted });
+    } catch (error) {
+      console.error('Admin update consent error:', error);
+      return res.status(500).json({ error: 'Erro ao atualizar consentimento LGPD' });
+    }
+  });
+
   app.get('/api/admin/lgpd/requests', authenticate, isAdmin, (req, res) => {
     try {
       const page = Math.max(1, Number(req.query.page || 1));
@@ -4297,7 +4829,7 @@ async function startServer() {
            WHERE id = ?`,
           targetUserId,
         );
-        db.run('UPDATE customers SET phone = NULL, cpf = NULL, address = NULL, city = NULL, state = NULL, zip = NULL, country = NULL, billing_address = NULL, billing_city = NULL, billing_state = NULL, billing_zip = NULL, billing_country = NULL, shipping_address = NULL, shipping_city = NULL, shipping_state = NULL, shipping_zip = NULL, shipping_country = NULL WHERE user_id = ?', targetUserId);
+        db.run('UPDATE customers SET phone = NULL, cpf = NULL, address = NULL, city = NULL, state = NULL, zip = NULL, country = NULL, billing_address = NULL, billing_city = NULL, billing_neighborhood = NULL, billing_state = NULL, billing_zip = NULL, billing_country = NULL, shipping_address = NULL, shipping_city = NULL, shipping_neighborhood = NULL, shipping_state = NULL, shipping_zip = NULL, shipping_country = NULL WHERE user_id = ?', targetUserId);
         db.run('DELETE FROM favorites WHERE user_id = ?', targetUserId);
         db.run('UPDATE lgpd_consents SET granted = 0, revoked_at = CURRENT_TIMESTAMP WHERE user_id = ?', targetUserId);
         db.run('DELETE FROM download_tokens WHERE user_id = ?', targetUserId);
@@ -5531,7 +6063,7 @@ async function startServer() {
       const cached = apiCache.get('public_settings');
       if (cached) return res.json(cached);
 
-      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "brand_logos", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies")') as any[];
+      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "redirect_to_checkout_after_add_to_cart", "brand_logos", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);

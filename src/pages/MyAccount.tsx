@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useMemo, useState } from 'react';
+﻿import React, { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   Camera,
   ChevronRight,
@@ -32,6 +32,7 @@ type AddressForm = {
   address: string;
   number: string;
   complement: string;
+  neighborhood: string;
   city: string;
   state: string;
   zip: string;
@@ -126,15 +127,18 @@ type AccountUser = {
   avatar_url?: string | null;
   billing_address?: string | null;
   billing_city?: string | null;
+  billing_neighborhood?: string | null;
   billing_state?: string | null;
   billing_zip?: string | null;
   billing_country?: string | null;
   shipping_address?: string | null;
   shipping_city?: string | null;
+  shipping_neighborhood?: string | null;
   shipping_state?: string | null;
   shipping_zip?: string | null;
   shipping_country?: string | null;
   address?: string | null;
+  neighborhood?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
@@ -181,6 +185,64 @@ export default function MyAccount() {
   const [privacyRequestType, setPrivacyRequestType] = useState<'export' | 'delete' | 'correction' | 'revoke'>('export');
   const [privacyRequestNotes, setPrivacyRequestNotes] = useState('');
 
+  const formatLgpdMissing = (missing: any) => {
+    const items = Array.isArray(missing) ? missing : [];
+    if (items.length === 0) return '';
+    const labels: Record<string, string> = {
+      privacy: 'Política de Privacidade',
+      terms: 'Termos de Uso',
+      cookies: 'Política de Cookies',
+    };
+    return items.map((key) => labels[String(key || '').toLowerCase()] || String(key)).join(', ');
+  };
+
+  const parseLegacyAddress = (rawValue: string | null | undefined) => {
+    const raw = String(rawValue || '').trim();
+    if (!raw) return { address: '', number: '', complement: '' };
+
+    let base = raw;
+    let complement = '';
+    const complementMatch = raw.match(/^(.*?)(?:\s+-\s+)(.+)$/);
+    if (complementMatch) {
+      base = complementMatch[1].trim();
+      complement = complementMatch[2].trim();
+    }
+
+    let address = base;
+    let number = '';
+    const numberMatch = base.match(/^(.*?)(?:,\s*)([0-9A-Za-z\-\/]+)$/);
+    if (numberMatch) {
+      address = numberMatch[1].trim();
+      number = numberMatch[2].trim();
+      const escapedNumber = number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const duplicatedSuffix = new RegExp(`^(.*?)(?:,\\s*${escapedNumber})$`);
+      while (duplicatedSuffix.test(address)) {
+        address = address.replace(duplicatedSuffix, '$1').trim();
+      }
+    }
+
+    return { address, number, complement };
+  };
+
+  const composeAddress = (form: AddressForm) => {
+    const street = String(form.address || '').trim();
+    const number = String(form.number || '').trim();
+    const complement = String(form.complement || '').trim();
+    if (!street) return '';
+
+    let value = street;
+    const escapedNumber = number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (number && !new RegExp(`,\\s*${escapedNumber}$`).test(value)) {
+      value += `, ${number}`;
+    }
+    const escapedComplement = complement.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (complement && !new RegExp(`-\\s*${escapedComplement}$`).test(value)) {
+      value += ` - ${complement}`;
+    }
+
+    return value;
+  };
+
   const [profileForm, setProfileForm] = useState({
     first_name: '',
     last_name: '',
@@ -194,6 +256,7 @@ export default function MyAccount() {
     address: '',
     number: '',
     complement: '',
+    neighborhood: '',
     city: '',
     state: '',
     zip: '',
@@ -202,6 +265,9 @@ export default function MyAccount() {
 
   const [shippingAddress, setShippingAddress] = useState<AddressForm>({
     address: '',
+    number: '',
+    complement: '',
+    neighborhood: '',
     city: '',
     state: '',
     zip: '',
@@ -223,7 +289,7 @@ export default function MyAccount() {
   useEffect(() => {
     if (location.pathname.endsWith('/pedidos')) return setActiveTab('orders');
     if (location.pathname.endsWith('/downloads')) return setActiveTab('downloads');
-    if (location.pathname.endsWith('/enderecos')) return setActiveTab('address');
+    if (location.pathname.endsWith('/endereços')) return setActiveTab('address');
     if (location.pathname.endsWith('/perfil')) return setActiveTab('profile');
     if (location.pathname.endsWith('/lista-de-desejos')) return setActiveTab('wishlist');
     if (location.pathname.endsWith('/privacidade')) return setActiveTab('privacy');
@@ -278,7 +344,7 @@ export default function MyAccount() {
             (accountData as any)?.error ||
             (ordersData as any)?.error ||
             (favoritesData as any)?.error ||
-            'N??o foi poss??vel carregar os dados da conta.'
+            'Não foi possível carregar os dados da conta.'
           );
         }
 
@@ -288,8 +354,10 @@ export default function MyAccount() {
         setAccountUser(userData);
         const lgpdCompliance = accountData?.lgpd?.compliance;
         if (lgpdCompliance && lgpdCompliance.ok === false) {
-          const missing = Array.isArray(lgpdCompliance.missing) ? lgpdCompliance.missing.join(', ') : 'políticas obrigatórias';
+          const missing = formatLgpdMissing(lgpdCompliance.missing) || 'políticas obrigatórias';
           setAccountMessage(`Para continuar, revise e aceite os itens LGPD pendentes: ${missing}.`);
+        } else {
+          setAccountMessage('');
         }
         setOrders(Array.isArray(ordersData) ? ordersData : []);
         if (downloadsRes.ok) {
@@ -298,7 +366,7 @@ export default function MyAccount() {
           setDownloads([]);
           const downloadError =
             (downloadsData as any)?.error ||
-            'N??o foi poss??vel carregar os downloads agora.';
+            'Não foi possível carregar os downloads agora.';
           setAccountMessage(downloadError);
         }
         setFavorites(Array.isArray(favoritesData?.favorites) ? favoritesData.favorites : []);
@@ -322,22 +390,31 @@ export default function MyAccount() {
             address: userData.address || '',
             number: '',
             complement: '',
+            neighborhood: userData.neighborhood || '',
             city: userData.city || '',
             state: userData.state || '',
             zip: userData.zip || '',
             country: userData.country || 'Brasil',
           };
 
+          const parsedBilling = parseLegacyAddress(userData.billing_address || fallbackAddress.address);
           setBillingAddress({
-            address: userData.billing_address || fallbackAddress.address,
+            address: parsedBilling.address,
+            number: parsedBilling.number,
+            complement: parsedBilling.complement,
+            neighborhood: userData.billing_neighborhood || fallbackAddress.neighborhood,
             city: userData.billing_city || fallbackAddress.city,
             state: userData.billing_state || fallbackAddress.state,
             zip: userData.billing_zip || fallbackAddress.zip,
             country: userData.billing_country || fallbackAddress.country,
           });
 
+          const parsedShipping = parseLegacyAddress(userData.shipping_address || fallbackAddress.address);
           setShippingAddress({
-            address: userData.shipping_address || fallbackAddress.address,
+            address: parsedShipping.address,
+            number: parsedShipping.number,
+            complement: parsedShipping.complement,
+            neighborhood: userData.shipping_neighborhood || fallbackAddress.neighborhood,
             city: userData.shipping_city || fallbackAddress.city,
             state: userData.shipping_state || fallbackAddress.state,
             zip: userData.shipping_zip || fallbackAddress.zip,
@@ -369,7 +446,7 @@ export default function MyAccount() {
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { key: 'orders', label: 'Pedidos', icon: ShoppingBag },
     { key: 'downloads', label: 'Matrizes Compradas', icon: Download },
-    { key: 'address', label: 'Endereco', icon: MapPinHouse },
+    { key: 'address', label: 'Endereço', icon: MapPinHouse },
     { key: 'profile', label: 'Perfil', icon: UserRound },
     { key: 'privacy', label: 'Privacidade e Dados', icon: ShieldCheck },
     { key: 'wishlist', label: 'Favoritos', icon: Heart },
@@ -393,6 +470,40 @@ export default function MyAccount() {
     return 'bg-slate-100 text-slate-600';
   };
 
+  const getPrivacyRequestTypeLabel = (requestType: string) => {
+    const normalized = String(requestType || '').toLowerCase();
+    if (normalized === 'export') return 'Exportação de dados';
+    if (normalized === 'delete') return 'Exclusão de conta';
+    if (normalized === 'correction') return 'Correção de dados';
+    if (normalized === 'revoke') return 'Revogação de consentimento';
+    return requestType || 'Solicitação';
+  };
+
+  const getPrivacyRequestStatusLabel = (status: string) => {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'pending') return 'Pendente';
+    if (normalized === 'in_review') return 'Em análise';
+    if (normalized === 'completed') return 'Concluída';
+    if (normalized === 'refused') return 'Recusada';
+    return status || 'Indefinido';
+  };
+
+  const getConsentKeyLabel = (key: string) => {
+    const normalized = String(key || '').toLowerCase();
+    if (normalized === 'marketing_communications') return 'Comunicações de marketing';
+    if (normalized === 'privacy_policy') return 'Política de privacidade';
+    if (normalized === 'terms_of_use') return 'Termos de uso';
+    if (normalized === 'cookie_policy') return 'Política de cookies';
+    return key || 'Consentimento';
+  };
+
+  const formatPrivacyDate = (value?: string | null) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString('pt-BR');
+  };
+
   const handleMenuClick = async (key: AccountTab | 'logout') => {
     if (key === 'logout') {
       await logout();
@@ -403,7 +514,7 @@ export default function MyAccount() {
       dashboard: '/minha-conta',
       orders: '/minha-conta/pedidos',
       downloads: '/minha-conta/downloads',
-      address: '/minha-conta/enderecos',
+      address: '/minha-conta/endereços',
       profile: '/minha-conta/perfil',
       privacy: '/minha-conta/privacidade',
       wishlist: '/minha-conta/lista-de-desejos',
@@ -590,23 +701,27 @@ export default function MyAccount() {
     setAddressMessage('');
     const billingToSave = {
       ...billingAddress,
-      address: `${billingAddress.address}${billingAddress.number ? ', ' + billingAddress.number : ''}${billingAddress.complement ? ' - ' + billingAddress.complement : ''}`
+      address: composeAddress(billingAddress),
+    };
+    const shippingToSave = {
+      ...shippingAddress,
+      address: composeAddress(shippingAddress),
     };
 
     try {
       const res = await fetch('/api/customer/addresses', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ billing: billingToSave, shipping: shippingAddress }),
+        body: JSON.stringify({ billing: billingToSave, shipping: shippingToSave }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setAddressMessage(data?.error || 'Nao foi possivel salvar os enderecos.');
+        setAddressMessage(data?.error || 'Nao foi possivel salvar os endereços.');
         return;
       }
       setAddressMessage('Enderecos atualizados com sucesso.');
     } catch {
-      setAddressMessage('Erro ao salvar enderecos.');
+      setAddressMessage('Erro ao salvar endereços.');
     } finally {
       setSavingAddresses(false);
     }
@@ -622,6 +737,13 @@ export default function MyAccount() {
         return;
       }
       setPrivacyData(data as PrivacyData);
+      const compliance = (data as any)?.compliance;
+      if (compliance?.ok === false) {
+        const missing = formatLgpdMissing(compliance?.missing) || 'políticas obrigatórias';
+        setAccountMessage(`Para continuar, revise e aceite os itens LGPD pendentes: ${missing}.`);
+      } else {
+        setAccountMessage('');
+      }
     } catch {
       setPrivacyMessage('Erro ao atualizar dados de privacidade.');
     } finally {
@@ -636,7 +758,7 @@ export default function MyAccount() {
       const res = await fetch('/api/customer/privacy/consents', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ marketing_accepted: enabled }),
+        body: JSON.stringify({ marketing: enabled }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -660,6 +782,10 @@ export default function MyAccount() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          accept_required: true,
+          policy_accept: true,
+          terms_accept: true,
+          cookies_accept: true,
           privacy_accepted: true,
           terms_accepted: true,
           cookie_accepted: true,
@@ -721,7 +847,7 @@ export default function MyAccount() {
 
   return (
     <main className="max-w-[1360px] mx-auto px-4 md:px-10 py-8 md:py-10">
-      {/* Header da conta - Fino, Foto esticada, Suporte à direita */}
+      {/* Header da conta - Fino, foto esticada, suporte à direita */}
       <section 
         className="rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden group"
         style={{ backgroundColor: 'var(--brand-primary, #2563eb)' }}
@@ -829,10 +955,10 @@ export default function MyAccount() {
 
           {activeTab === 'dashboard' && (
             <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 md:p-8 shadow-sm">
-              <h2 className="text-2xl font-black text-slate-900 mb-3">Ola, {displayName}!</h2>
+              <h2 className="text-2xl font-black text-slate-900 mb-3">Olá, {displayName}!</h2>
               <p className="text-slate-600 leading-relaxed font-semibold">
-                A partir do painel da sua conta, voce pode visualizar seus pedidos recentes, acessar suas matrizes compradas,
-                gerenciar seus enderecos e editar os detalhes da sua conta.
+                A partir do painel da sua conta, você pode visualizar seus pedidos recentes, acessar suas matrizes compradas,
+                gerenciar seus endereços e editar os detalhes da sua conta.
               </p>
               <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-6">
                 <div className="group relative overflow-hidden rounded-3xl bg-blue-50 border border-blue-100 p-6 transition-all hover:shadow-xl hover:-translate-y-1">
@@ -1072,6 +1198,16 @@ export default function MyAccount() {
                   ))}
                 </div>
               )}
+
+              <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                <p className="text-sm font-black">Alerta de não compartilhamento</p>
+                <p className="mt-1 text-sm font-semibold leading-relaxed">
+                  O arquivo adquirido é de uso pessoal e exclusivo do comprador. Não compartilhe, revenda, doe ou redistribua em redes sociais, grupos, sites ou qualquer outra mídia digital.
+                </p>
+                <p className="mt-2 text-xs font-black uppercase tracking-wide text-amber-800">
+                  Redistribuição sem autorização é proibida pela Lei de Direitos Autorais (Lei 9.610/98).
+                </p>
+              </div>
             </div>
           )}
 
@@ -1180,14 +1316,9 @@ export default function MyAccount() {
           )}
 
           {activeTab === 'privacy' && (
-            <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 shadow-sm space-y-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-xl font-black text-slate-900">Privacidade e Dados</h2>
-                  <p className="text-sm font-semibold text-slate-600 mt-1">
-                    Gerencie consentimentos, exporte seus dados e solicite exclusão/retificação conforme LGPD.
-                  </p>
-                </div>
+            <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 shadow-sm space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-xl font-black text-slate-900">Privacidade e Dados</h2>
                 <button
                   type="button"
                   onClick={reloadPrivacyData}
@@ -1197,136 +1328,119 @@ export default function MyAccount() {
                 </button>
               </div>
 
+              <p className="text-sm font-semibold text-slate-600">
+                Gerencie seus consentimentos e envie solicitações LGPD de forma simples.
+              </p>
+
               {privacyMessage && (
                 <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
                   {privacyMessage}
                 </div>
               )}
 
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5 space-y-4">
-                  <h3 className="text-sm font-black uppercase tracking-wider text-slate-800">Consentimentos</h3>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={acceptRequiredPolicies}
-                      disabled={privacyLoading}
-                      className="px-4 py-2 rounded-xl bg-blue-600 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
-                    >
-                      Aceitar políticas obrigatórias
-                    </button>
-                  </div>
-                  <div className="space-y-3">
-                    {privacyData?.consents?.map((consent) => (
-                      <div key={consent.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-xs font-black text-slate-800">{consent.consent_key}</p>
-                            <p className="text-[11px] text-slate-500 font-semibold">Versão {consent.policy_version || '-'} • {consent.updated_at}</p>
-                          </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={acceptRequiredPolicies}
+                  disabled={privacyLoading}
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
+                >
+                  Aceitar políticas obrigatórias
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const marketingConsent = privacyData?.consents?.find((c) => c.consent_key === 'marketing_communications');
+                    const next = !Boolean(Number(marketingConsent?.granted || 0));
+                    updateMarketingConsent(next);
+                  }}
+                  disabled={privacyLoading}
+                  className="px-4 py-2 rounded-lg bg-slate-900 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
+                >
+                  {Boolean(Number(privacyData?.consents?.find((c) => c.consent_key === 'marketing_communications')?.granted || 0))
+                    ? 'Desativar marketing'
+                    : 'Ativar marketing'}
+                </button>
+                <a href="/api/customer/privacy/export?format=json" className="px-3 py-2 rounded-lg bg-slate-700 text-white text-[10px] font-black uppercase tracking-widest">Exportar JSON</a>
+                <a href="/api/customer/privacy/export?format=csv" className="px-3 py-2 rounded-lg bg-blue-700 text-white text-[10px] font-black uppercase tracking-widest">Exportar CSV</a>
+                <a href="/api/customer/privacy/export?format=pdf" className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest">Exportar PDF</a>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <p className="text-sm font-black text-slate-800">Nova solicitação</p>
+                <div className="grid grid-cols-1 md:grid-cols-[260px_1fr_auto] gap-2">
+                  <select
+                    value={privacyRequestType}
+                    onChange={(e) => setPrivacyRequestType(e.target.value as any)}
+                    className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm font-semibold"
+                  >
+                    <option value="export">Exportação de dados</option>
+                    <option value="delete">Exclusão de conta</option>
+                    <option value="correction">Correção de dados</option>
+                    <option value="revoke">Revogação de consentimento</option>
+                  </select>
+                  <input
+                    value={privacyRequestNotes}
+                    onChange={(e) => setPrivacyRequestNotes(e.target.value)}
+                    className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm font-semibold"
+                    placeholder="Detalhes (opcional)"
+                  />
+                  <button
+                    type="button"
+                    onClick={submitPrivacyRequest}
+                    disabled={privacyLoading}
+                    className="px-4 py-2 rounded-xl bg-blue-600 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
+                  >
+                    Enviar
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-slate-200 p-4">
+                  <p className="text-sm font-black text-slate-800 mb-3">Consentimentos</p>
+                  {!privacyData?.consents?.length ? (
+                    <p className="text-sm text-slate-500 font-semibold">Nenhum consentimento registrado.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {privacyData.consents.map((consent) => (
+                        <div key={consent.id} className="flex items-center justify-between rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+                          <p className="text-xs font-bold text-slate-700">{getConsentKeyLabel(consent.consent_key)}</p>
                           <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${Number(consent.granted) ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
                             {Number(consent.granted) ? 'Ativo' : 'Revogado'}
                           </span>
                         </div>
-                      </div>
-                    ))}
-                    {!privacyData?.consents?.length && (
-                      <p className="text-sm text-slate-500 font-semibold">Nenhum consentimento registrado ainda.</p>
-                    )}
-                  </div>
-                  <div className="pt-2 border-t border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const marketingConsent = privacyData?.consents?.find((c) => c.consent_key === 'marketing_communications');
-                        const next = !Boolean(Number(marketingConsent?.granted || 0));
-                        updateMarketingConsent(next);
-                      }}
-                      disabled={privacyLoading}
-                      className="px-4 py-2 rounded-xl bg-blue-600 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
-                    >
-                      Alternar permissões de marketing
-                    </button>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <p className="text-xs font-black text-slate-800 mb-2">Histórico de aceite de políticas</p>
-                    {!privacyData?.policy_acceptances?.length ? (
-                      <p className="text-[11px] text-slate-500 font-semibold">Sem aceite registrado.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {privacyData.policy_acceptances.slice(0, 5).map((acceptance) => (
-                          <p key={acceptance.id} className="text-[11px] text-slate-600 font-semibold">
-                            {acceptance.policy_type} v{acceptance.policy_version} • {acceptance.accepted_at}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5 space-y-4">
-                  <h3 className="text-sm font-black uppercase tracking-wider text-slate-800">Exportação e Solicitações</h3>
-                  <div className="flex flex-wrap gap-2">
-                    <a href="/api/customer/privacy/export?format=json" className="px-3 py-2 rounded-lg bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest">Exportar JSON</a>
-                    <a href="/api/customer/privacy/export?format=csv" className="px-3 py-2 rounded-lg bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest">Exportar CSV</a>
-                    <a href="/api/customer/privacy/export?format=pdf" className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest">Exportar PDF</a>
-                  </div>
-                  <div className="space-y-3">
-                    <select
-                      value={privacyRequestType}
-                      onChange={(e) => setPrivacyRequestType(e.target.value as any)}
-                      className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm font-semibold"
-                    >
-                      <option value="export">Solicitar exportação</option>
-                      <option value="delete">Solicitar exclusão de conta</option>
-                      <option value="correction">Solicitar correção de dados</option>
-                      <option value="revoke">Revogar consentimentos</option>
-                    </select>
-                    <textarea
-                      value={privacyRequestNotes}
-                      onChange={(e) => setPrivacyRequestNotes(e.target.value)}
-                      className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm font-semibold min-h-[90px]"
-                      placeholder="Descreva os detalhes da sua solicitação..."
-                    />
-                    <button
-                      type="button"
-                      onClick={submitPrivacyRequest}
-                      disabled={privacyLoading}
-                      className="px-4 py-2 rounded-xl bg-rose-600 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
-                    >
-                      Enviar solicitação
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5">
-                <h3 className="text-sm font-black uppercase tracking-wider text-slate-800 mb-3">Histórico de solicitações LGPD</h3>
-                {!privacyData?.requests?.length ? (
-                  <p className="text-sm text-slate-500 font-semibold">Você ainda não possui solicitações LGPD.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {privacyData.requests.map((request) => (
-                      <div key={request.id} className="rounded-xl border border-slate-200 bg-white p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-xs font-black text-slate-800">#{request.id} • {request.request_type}</p>
-                          <span className="text-[10px] font-black uppercase tracking-wider text-blue-700">{request.status}</span>
+                <div className="rounded-xl border border-slate-200 p-4">
+                  <p className="text-sm font-black text-slate-800 mb-3">Histórico de solicitações</p>
+                  {!privacyData?.requests?.length ? (
+                    <p className="text-sm text-slate-500 font-semibold">Você ainda não possui solicitações.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {privacyData.requests.map((request) => (
+                        <div key={request.id} className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-black text-slate-800">#{request.id} â€¢ {getPrivacyRequestTypeLabel(request.request_type)}</p>
+                            <span className="text-[10px] font-black uppercase tracking-wider text-blue-700">{getPrivacyRequestStatusLabel(request.status)}</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 font-semibold mt-1">{formatPrivacyDate(request.created_at)}</p>
                         </div>
-                        <p className="text-[11px] text-slate-500 font-semibold mt-1">{request.created_at}</p>
-                        {request.notes ? <p className="text-[11px] text-slate-600 mt-1">{request.notes}</p> : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-800 text-sm font-semibold flex items-start gap-2">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-800 text-xs font-semibold flex items-start gap-2">
                 <FileWarning className="w-4 h-4 shrink-0 mt-0.5" />
-                A solicitação de exclusão pode anonimizar seus dados pessoais, preservando apenas registros obrigatórios fiscais/financeiros.
+                Solicitações de exclusão podem anonimizar seus dados, preservando apenas registros fiscais obrigatórios.
               </div>
             </div>
           )}
-
           {activeTab === 'wishlist' && (
             <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 shadow-sm">
               <h2 className="text-xl font-black text-slate-900 mb-4">Favoritos</h2>
@@ -1388,7 +1502,7 @@ export default function MyAccount() {
             </div>
             
             <div className="p-6 space-y-6">
-              {/* Área de Visualização */}
+              {/* Área de visualização */}
               <div 
                 className="relative aspect-square w-full bg-slate-100 rounded-2xl overflow-hidden cursor-move touch-none"
                 onMouseDown={handleMouseDown}
@@ -1475,6 +1589,7 @@ function AddressFormBlock({
         setAddress(prev => ({
           ...prev,
           address: data.logradouro || prev.address,
+          neighborhood: data.bairro || prev.neighborhood,
           city: data.localidade || prev.city,
           state: data.uf || prev.state,
           country: 'Brasil',
@@ -1526,11 +1641,18 @@ function AddressFormBlock({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Bairro</label>
+          <input className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" placeholder="Nome do bairro" value={address.neighborhood || ''} onChange={(e) => setAddress(prev => ({ ...prev, neighborhood: e.target.value }))} />
+        </div>
         <div>
           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Cidade</label>
           <input className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" placeholder="Cidade" value={address.city || ''} onChange={(e) => setAddress(prev => ({ ...prev, city: e.target.value }))} />
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Estado (UF)</label>
           <input className="w-full rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-sm font-semibold focus:border-blue-300 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" placeholder="UF" value={address.state || ''} onChange={(e) => setAddress(prev => ({ ...prev, state: e.target.value }))} maxLength={2} />
@@ -1574,3 +1696,6 @@ function PasswordInput({
     </label>
   );
 }
+
+
+

@@ -767,11 +767,13 @@ export function initDb() {
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS country VARCHAR(50) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_address TEXT NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_city VARCHAR(100) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_neighborhood VARCHAR(120) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_state VARCHAR(50) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_zip VARCHAR(10) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_country VARCHAR(50) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_address TEXT NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_city VARCHAR(100) NULL`);
+  query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_neighborhood VARCHAR(120) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_state VARCHAR(50) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_zip VARCHAR(10) NULL`);
   query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS shipping_country VARCHAR(50) NULL`);
