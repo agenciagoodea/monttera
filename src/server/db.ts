@@ -419,6 +419,25 @@ export function initDb() {
   `);
 
   query(`
+    CREATE TABLE IF NOT EXISTS download_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NULL,
+      order_id INT NULL,
+      order_item_id INT NULL,
+      product_id INT NULL,
+      file_name VARCHAR(255) NULL,
+      file_path TEXT NULL,
+      file_size BIGINT NULL,
+      sha256 CHAR(64) NULL,
+      status ENUM('success','denied','error') DEFAULT 'success',
+      error TEXT NULL,
+      ip VARCHAR(64) NULL,
+      user_agent TEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
     CREATE TABLE IF NOT EXISTS processed_webhooks (
       id INT AUTO_INCREMENT PRIMARY KEY,
       provider VARCHAR(50) NOT NULL,
@@ -710,6 +729,9 @@ export function initDb() {
   createIndexIfNotExists('login_attempts', 'idx_login_attempts_ip_time', 'CREATE INDEX idx_login_attempts_ip_time ON login_attempts(ip, attempted_at)');
   createIndexIfNotExists('download_tokens', 'idx_download_tokens_user_item', 'CREATE INDEX idx_download_tokens_user_item ON download_tokens(user_id, order_item_id)');
   createIndexIfNotExists('download_tokens', 'idx_download_tokens_expires', 'CREATE INDEX idx_download_tokens_expires ON download_tokens(expires_at)');
+  createIndexIfNotExists('download_logs', 'idx_download_logs_user_date', 'CREATE INDEX idx_download_logs_user_date ON download_logs(user_id, created_at)');
+  createIndexIfNotExists('download_logs', 'idx_download_logs_order_date', 'CREATE INDEX idx_download_logs_order_date ON download_logs(order_id, created_at)');
+  createIndexIfNotExists('download_logs', 'idx_download_logs_status_date', 'CREATE INDEX idx_download_logs_status_date ON download_logs(status, created_at)');
   createIndexIfNotExists('lgpd_requests', 'idx_lgpd_requests_user', 'CREATE INDEX idx_lgpd_requests_user ON lgpd_requests(user_id, created_at)');
   createIndexIfNotExists('lgpd_requests', 'idx_lgpd_requests_status', 'CREATE INDEX idx_lgpd_requests_status ON lgpd_requests(status, created_at)');
   createIndexIfNotExists('lgpd_consents', 'idx_lgpd_consents_key', 'CREATE INDEX idx_lgpd_consents_key ON lgpd_consents(consent_key, updated_at)');

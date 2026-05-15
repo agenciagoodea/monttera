@@ -98,14 +98,14 @@ export default function AdminSettings() {
   const [settings, setSettings] = useState({
     // Home/Info
     site_name: 'Digital Bordados',
-    site_description: 'ExcelÃªncia em Matrizes de Bordado',
+    site_description: 'Excelência em Matrizes de Bordado',
     logo_url: '/logo.png',
     primary_color: '#3b82f6',
     secondary_color: '#1e293b',
     phone: '',
     email_contact: 'contato@digitalbordados.com',
     address: '',
-    contact_hours: 'Seg a Sex, 8h as 18h',
+    contact_hours: 'Seg a Sex, 8h às 18h',
     contact_whatsapp: '',
     new_badge_days: '20',
     // Suporte ao Cliente
@@ -405,12 +405,12 @@ export default function AdminSettings() {
         })
       });
       if (res.ok) {
-        setMessage({ text: 'ConfiguraÃ§Ãµes salvas com sucesso!', type: 'success' });
+        setMessage({ text: 'Configurações salvas com sucesso!', type: 'success' });
       } else {
-        setMessage({ text: 'Erro ao salvar configuraÃ§Ãµes.', type: 'error' });
+        setMessage({ text: 'Erro ao salvar configurações.', type: 'error' });
       }
     } catch (error) {
-      setMessage({ text: 'Erro de conexÃ£o.', type: 'error' });
+      setMessage({ text: 'Erro de conexão.', type: 'error' });
     } finally {
       setSaving(false);
       setTimeout(() => setMessage(null), 3000);
@@ -418,8 +418,8 @@ export default function AdminSettings() {
   };
 
   const tabs = [
-    { id: 'home', label: 'AparÃªncia & Home', icon: Layout },
-    { id: 'email', label: 'ConfiguraÃ§Ã£o de E-mail', icon: Mail },
+    { id: 'home', label: 'Aparência & Home', icon: Layout },
+    { id: 'email', label: 'Configuração de E-mail', icon: Mail },
     { id: 'payment', label: 'Meios de Pagamento', icon: CreditCard },
     { id: 'lgpd', label: 'LGPD', icon: ShieldCheck },
   ];
@@ -432,7 +432,7 @@ export default function AdminSettings() {
       setCopiedWebhook(true);
       setTimeout(() => setCopiedWebhook(false), 1500);
     } catch (error) {
-      setMessage({ text: 'NÃ£o foi possÃ­vel copiar a URL do webhook.', type: 'error' });
+      setMessage({ text: 'Não foi possível copiar a URL do webhook.', type: 'error' });
     }
   };
 
@@ -458,7 +458,7 @@ export default function AdminSettings() {
       const data = await res.json();
       if (res.ok && data?.connected) {
         setConnectionInfo(data.account || null);
-        setMessage({ text: 'ConexÃ£o validada com sucesso.', type: 'success' });
+        setMessage({ text: 'Conexão validada com sucesso.', type: 'success' });
       } else {
         setConnectionInfo(null);
         const details =
@@ -467,12 +467,12 @@ export default function AdminSettings() {
             : Array.isArray(data?.details)
               ? JSON.stringify(data.details)
               : '';
-        const messageText = details ? `${data?.error || 'Falha ao validar conexÃ£o do Mercado Pago.'} (${details})` : (data?.error || 'Falha ao validar conexÃ£o do Mercado Pago.');
+        const messageText = details ? `${data?.error || 'Falha ao validar conexão do Mercado Pago.'} (${details})` : (data?.error || 'Falha ao validar conexão do Mercado Pago.');
         setMessage({ text: messageText, type: 'error' });
       }
     } catch (error) {
       setConnectionInfo(null);
-      setMessage({ text: 'Erro ao testar conexÃ£o do Mercado Pago.', type: 'error' });
+      setMessage({ text: 'Erro ao testar conexão do Mercado Pago.', type: 'error' });
     } finally {
       setTestingConnection(false);
       setTimeout(() => setMessage(null), 3000);
@@ -510,7 +510,7 @@ export default function AdminSettings() {
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await res.json();
-      setSmtpStatus({ ok: data.ok, msg: data.ok ? 'ConexÃ£o estabelecida com sucesso!' : (data.error || 'Falha na conexÃ£o SMTP') });
+      setSmtpStatus({ ok: data.ok, msg: data.ok ? 'Conexão estabelecida com sucesso!' : (data.error || 'Falha na conexão SMTP') });
     } catch {
       setSmtpStatus({ ok: false, msg: 'Erro de rede ao testar SMTP' });
     } finally {
@@ -539,7 +539,7 @@ export default function AdminSettings() {
 
   const createLgpdPolicy = async () => {
     if (!newPolicy.version || !newPolicy.title || !newPolicy.content) {
-      setMessage({ text: 'Preencha versao, titulo e conteudo da politica.', type: 'error' });
+      setMessage({ text: 'Preencha versão, título e conteúdo da política.', type: 'error' });
       return;
     }
     try {
@@ -550,14 +550,14 @@ export default function AdminSettings() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMessage({ text: data?.error || 'Erro ao criar politica LGPD.', type: 'error' });
+        setMessage({ text: data?.error || 'Erro ao criar política LGPD.', type: 'error' });
         return;
       }
-      setMessage({ text: 'Politica LGPD criada com sucesso.', type: 'success' });
+      setMessage({ text: 'Política LGPD criada com sucesso.', type: 'success' });
       setNewPolicy({ policy_type: 'privacy', version: '', title: '', content: '', is_active: true, force_reaccept: false });
       loadLgpdData();
     } catch {
-      setMessage({ text: 'Erro de rede ao criar politica LGPD.', type: 'error' });
+      setMessage({ text: 'Erro de rede ao criar política LGPD.', type: 'error' });
     }
   };
 
@@ -570,14 +570,14 @@ export default function AdminSettings() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMessage({ text: data?.error || 'Erro ao ativar politica.', type: 'error' });
+        setMessage({ text: data?.error || 'Erro ao ativar política.', type: 'error' });
         return;
       }
-      setMessage({ text: 'Politica ativada com sucesso.', type: 'success' });
+      setMessage({ text: 'Política ativada com sucesso.', type: 'success' });
       loadLgpdData();
       fetchSettings();
     } catch {
-      setMessage({ text: 'Erro de rede ao ativar politica.', type: 'error' });
+      setMessage({ text: 'Erro de rede ao ativar política.', type: 'error' });
     }
   };
 
@@ -602,7 +602,7 @@ export default function AdminSettings() {
 
   const runPolicyDiff = async () => {
     if (!policyDiffSelection.leftId || !policyDiffSelection.rightId) {
-      setMessage({ text: 'Selecione as duas versÃµes para comparar.', type: 'error' });
+      setMessage({ text: 'Selecione as duas versões para comparar.', type: 'error' });
       return;
     }
     setLoadingPolicyDiff(true);
@@ -615,12 +615,12 @@ export default function AdminSettings() {
       const res = await fetch(`/api/admin/lgpd/policies/diff?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMessage({ text: data?.error || 'Erro ao comparar versÃµes.', type: 'error' });
+        setMessage({ text: data?.error || 'Erro ao comparar versões.', type: 'error' });
         return;
       }
       setPolicyDiffResult(data);
     } catch {
-      setMessage({ text: 'Erro de rede ao comparar versÃµes.', type: 'error' });
+      setMessage({ text: 'Erro de rede ao comparar versões.', type: 'error' });
     } finally {
       setLoadingPolicyDiff(false);
     }
@@ -629,20 +629,20 @@ export default function AdminSettings() {
   const downloadAdminLgpdExport = async () => {
     const userId = Number(lgpdExportUserId);
     if (!Number.isFinite(userId) || userId <= 0) {
-      setMessage({ text: 'Informe um ID de usuÃ¡rio vÃ¡lido.', type: 'error' });
+      setMessage({ text: 'Informe um ID de usuário válido.', type: 'error' });
       return;
     }
     try {
       const res = await fetch(`/api/admin/lgpd/export/user/${userId}?format=${lgpdExportFormat}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setMessage({ text: err?.error || 'Erro ao exportar dados do usuÃ¡rio.', type: 'error' });
+        setMessage({ text: err?.error || 'Erro ao exportar dados do usuário.', type: 'error' });
         return;
       }
 
       const blob = await res.blob();
       const extension = lgpdExportFormat === 'pdf' ? 'pdf' : lgpdExportFormat === 'csv' ? 'csv' : 'json';
-      const fileName = `dados-lgpd-usuario-${userId}.${extension}`;
+      const fileName = `dados-lgpd-usuário-${userId}.${extension}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -651,21 +651,21 @@ export default function AdminSettings() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      setMessage({ text: `ExportaÃ§Ã£o do usuÃ¡rio #${userId} iniciada.`, type: 'success' });
+      setMessage({ text: `Exportação do usuário #${userId} iniciada.`, type: 'success' });
     } catch {
-      setMessage({ text: 'Erro de rede ao exportar usuÃ¡rio.', type: 'error' });
+      setMessage({ text: 'Erro de rede ao exportar usuário.', type: 'error' });
     }
   };
 
-  if (loading) return <div className="p-10 animate-pulse text-slate-400 font-black uppercase tracking-widest text-xs">Carregando configuraÃ§Ãµes...</div>;
+  if (loading) return <div className="p-10 animate-pulse text-slate-400 font-black uppercase tracking-widest text-xs">Carregando configurações...</div>;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-slate-800 tracking-tight uppercase">ConfiguraÃ§Ãµes do Sistema</h1>
+          <h1 className="text-2xl font-black text-slate-800 tracking-tight uppercase">Configurações do Sistema</h1>
           <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">
-            Personalize a plataforma e integre serviÃ§os
+            Personalize a plataforma e integre serviços
           </p>
         </div>
         <button 
@@ -676,7 +676,7 @@ export default function AdminSettings() {
           {saving ? 'Salvando...' : (
             <>
               <Save className="w-4 h-4" />
-              Salvar AlteraÃ§Ãµes
+              Salvar Alterações
             </>
           )}
         </button>
@@ -718,11 +718,11 @@ export default function AdminSettings() {
           <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden p-8 lg:p-10">
             <form onSubmit={handleSave} className="space-y-10">
               
-              {/* Tab: Home/AparÃªncia */}
+              {/* Tab: Home/Aparência */}
               {activeTab === 'home' && (
                 <div className="space-y-8">
                   <div>
-                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">InformaÃ§Ãµes Institucionais</h3>
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Informações Institucionais</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nome do Site</label>
@@ -761,10 +761,10 @@ export default function AdminSettings() {
                           value={settings.contact_whatsapp}
                           onChange={e => setSettings({ ...settings, contact_whatsapp: e.target.value })}
                         />
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Usado na pÃ¡gina de Contato (bloco Canais Oficiais).</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Usado na página de Contato (bloco Canais Oficiais).</p>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Area de Atendimento</label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Área de Atendimento</label>
                         <input
                           type="text"
                           placeholder="Atendimento online em todo o Brasil"
@@ -774,10 +774,10 @@ export default function AdminSettings() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Horario de Atendimento</label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Horário de Atendimento</label>
                         <input
                           type="text"
-                          placeholder="Seg a Sex, 8h as 18h"
+                          placeholder="Seg a Sex, 8h às 18h"
                           className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
                           value={settings.contact_hours}
                           onChange={e => setSettings({ ...settings, contact_hours: e.target.value })}
@@ -792,7 +792,7 @@ export default function AdminSettings() {
                           value={settings.support_whatsapp}
                           onChange={e => setSettings({...settings, support_whatsapp: e.target.value})}
                         />
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Exibido na Ã¡rea "Minha Conta" do cliente.</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Exibido na Área "Minha Conta" do cliente.</p>
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail de Suporte</label>
@@ -803,10 +803,10 @@ export default function AdminSettings() {
                           value={settings.support_email}
                           onChange={e => setSettings({...settings, support_email: e.target.value})}
                         />
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Exibido na Ã¡rea "Minha Conta" do cliente.</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Exibido na Área "Minha Conta" do cliente.</p>
                       </div>
                       <div className="md:col-span-2 space-y-2">
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">DescriÃ§Ã£o (SEO)</label>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Descrição (SEO)</label>
                         <textarea 
                           rows={3}
                           className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
@@ -827,7 +827,7 @@ export default function AdminSettings() {
                           }}
                         />
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
-                          Produtos cadastrados nos ultimos X dias exibirao o badge "Novo".
+                          Produtos cadastrados nos últimos X dias exibirão o badge "Novo".
                         </p>
                       </div>
                     </div>
@@ -895,7 +895,7 @@ export default function AdminSettings() {
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                         <div className="space-y-4">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Cor PrimÃ¡ria</label>
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Cor Primária</label>
                           <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 flex items-center gap-4">
                             <div className="relative w-12 h-12 rounded-xl overflow-hidden shadow-sm ring-2 ring-white">
                               <input 
@@ -912,13 +912,13 @@ export default function AdminSettings() {
                                 value={settings.primary_color}
                                 onChange={e => setSettings({...settings, primary_color: e.target.value})}
                               />
-                              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Cor principal e botÃµes</p>
+                              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Cor principal e botões</p>
                             </div>
                           </div>
                         </div>
 
                         <div className="space-y-4">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Cor SecundÃ¡ria</label>
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Cor Secundária</label>
                           <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 flex items-center gap-4">
                             <div className="relative w-12 h-12 rounded-xl overflow-hidden shadow-sm ring-2 ring-white">
                               <input 
@@ -1060,7 +1060,7 @@ export default function AdminSettings() {
                           </label>
                         </div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
-                          Estes logos aparecerÃ£o no rodapÃ© da pÃ¡gina inicial em um carrossel. Recomendado: PNG com fundo transparente.
+                          Estes logos aparecerão no rodapé da página inicial em um carrossel. Recomendado: PNG com fundo transparente.
                         </p>
                       </div>
                     </div>
@@ -1074,7 +1074,7 @@ export default function AdminSettings() {
                   {/* Sub-tabs */}
                   <div className="flex gap-2 border-b border-slate-100 pb-4">
                     {[
-                      { id: 'smtp', label: 'ConfiguraÃ§Ãµes SMTP', icon: Wifi },
+                      { id: 'smtp', label: 'Configurações SMTP', icon: Wifi },
                       { id: 'templates', label: 'Templates', icon: FileText },
                       { id: 'logs', label: 'Logs de Envio', icon: Activity },
                     ].map(st => {
@@ -1123,7 +1123,7 @@ export default function AdminSettings() {
                             />
                           </div>
                           <div className="space-y-2">
-                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">SeguranÃ§a</label>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Segurança</label>
                             <select 
                               className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
                               value={settings.smtp_secure}
@@ -1135,7 +1135,7 @@ export default function AdminSettings() {
                           </div>
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">UsuÃ¡rio / E-mail</label>
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Usuário / E-mail</label>
                           <input 
                             type="text" 
                             className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
@@ -1194,7 +1194,7 @@ export default function AdminSettings() {
                           disabled={testingSmtp}
                           className="px-6 py-3 rounded-2xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-700 transition-all disabled:opacity-50"
                         >
-                          {testingSmtp ? 'Testando...' : 'Testar ConexÃ£o'}
+                          {testingSmtp ? 'Testando...' : 'Testar Conexão'}
                         </button>
 
                         {smtpStatus && (
@@ -1246,14 +1246,14 @@ export default function AdminSettings() {
                 <div className="space-y-6">
                   <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-4">
                     {[
-                      { id: 'general', label: 'ConfiguraÃ§Ãµes Gerais', icon: ShieldCheck },
+                      { id: 'general', label: 'Configurações Gerais', icon: ShieldCheck },
                       { id: 'consents', label: 'Consentimentos', icon: Users },
-                      { id: 'policies', label: 'PolÃ­ticas', icon: FileText },
+                      { id: 'policies', label: 'Políticas', icon: FileText },
                       { id: 'cookies', label: 'Cookies', icon: Cookie },
-                      { id: 'requests', label: 'SolicitaÃ§Ãµes', icon: FileClock },
+                      { id: 'requests', label: 'Solicitações', icon: FileClock },
                       { id: 'logs', label: 'Logs LGPD', icon: Activity },
-                      { id: 'security', label: 'SeguranÃ§a', icon: Database },
-                      { id: 'export', label: 'ExportaÃ§Ã£o e ExclusÃ£o', icon: Scale },
+                      { id: 'security', label: 'Segurança', icon: Database },
+                      { id: 'export', label: 'Exportação e Exclusão', icon: Scale },
                       { id: 'terms', label: 'Termos e Contratos', icon: FileCheck2 },
                     ].map((st) => {
                       const Icon = st.icon;
@@ -1280,7 +1280,7 @@ export default function AdminSettings() {
                       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
                         <input
                           type="text"
-                          placeholder="Buscar por usuÃ¡rio/e-mail"
+                          placeholder="Buscar por usuário/e-mail"
                           value={lgpdFilters.q}
                           onChange={(e) => setLgpdFilters((prev) => ({ ...prev, q: e.target.value }))}
                           className="px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold"
@@ -1404,9 +1404,9 @@ export default function AdminSettings() {
                           ['lgpd_require_checkout_consent', 'Exigir consentimento no checkout'],
                           ['lgpd_require_marketing_optin', 'Exigir opt-in marketing'],
                           ['lgpd_require_cookie_consent', 'Exigir consentimento de cookies'],
-                          ['lgpd_require_policy_acceptance', 'Exigir aceite polÃ­tica'],
+                          ['lgpd_require_policy_acceptance', 'Exigir aceite política'],
                           ['lgpd_require_terms_acceptance', 'Exigir aceite termos'],
-                          ['lgpd_require_reaccept_on_policy_update', 'ForÃ§ar reaceite ao atualizar polÃ­tica'],
+                          ['lgpd_require_reaccept_on_policy_update', 'Forçar reaceite ao atualizar política'],
                         ].map(([key, label]) => (
                           <button
                             key={key}
@@ -1446,7 +1446,7 @@ export default function AdminSettings() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">URL PolÃ­tica Privacidade</label>
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">URL Política Privacidade</label>
                           <input type="text" className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" value={settings.lgpd_privacy_url} onChange={(e) => setSettings({ ...settings, lgpd_privacy_url: e.target.value })} />
                         </div>
                         <div className="space-y-2">
@@ -1454,7 +1454,7 @@ export default function AdminSettings() {
                           <input type="text" className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" value={settings.lgpd_terms_url} onChange={(e) => setSettings({ ...settings, lgpd_terms_url: e.target.value })} />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">URL PolÃ­tica Cookies</label>
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">URL Política Cookies</label>
                           <input type="text" className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" value={settings.lgpd_cookie_policy_url} onChange={(e) => setSettings({ ...settings, lgpd_cookie_policy_url: e.target.value })} />
                         </div>
                       </div>
@@ -1466,7 +1466,7 @@ export default function AdminSettings() {
                       <div className="rounded-2xl border border-slate-200 p-5 bg-slate-50/60">
                         <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Consentimentos Registrados</h4>
                         <p className="text-xs text-slate-500 font-semibold mt-2">
-                          Registros de aceite e revogaÃ§Ã£o com usuÃ¡rio, IP, origem e versÃ£o de polÃ­tica.
+                          Registros de aceite e revogação com usuário, IP, origem e versão de política.
                         </p>
                       </div>
                       {loadingLgpdData ? (
@@ -1481,17 +1481,17 @@ export default function AdminSettings() {
                                 {c.consent_key} • {c.granted ? 'Concedido' : 'Revogado'}
                               </p>
                               <p className="text-sm font-black text-slate-800 mt-1">
-                                {c.user_name || 'Usuario removido'} <span className="text-slate-500">({c.user_email || 'sem e-mail'})</span>
+                                {c.user_name || 'Usuário removido'} <span className="text-slate-500">({c.user_email || 'sem e-mail'})</span>
                               </p>
                               <p className="text-xs text-slate-500 mt-1">
-                                Versao: {c.policy_version || '-'} • Origem: {c.source || '-'} • Atualizado: {c.updated_at}
+                                Versão: {c.policy_version || '-'} • Origem: {c.source || '-'} • Atualizado: {c.updated_at}
                               </p>
                               <p className="text-xs text-slate-500">IP: {c.ip || '-'} • Navegador: {c.user_agent || '-'}</p>
                             </div>
                           ))}
                           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                              {lgpdPagination.consents.total} registro(s) • pagina {lgpdPagination.consents.page} de {lgpdPagination.consents.totalPages}
+                              {lgpdPagination.consents.total} registro(s) • página {lgpdPagination.consents.page} de {lgpdPagination.consents.totalPages}
                             </p>
                             <div className="flex items-center gap-2">
                               <button
@@ -1508,7 +1508,7 @@ export default function AdminSettings() {
                                 onClick={() => changeLgpdPage('consents', lgpdPagination.consents.page + 1)}
                                 className="px-3 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
                               >
-                                Proxima
+                                Próxima
                               </button>
                             </div>
                           </div>
@@ -1520,39 +1520,39 @@ export default function AdminSettings() {
                   {lgpdSubTab === 'policies' && (
                     <div className="space-y-6">
                       <div className="rounded-2xl border border-slate-200 p-5 space-y-4">
-                        <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Nova VersÃ£o de PolÃ­tica</h4>
+                        <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Nova Versão de Política</h4>
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                           <select className="px-4 py-3 rounded-xl bg-slate-50 text-xs font-bold" value={newPolicy.policy_type} onChange={(e) => setNewPolicy({ ...newPolicy, policy_type: e.target.value })}>
                             <option value="privacy">Privacidade</option>
                             <option value="terms">Termos de Uso</option>
                             <option value="cookies">Cookies</option>
                           </select>
-                          <input className="px-4 py-3 rounded-xl bg-slate-50 text-xs font-bold" placeholder="VersÃ£o (ex: 1.1)" value={newPolicy.version} onChange={(e) => setNewPolicy({ ...newPolicy, version: e.target.value })} />
-                          <input className="px-4 py-3 rounded-xl bg-slate-50 text-xs font-bold md:col-span-2" placeholder="TÃ­tulo" value={newPolicy.title} onChange={(e) => setNewPolicy({ ...newPolicy, title: e.target.value })} />
+                          <input className="px-4 py-3 rounded-xl bg-slate-50 text-xs font-bold" placeholder="Versão (ex: 1.1)" value={newPolicy.version} onChange={(e) => setNewPolicy({ ...newPolicy, version: e.target.value })} />
+                          <input className="px-4 py-3 rounded-xl bg-slate-50 text-xs font-bold md:col-span-2" placeholder="Título" value={newPolicy.title} onChange={(e) => setNewPolicy({ ...newPolicy, title: e.target.value })} />
                         </div>
-                        <textarea className="w-full min-h-[160px] px-4 py-3 rounded-xl bg-slate-50 text-xs font-semibold" placeholder="ConteÃºdo completo da polÃ­tica..." value={newPolicy.content} onChange={(e) => setNewPolicy({ ...newPolicy, content: e.target.value })} />
+                        <textarea className="w-full min-h-[160px] px-4 py-3 rounded-xl bg-slate-50 text-xs font-semibold" placeholder="Conteúdo completo da política..." value={newPolicy.content} onChange={(e) => setNewPolicy({ ...newPolicy, content: e.target.value })} />
                         <div className="flex flex-wrap gap-3">
                           <button type="button" onClick={() => setNewPolicy({ ...newPolicy, is_active: !newPolicy.is_active })} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${newPolicy.is_active ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
                             {newPolicy.is_active ? 'Ativa ao salvar' : 'Salvar inativa'}
                           </button>
                           <button type="button" onClick={() => setNewPolicy({ ...newPolicy, force_reaccept: !newPolicy.force_reaccept })} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${newPolicy.force_reaccept ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
-                            {newPolicy.force_reaccept ? 'ForÃ§ar reaceite ligado' : 'ForÃ§ar reaceite desligado'}
+                            {newPolicy.force_reaccept ? 'Forçar reaceite ligado' : 'Forçar reaceite desligado'}
                           </button>
-                          <button type="button" onClick={createLgpdPolicy} className="ml-auto px-5 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest">Criar polÃ­tica</button>
+                          <button type="button" onClick={createLgpdPolicy} className="ml-auto px-5 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest">Criar política</button>
                         </div>
                       </div>
 
                       <div className="space-y-3">
                         {loadingLgpdData ? (
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Carregando polÃ­ticas...</p>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Carregando políticas...</p>
                         ) : lgpdPolicies.length === 0 ? (
-                          <p className="text-sm font-semibold text-slate-500">Nenhuma polÃ­tica cadastrada.</p>
+                          <p className="text-sm font-semibold text-slate-500">Nenhuma política cadastrada.</p>
                         ) : lgpdPolicies.map((p) => (
                           <div key={p.id} className="rounded-2xl border border-slate-200 p-4 flex flex-col md:flex-row md:items-center gap-3">
                             <div className="flex-1">
                               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{p.policy_type}</p>
                               <h5 className="text-sm font-black text-slate-800">{p.title} <span className="text-slate-500">v{p.version}</span></h5>
-                              <p className="text-xs text-slate-500 mt-1">{p.is_active ? 'Ativa' : 'Inativa'} â€¢ {p.force_reaccept ? 'ForÃ§a reaceite' : 'Sem reaceite'}</p>
+                              <p className="text-xs text-slate-500 mt-1">{p.is_active ? 'Ativa' : 'Inativa'} • {p.force_reaccept ? 'Força reaceite' : 'Sem reaceite'}</p>
                             </div>
                             {!p.is_active && (
                               <button type="button" onClick={() => activateLgpdPolicy(Number(p.id))} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest">
@@ -1564,14 +1564,14 @@ export default function AdminSettings() {
                       </div>
 
                       <div className="rounded-2xl border border-slate-200 p-5 space-y-4">
-                        <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Comparador de VersÃµes</h4>
+                        <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Comparador de Versões</h4>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           <select
                             value={policyDiffSelection.leftId}
                             onChange={(e) => setPolicyDiffSelection((prev) => ({ ...prev, leftId: e.target.value }))}
                             className="px-4 py-3 rounded-xl bg-slate-50 text-xs font-bold"
                           >
-                            <option value="">VersÃ£o A</option>
+                            <option value="">Versão A</option>
                             {lgpdPolicies.map((p) => (
                               <option key={`left-${p.id}`} value={String(p.id)}>
                                 {p.policy_type} • v{p.version}
@@ -1583,7 +1583,7 @@ export default function AdminSettings() {
                             onChange={(e) => setPolicyDiffSelection((prev) => ({ ...prev, rightId: e.target.value }))}
                             className="px-4 py-3 rounded-xl bg-slate-50 text-xs font-bold"
                           >
-                            <option value="">VersÃ£o B</option>
+                            <option value="">Versão B</option>
                             {lgpdPolicies.map((p) => (
                               <option key={`right-${p.id}`} value={String(p.id)}>
                                 {p.policy_type} • v{p.version}
@@ -1629,26 +1629,26 @@ export default function AdminSettings() {
 
                   {lgpdSubTab === 'cookies' && (
                     <div className="rounded-2xl border border-slate-200 p-6 space-y-4">
-                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">PolÃ­tica de Cookies e Banner</h4>
+                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Política de Cookies e Banner</h4>
                       <p className="text-sm text-slate-600 font-semibold">
-                        O banner de cookies usa estas chaves de configuraÃ§Ã£o e grava os consentimentos em banco.
+                        O banner de cookies usa estas chaves de configuração e grava os consentimentos em banco de dados.
                       </p>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                         <div className="rounded-xl bg-blue-50 border border-blue-100 p-4">
-                          <p className="font-black text-blue-800 uppercase tracking-widest">NecessÃ¡rios</p>
-                          <p className="text-blue-700 mt-1 font-semibold">Sempre ativos para autenticaÃ§Ã£o e sessÃ£o segura.</p>
+                          <p className="font-black text-blue-800 uppercase tracking-widest">Necessários</p>
+                          <p className="text-blue-700 mt-1 font-semibold">Sempre ativos para autenticação e sessão segura.</p>
                         </div>
                         <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                          <p className="font-black text-slate-700 uppercase tracking-widest">EstatÃ­sticos</p>
-                          <p className="text-slate-600 mt-1 font-semibold">Controlados pelo usuÃ¡rio via banner.</p>
+                          <p className="font-black text-slate-700 uppercase tracking-widest">Estatísticos</p>
+                          <p className="text-slate-600 mt-1 font-semibold">Controlados pelo usuário via banner.</p>
                         </div>
                         <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
                           <p className="font-black text-slate-700 uppercase tracking-widest">Marketing</p>
-                          <p className="text-slate-600 mt-1 font-semibold">SÃ³ ativados apÃ³s consentimento explÃ­cito.</p>
+                          <p className="text-slate-600 mt-1 font-semibold">Só ativados após consentimento explícito.</p>
                         </div>
                         <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                          <p className="font-black text-slate-700 uppercase tracking-widest">PreferÃªncias</p>
-                          <p className="text-slate-600 mt-1 font-semibold">MemÃ³ria de escolhas e personalizaÃ§Ã£o.</p>
+                          <p className="font-black text-slate-700 uppercase tracking-widest">Preferências</p>
+                          <p className="text-slate-600 mt-1 font-semibold">Memória de escolhas e personalização.</p>
                         </div>
                       </div>
                     </div>
@@ -1657,16 +1657,16 @@ export default function AdminSettings() {
                   {lgpdSubTab === 'requests' && (
                     <div className="space-y-3">
                       {loadingLgpdData ? (
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Carregando solicitaÃ§Ãµes...</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Carregando solicitações...</p>
                       ) : lgpdRequests.length === 0 ? (
-                        <p className="text-sm font-semibold text-slate-500">Nenhuma solicitaÃ§Ã£o LGPD encontrada.</p>
+                        <p className="text-sm font-semibold text-slate-500">Nenhuma solicitação LGPD encontrada.</p>
                       ) : (
                         <>
                           {lgpdRequests.map((r) => (
                             <div key={r.id} className="rounded-2xl border border-slate-200 p-4">
                               <div className="flex flex-col md:flex-row md:items-center gap-2">
                                 <div className="flex-1">
-                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{r.id} â€¢ {r.request_type}</p>
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">#{r.id} • {r.request_type}</p>
                                   <h5 className="text-sm font-black text-slate-800">{r.user_name} <span className="text-slate-500 font-bold">({r.user_email})</span></h5>
                                   <p className="text-xs text-slate-500 mt-1">Status atual: <strong>{r.status}</strong></p>
                                 </div>
@@ -1699,7 +1699,7 @@ export default function AdminSettings() {
                                 onClick={() => changeLgpdPage('requests', lgpdPagination.requests.page + 1)}
                                 className="px-3 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
                               >
-                                Proxima
+                                Próxima
                               </button>
                             </div>
                           </div>
@@ -1718,9 +1718,9 @@ export default function AdminSettings() {
                         <>
                           {lgpdLogs.map((l) => (
                             <div key={l.id} className="rounded-2xl border border-slate-200 p-4">
-                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{l.event_type} â€¢ {l.action}</p>
+                              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{l.event_type} • {l.action}</p>
                               <p className="text-sm font-black text-slate-800 mt-1">{l.user_name || 'Sistema'} <span className="text-slate-500 font-bold">({l.user_email || 'sem e-mail'})</span></p>
-                              <p className="text-xs text-slate-500 mt-1">IP: {l.ip || '-'} â€¢ {l.created_at}</p>
+                              <p className="text-xs text-slate-500 mt-1">IP: {l.ip || '-'} • {l.created_at}</p>
                             </div>
                           ))}
                           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
@@ -1742,7 +1742,7 @@ export default function AdminSettings() {
                                 onClick={() => changeLgpdPage('logs', lgpdPagination.logs.page + 1)}
                                 className="px-3 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
                               >
-                                Proxima
+                                Próxima
                               </button>
                             </div>
                           </div>
@@ -1753,34 +1753,34 @@ export default function AdminSettings() {
 
                   {lgpdSubTab === 'security' && (
                     <div className="rounded-2xl border border-slate-200 p-6">
-                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider mb-4">SeguranÃ§a de Dados e Conformidade</h4>
+                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider mb-4">Segurança de Dados e Conformidade</h4>
                       <ul className="space-y-2 text-sm text-slate-600 font-semibold">
-                        <li className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Cookies de sessÃ£o HTTPOnly e SameSite ativos.</li>
-                        <li className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Hash de senha com bcrypt, proteÃ§Ã£o de brute force e logs.</li>
-                        <li className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Registro de consentimentos, polÃ­ticas e solicitaÃ§Ãµes do titular.</li>
-                        <li className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Fluxo de exportaÃ§Ã£o e anonimizaÃ§Ã£o de dados disponÃ­vel via API LGPD.</li>
+                        <li className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Cookies de sessão HTTPOnly e SameSite ativos.</li>
+                        <li className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Hash de senha com bcrypt, proteção de brute force e logs.</li>
+                        <li className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Registro de consentimentos, políticas e solicitações do titular.</li>
+                        <li className="flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-600" /> Fluxo de exportação e anonimização de dados disponível via API LGPD.</li>
                       </ul>
                     </div>
                   )}
 
                   {lgpdSubTab === 'export' && (
                     <div className="rounded-2xl border border-slate-200 p-6 space-y-4">
-                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">ExportaÃ§Ã£o e ExclusÃ£o</h4>
+                      <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Exportação e Exclusão</h4>
                       <p className="text-sm text-slate-600 font-semibold">
-                        O titular pode solicitar exportaÃ§Ã£o (JSON/CSV/PDF) e exclusÃ£o/anonimizaÃ§Ã£o via Minha Conta.
+                        O titular pode solicitar exportação (JSON/CSV/PDF) e exclusão/anonimização via Minha Conta.
                       </p>
                       <ul className="space-y-2 text-sm text-slate-600 font-semibold">
-                        <li>â€¢ ExportaÃ§Ã£o protegida por autenticaÃ§Ã£o e vÃ­nculo com o usuÃ¡rio logado.</li>
-                        <li>â€¢ SolicitaÃ§Ãµes com workflow: pending, in_review, completed, refused.</li>
-                        <li>â€¢ ConclusÃ£o de exclusÃ£o executa anonimizaÃ§Ã£o e revoga consentimentos.</li>
+                        <li>• Exportação protegida por autenticação e vínculo com o usuário logado.</li>
+                        <li>• Solicitações com workflow: pending, in_review, completed, refused.</li>
+                        <li>• Conclusão de exclusão executa anonimização e revoga consentimentos.</li>
                       </ul>
                       <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-3">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Exportar dados de um usuÃ¡rio (admin)</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Exportar dados de um usuário (admin)</p>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           <input
                             type="number"
                             min={1}
-                            placeholder="ID do usuÃ¡rio"
+                            placeholder="ID do usuário"
                             value={lgpdExportUserId}
                             onChange={(e) => setLgpdExportUserId(e.target.value)}
                             className="px-4 py-3 rounded-xl bg-white border border-slate-200 text-xs font-bold"
@@ -1799,7 +1799,7 @@ export default function AdminSettings() {
                             onClick={downloadAdminLgpdExport}
                             className="px-4 py-3 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest"
                           >
-                            Baixar exportacao
+                            Baixar exportação
                           </button>
                         </div>
                       </div>
@@ -1810,19 +1810,19 @@ export default function AdminSettings() {
                     <div className="rounded-2xl border border-slate-200 p-6 space-y-4">
                       <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">Termos e Contratos</h4>
                       <p className="text-sm text-slate-600 font-semibold">
-                        Utilize a aba <strong>PolÃ­ticas</strong> para versionar e ativar documentos de Privacidade, Termos de Uso e Cookies.
+                        Utilize a aba <strong>Políticas</strong> para versionar e ativar documentos de Privacidade, Termos de Uso e Cookies.
                       </p>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">VersÃ£o ativa Privacidade</p>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Versão ativa Privacidade</p>
                           <p className="text-lg font-black text-slate-900 mt-1">{settings.lgpd_policy_version_privacy || '-'}</p>
                         </div>
                         <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">VersÃ£o ativa Termos</p>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Versão ativa Termos</p>
                           <p className="text-lg font-black text-slate-900 mt-1">{settings.lgpd_policy_version_terms || '-'}</p>
                         </div>
                         <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">VersÃ£o ativa Cookies</p>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Versão ativa Cookies</p>
                           <p className="text-lg font-black text-slate-900 mt-1">{settings.lgpd_policy_version_cookies || '-'}</p>
                         </div>
                       </div>
@@ -1844,7 +1844,7 @@ export default function AdminSettings() {
                             onChange={e => setSettings({ ...settings, mp_mode: e.target.value })}
                             className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
                           >
-                            <option value="production">ProduÃ§Ã£o (Real)</option>
+                            <option value="production">Produção (Real)</option>
                             <option value="sandbox">Sandbox (Teste)</option>
                           </select>
                         </div>
@@ -1908,7 +1908,7 @@ export default function AdminSettings() {
                           disabled={testingConnection}
                           className="px-6 py-3 rounded-2xl bg-slate-800 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-700 disabled:opacity-50"
                         >
-                          {testingConnection ? 'Testando...' : 'Testar ConexÃ£o'}
+                          {testingConnection ? 'Testando...' : 'Testar Conexão'}
                         </button>
                         {connectionInfo && (
                           <div className="inline-flex items-center gap-2 text-emerald-600 text-xs font-black">
@@ -1921,7 +1921,7 @@ export default function AdminSettings() {
                           disabled={saving}
                           className="ml-auto px-6 py-3 rounded-2xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/30 hover:bg-blue-700 disabled:opacity-50"
                         >
-                          Salvar ConfiguraÃ§Ã£o
+                          Salvar Configuração
                         </button>
                       </div>
 
@@ -1951,12 +1951,12 @@ export default function AdminSettings() {
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                     <div className="rounded-[2rem] border border-slate-200 p-6 md:p-8 space-y-4">
                       <h3 className="text-2xl font-black text-slate-800 tracking-tight">Formas de Pagamento</h3>
-                      <p className="text-xs text-slate-500 font-medium">Selecione quais mÃ©todos serÃ£o aceitos.</p>
+                      <p className="text-xs text-slate-500 font-medium">Selecione quais métodos serão aceitos.</p>
                       {[
                         { key: 'mp_enable_pix', label: 'Pix' },
-                        { key: 'mp_enable_credit_card', label: 'CartÃ£o de CrÃ©dito' },
-                        { key: 'mp_enable_debit_card', label: 'CartÃ£o de DÃ©bito' },
-                        { key: 'mp_enable_boleto', label: 'Boleto BancÃ¡rio' },
+                        { key: 'mp_enable_credit_card', label: 'Cartão de Crédito' },
+                        { key: 'mp_enable_debit_card', label: 'Cartão de Débito' },
+                        { key: 'mp_enable_boleto', label: 'Boleto Bancário' },
                       ].map((method) => {
                         const enabled = settings[method.key as keyof typeof settings] === 'true';
                         return (
@@ -1986,17 +1986,17 @@ export default function AdminSettings() {
                         </button>
                       </div>
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-2">
-                        <p className="text-[11px] font-black text-amber-700 uppercase tracking-widest">InstruÃ§Ãµes</p>
+                        <p className="text-[11px] font-black text-amber-700 uppercase tracking-widest">Instruções</p>
                         <ol className="text-xs text-amber-800 font-medium space-y-1 list-decimal pl-5">
                           <li>Acesse o Mercado Pago Developers.</li>
-                          <li>Crie a aplicaÃ§Ã£o e copie as credenciais.</li>
+                          <li>Crie a aplicação e copie as credenciais.</li>
                           <li>Adicione a URL acima em Webhooks, ouvindo eventos de payment.</li>
                         </ol>
                       </div>
                     </div>
                   </div>
 
-                  {/* â”€â”€â”€ PayPal Section â”€â”€â”€ */}
+                  {/* --- PayPal Section --- */}
                   <div className="space-y-8 pt-6 border-t border-slate-100">
                     <div>
                       <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">PayPal Internacional</h3>
@@ -2011,7 +2011,7 @@ export default function AdminSettings() {
                               settings.paypal_enabled === 'true' ? 'bg-[#0070ba]/10 border-[#0070ba]/30 text-[#0070ba]' : 'bg-slate-50 border-slate-200 text-slate-500'
                             }`}
                           >
-                            <span className="text-base font-black">PayPal Internacional {settings.paypal_enabled === 'true' ? 'âœ… Ativo' : 'â›” Inativo'}</span>
+                            <span className="text-base font-black">PayPal Internacional {settings.paypal_enabled === 'true' ? '• Ativo' : '• Inativo'}</span>
                             <span className={`w-6 h-6 rounded-full border flex items-center justify-center ${
                               settings.paypal_enabled === 'true' ? 'border-[#0070ba] bg-[#0070ba] text-white' : 'border-slate-300'
                             }`}>
@@ -2035,7 +2035,7 @@ export default function AdminSettings() {
 
                         {/* Currency + Rate */}
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Taxa BRL â†’ USD</label>
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Taxa BRL → USD</label>
                           <input
                             type="number"
                             step="0.01"
@@ -2143,7 +2143,7 @@ export default function AdminSettings() {
                             disabled={testingPayPal}
                             className="px-6 py-3 rounded-2xl bg-[#0070ba] text-white text-[10px] font-black uppercase tracking-widest hover:bg-[#005ea6] disabled:opacity-50"
                           >
-                            {testingPayPal ? 'Testando...' : 'ðŸ”— Testar Credenciais PayPal'}
+                            {testingPayPal ? 'Testando...' : 'Testar Credenciais PayPal'}
                           </button>
                           {paypalTestResult && (
                             <div className={`flex items-center gap-2 text-xs font-bold ${ paypalTestResult.ok ? 'text-emerald-600' : 'text-rose-600' }`}>
@@ -2166,4 +2166,7 @@ export default function AdminSettings() {
     </div>
   );
 }
+
+
+
 

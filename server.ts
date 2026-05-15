@@ -12,6 +12,7 @@ import slugify from 'slugify';
 import fs from 'fs';
 import https from 'https';
 import crypto from 'crypto';
+import { pipeline } from 'stream/promises';
 import { sendEmail } from './src/server/mailer';
 import nodemailer from 'nodemailer';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
@@ -465,6 +466,159 @@ function canUserAccessDownloads(userId: number, userEmail: string, emailVerified
   ) as any;
 
   return Number(hasPaidOrder?.total || 0) > 0;
+}
+
+function decodePathComponentSafe(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function toNormalizedSlashes(value: string) {
+  return String(value || '').replace(/\\/g, '/');
+}
+
+function extractWooUploadsRelativePath(rawInput: string): string | null {
+  let candidate = String(rawInput || '').trim();
+  if (!candidate) return null;
+
+  candidate = decodePathComponentSafe(candidate);
+
+  if (/^https?:\/\//i.test(candidate)) {
+    try {
+      const parsed = new URL(candidate);
+      candidate = parsed.pathname || '';
+    } catch {
+      return null;
+    }
+  }
+
+  candidate = toNormalizedSlashes(candidate);
+  candidate = candidate.split('?')[0]?.split('#')[0] || '';
+
+  const marker = '/woocommerce_uploads/';
+  const lower = candidate.toLowerCase();
+  const markerIdx = lower.indexOf(marker);
+
+  if (markerIdx >= 0) {
+    candidate = candidate.slice(markerIdx + marker.length);
+  } else {
+    const prefixes = [
+      'woocommerce_uploads/',
+      '/woocommerce_uploads/',
+      'wp-content/uploads/woocommerce_uploads/',
+      '/wp-content/uploads/woocommerce_uploads/',
+      'uploads/woocommerce_uploads/',
+      '/uploads/woocommerce_uploads/',
+    ];
+    const matched = prefixes.find((prefix) => lower.startsWith(prefix.toLowerCase()));
+    if (matched) {
+      candidate = candidate.slice(matched.length);
+    }
+  }
+
+  const normalized = path.posix.normalize(candidate).replace(/^\/+/, '');
+  if (!normalized || normalized === '.' || normalized.startsWith('..') || normalized.includes('/../')) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function getDownloadRoots(): string[] {
+  const configured = [
+    process.env.WOO_UPLOADS_DIR,
+    process.env.WOOCOMMERCE_UPLOADS_DIR,
+    process.env.DOWNLOADS_BASE_DIR,
+    process.env.PROTECTED_DOWNLOADS_DIR,
+  ]
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean)
+    .map((entry) => path.resolve(entry));
+
+  const defaults = [
+    path.resolve(process.cwd(), 'wp-content', 'uploads', 'woocommerce_uploads'),
+    path.resolve(process.cwd(), 'uploads', 'woocommerce_uploads'),
+    path.resolve(process.cwd(), '..', 'wp-content', 'uploads', 'woocommerce_uploads'),
+    path.resolve(process.cwd(), '..', 'uploads', 'woocommerce_uploads'),
+  ];
+
+  return Array.from(new Set([...configured, ...defaults]));
+}
+
+function isInsideRoot(absPath: string, absRoot: string) {
+  const rel = path.relative(absRoot, absPath);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function resolveDownloadAbsolutePath(rawInput: string): { absolutePath: string; relativePath: string } | null {
+  const relativePath = extractWooUploadsRelativePath(rawInput);
+  if (!relativePath) return null;
+
+  const roots = getDownloadRoots();
+  for (const root of roots) {
+    const absolutePath = path.resolve(root, relativePath);
+    if (!isInsideRoot(absolutePath, root)) continue;
+    if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile()) {
+      return { absolutePath, relativePath };
+    }
+  }
+
+  return null;
+}
+
+function getRequestIpAddress(req: express.Request) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0]?.trim();
+  return forwarded || req.socket.remoteAddress || '';
+}
+
+function logDownloadAttempt(payload: {
+  userId?: number | null;
+  orderId?: number | null;
+  orderItemId?: number | null;
+  productId?: number | null;
+  fileName?: string | null;
+  filePath?: string | null;
+  fileSize?: number | null;
+  sha256?: string | null;
+  status: 'success' | 'denied' | 'error';
+  error?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+}) {
+  try {
+    db.run(
+      `INSERT INTO download_logs
+       (user_id, order_id, order_item_id, product_id, file_name, file_path, file_size, sha256, status, error, ip, user_agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      payload.userId ?? null,
+      payload.orderId ?? null,
+      payload.orderItemId ?? null,
+      payload.productId ?? null,
+      payload.fileName ?? null,
+      payload.filePath ?? null,
+      payload.fileSize ?? null,
+      payload.sha256 ?? null,
+      payload.status,
+      payload.error ?? null,
+      payload.ip ?? null,
+      payload.userAgent ?? null,
+    );
+  } catch (error) {
+    console.error('Falha ao registrar log de download:', error);
+  }
+}
+
+async function computeFileSha256(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
 }
 
 function buildBaseAppUrl(req: express.Request) {
@@ -2829,43 +2983,73 @@ async function startServer() {
     }
   });
 
-  // Download seguro de matrizes compradas
+  // Download seguro de matrizes compradas (stream binario)
   app.get('/api/customer/download-file', authenticate, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      const rawFilePath = String(req.query.path || '').trim();
-      if (!rawFilePath) {
-        return res.status(400).json({ error: 'Caminho do arquivo e obrigatorio' });
-      }
+    const user = (req as any).user;
+    const requestIp = getRequestIpAddress(req);
+    const requestUserAgent = String(req.get('user-agent') || '').slice(0, 2048);
+    const rawFilePath = String(req.query.path || '').trim();
+    const mode = String(req.query.mode || '').trim().toLowerCase();
+    const decodedFilePath = decodePathComponentSafe(rawFilePath);
+    const normalizedUserEmail = String(user?.email || '').trim().toLowerCase();
+    const logContext: {
+      userId?: number | null;
+      orderId?: number | null;
+      orderItemId?: number | null;
+      productId?: number | null;
+      fileName?: string | null;
+      filePath?: string | null;
+      fileSize?: number | null;
+    } = {
+      userId: Number(user?.id || 0) || null,
+      filePath: rawFilePath,
+    };
 
-      const safeDecode = (value: string) => {
-        try {
-          return decodeURIComponent(value);
-        } catch {
-          return value;
-        }
-      };
-      const decodedFilePath = safeDecode(rawFilePath);
+    const deny = (
+      statusCode: number,
+      message: string,
+      extra: Record<string, unknown> = {},
+      ownedDownload?: any,
+    ) => {
+      logDownloadAttempt({
+        userId: Number(user?.id || 0) || null,
+        orderId: ownedDownload?.order_id ? Number(ownedDownload.order_id) : null,
+        orderItemId: ownedDownload?.order_item_id ? Number(ownedDownload.order_item_id) : null,
+        productId: ownedDownload?.product_id ? Number(ownedDownload.product_id) : null,
+        fileName: String(ownedDownload?.file_name || ''),
+        filePath: String(ownedDownload?.file_path || rawFilePath || ''),
+        status: 'denied',
+        error: message,
+        ip: requestIp,
+        userAgent: requestUserAgent,
+      });
+      return res.status(statusCode).json({ error: message, ...extra });
+    };
+
+    try {
+      if (!rawFilePath) {
+        return deny(400, 'Caminho do arquivo e obrigatorio');
+      }
 
       const freshUser = getUserById(Number(user?.id || 0));
       if (!freshUser) {
-        return res.status(401).json({ error: 'Usuario nao encontrado' });
+        return deny(401, 'Usuario nao encontrado');
       }
       if (!canUserAccessDownloads(Number(freshUser.id), String(freshUser.email || ''), freshUser.email_verified_at)) {
-        return res.status(403).json({ error: 'Confirme seu e-mail para acessar downloads.', code: 'EMAIL_NOT_VERIFIED' });
+        return deny(403, 'Confirme seu e-mail para acessar downloads.', { code: 'EMAIL_NOT_VERIFIED' });
       }
+
       const lgpdCompliance = ensureUserLgpdCompliance(Number(freshUser.id));
       if (!lgpdCompliance.ok) {
-        return res.status(403).json({ error: 'Aceite as politicas LGPD para acessar seus downloads.', code: lgpdCompliance.code, missing: lgpdCompliance.missing });
+        return deny(403, 'Aceite as politicas LGPD para acessar seus downloads.', {
+          code: lgpdCompliance.code,
+          missing: lgpdCompliance.missing,
+        });
       }
 
       const allowedDomain = String(process.env.APP_DOMAIN || 'digitalbordados.com.br')
         .trim()
         .toLowerCase();
-      const isAllowedHost = (host: string) => {
-        const normalized = host.toLowerCase();
-        return normalized === allowedDomain || normalized.endsWith(`.${allowedDomain}`);
-      };
       const toAbsoluteUrl = (value: string) => {
         if (!value) return '';
         if (/^https?:\/\//i.test(value)) return value;
@@ -2884,55 +3068,152 @@ async function startServer() {
         if (!candidate) continue;
         try {
           const parsed = new URL(candidate);
-          if (!isAllowedHost(parsed.hostname)) continue;
           if (parsed.pathname) {
             candidateValues.add(parsed.pathname);
             candidateValues.add(`${parsed.pathname}${parsed.search || ''}`);
-            candidateValues.add(safeDecode(parsed.pathname));
-            candidateValues.add(safeDecode(`${parsed.pathname}${parsed.search || ''}`));
+            candidateValues.add(decodePathComponentSafe(parsed.pathname));
+            candidateValues.add(decodePathComponentSafe(`${parsed.pathname}${parsed.search || ''}`));
           }
         } catch {
           // valor nao e URL absoluta, ignora
         }
       }
 
-      const filePathCandidates = Array.from(candidateValues).filter(Boolean);
+      const filePathCandidates = Array.from(candidateValues)
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+
       if (!filePathCandidates.length) {
-        return res.status(400).json({ error: 'Caminho do arquivo invalido' });
+        return deny(400, 'Caminho do arquivo invalido');
       }
 
       const placeholders = filePathCandidates.map(() => '?').join(', ');
       const statusPlaceholders = getDownloadStatusPlaceholders();
       const ownedDownload = db.get(`
-        SELECT oi.id AS order_item_id, f.file_path, f.file_name
+        SELECT
+          o.id AS order_id,
+          oi.id AS order_item_id,
+          oi.product_id,
+          o.status AS order_status,
+          f.file_path,
+          f.file_name
         FROM orders o
         JOIN order_items oi ON oi.order_id = o.id
         JOIN product_files f ON f.product_id = oi.product_id
-        WHERE (o.user_id = ? OR (o.user_id IS NULL AND COALESCE(o.customer_email, '') = ?))
+        WHERE (o.user_id = ? OR (o.user_id IS NULL AND LOWER(TRIM(COALESCE(o.customer_email, ''))) = ?))
           AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})
           AND f.file_path IN (${placeholders})
+        ORDER BY o.created_at DESC, oi.id DESC
         LIMIT 1
-      `, Number(user.id), String(freshUser.email || '').trim().toLowerCase(), ...DOWNLOAD_ALLOWED_STATUSES, ...filePathCandidates) as any;
+      `, Number(user.id), normalizedUserEmail, ...DOWNLOAD_ALLOWED_STATUSES, ...filePathCandidates) as any;
 
       if (!ownedDownload) {
-        return res.status(403).json({ error: 'Download nao autorizado para este usuario.' });
+        return deny(403, 'Download nao autorizado para este usuario.');
       }
 
-      const targetUrl = toAbsoluteUrl(String(ownedDownload.file_path || decodedFilePath || rawFilePath));
-      try {
-        const urlObj = new URL(targetUrl);
-        if (!isAllowedHost(urlObj.hostname)) {
-          return res.status(403).json({ error: 'Download nao autorizado para este dominio.' });
-        }
-      } catch {
-        return res.status(400).json({ error: 'URL de arquivo invalida.' });
+      logContext.orderId = Number(ownedDownload.order_id || 0) || null;
+      logContext.orderItemId = Number(ownedDownload.order_item_id || 0) || null;
+      logContext.productId = Number(ownedDownload.product_id || 0) || null;
+      logContext.fileName = String(ownedDownload.file_name || '');
+      logContext.filePath = String(ownedDownload.file_path || rawFilePath || '');
+
+      const resolved = resolveDownloadAbsolutePath(String(ownedDownload.file_path || decodedFilePath || rawFilePath));
+      if (!resolved) {
+        return deny(404, 'Arquivo ZIP nao encontrado no servidor.', { code: 'FILE_NOT_FOUND' }, ownedDownload);
       }
 
-      // Redireciona para o arquivo autorizado (evita falhas de proxy em produÃ§Ã£o).
-      return res.redirect(302, targetUrl);
+      const fileStats = fs.statSync(resolved.absolutePath);
+      if (!fileStats.isFile() || fileStats.size <= 0) {
+        return deny(404, 'Arquivo invalido para download.', { code: 'INVALID_FILE' }, ownedDownload);
+      }
+
+      const fileNameRaw = String(ownedDownload.file_name || path.basename(resolved.absolutePath) || 'matriz.zip');
+      const fileName = fileNameRaw.replace(/[/\\?%*:|"<>]/g, '_');
+      const asciiFallback = fileName.replace(/[^\x20-\x7E]/g, '_');
+      const ext = path.extname(fileName).toLowerCase();
+      logContext.fileName = fileName;
+      logContext.fileSize = Number(fileStats.size);
+
+      if (ext !== '.zip') {
+        return deny(400, 'Somente arquivos ZIP sao permitidos para este endpoint.', { code: 'INVALID_EXTENSION' }, ownedDownload);
+      }
+
+      if (mode === 'meta') {
+        const sha256Hex = await computeFileSha256(resolved.absolutePath);
+        logDownloadAttempt({
+          userId: Number(freshUser.id),
+          orderId: Number(ownedDownload.order_id || 0) || null,
+          orderItemId: Number(ownedDownload.order_item_id || 0) || null,
+          productId: Number(ownedDownload.product_id || 0) || null,
+          fileName,
+          filePath: String(ownedDownload.file_path || ''),
+          fileSize: Number(fileStats.size),
+          sha256: sha256Hex,
+          status: 'success',
+          ip: requestIp,
+          userAgent: requestUserAgent,
+        });
+        return res.json({
+          file_name: fileName,
+          file_path: String(ownedDownload.file_path || ''),
+          size: Number(fileStats.size),
+          sha256: sha256Hex,
+        });
+      }
+
+      const hash = crypto.createHash('sha256');
+      const readStream = fs.createReadStream(resolved.absolutePath);
+
+      readStream.on('data', (chunk) => {
+        hash.update(chunk);
+      });
+
+      res.status(200);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+      res.setHeader('Content-Length', String(fileStats.size));
+      res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+
+      await pipeline(readStream, res);
+
+      const sha256Hex = hash.digest('hex');
+      logDownloadAttempt({
+        userId: Number(freshUser.id),
+        orderId: Number(ownedDownload.order_id || 0) || null,
+        orderItemId: Number(ownedDownload.order_item_id || 0) || null,
+        productId: Number(ownedDownload.product_id || 0) || null,
+        fileName,
+        filePath: String(ownedDownload.file_path || ''),
+        fileSize: Number(fileStats.size),
+        sha256: sha256Hex,
+        status: 'success',
+        ip: requestIp,
+        userAgent: requestUserAgent,
+      });
+      return;
     } catch (error: any) {
-      console.error('Erro no proxy de download:', error?.message || error);
-      return res.status(500).json({ error: 'Nao foi possivel processar o download. Tente novamente mais tarde.' });
+      const errorMessage = String(error?.message || error || 'Erro desconhecido');
+      console.error('Erro no stream de download:', errorMessage);
+      logDownloadAttempt({
+        userId: logContext.userId ?? null,
+        orderId: logContext.orderId ?? null,
+        orderItemId: logContext.orderItemId ?? null,
+        productId: logContext.productId ?? null,
+        fileName: logContext.fileName ?? null,
+        filePath: logContext.filePath ?? rawFilePath,
+        fileSize: logContext.fileSize ?? null,
+        status: 'error',
+        error: errorMessage,
+        ip: requestIp,
+        userAgent: requestUserAgent,
+      });
+      if (!res.headersSent) {
+        return res.status(500).json({ error: 'Nao foi possivel processar o download. Tente novamente mais tarde.' });
+      }
+      return;
     }
   });
 
