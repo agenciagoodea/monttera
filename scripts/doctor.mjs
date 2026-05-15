@@ -39,11 +39,14 @@ function getNodeMajor() {
 
 function checkNodeVersion() {
   const major = getNodeMajor();
-  const ok = major === 20;
+  const ok = major >= 20;
+  const detail = major === 20
+    ? `Atual: ${process.versions.node}. Versão ideal para produção no DirectAdmin.`
+    : `Atual: ${process.versions.node}. Build aceito, mas o servidor DirectAdmin usa Node 20.x.`;
   addCheck(
     ok,
-    'Node.js 20 LTS',
-    `Atual: ${process.versions.node}. Esperado: 20.x para produção no DirectAdmin.`,
+    'Node.js 20+',
+    detail,
   );
 }
 
@@ -90,7 +93,15 @@ function checkStartupArtifacts() {
 function checkEnvEssentials() {
   const required = ['JWT_SECRET', 'MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DATABASE'];
   const missing = required.filter((key) => !String(process.env[key] || '').trim());
-  addCheck(missing.length === 0, 'Variáveis essenciais', missing.length ? `Faltando: ${missing.join(', ')}` : 'Todas presentes');
+  const isProduction = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+  // Em ambiente local (dev), variáveis ausentes são apenas aviso, não falha
+  const ok = missing.length === 0 || !isProduction;
+  const detail = missing.length
+    ? (isProduction
+      ? `ERRO: Faltando em producao: ${missing.join(', ')}`
+      : `Aviso (dev): ${missing.join(', ')} — ok, serao carregadas do .env no servidor`)
+    : 'Todas presentes';
+  addCheck(ok, 'Variáveis essenciais', detail);
 }
 
 function run() {

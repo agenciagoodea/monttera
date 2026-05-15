@@ -22,7 +22,8 @@
     "doctor:strict": "node ./scripts/doctor.mjs --strict",
     "doctor:startup": "node ./scripts/doctor.mjs --startup",
     "doctor:startup:strict": "node ./scripts/doctor.mjs --startup --strict",
-    "deploy:directadmin": "npm run doctor:strict && npm run build && npm run doctor:startup:strict"
+    "deploy:directadmin": "npm run doctor:strict && npm run build && npm run doctor:startup:strict",
+    "prepare:deploy": "npm run deploy:directadmin && node ./scripts/prepare-deploy.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

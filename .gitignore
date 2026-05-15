@@ -9,3 +9,5 @@ coverage/
 cookies.txt
 cookie*.txt
 *.zip
+deploy-bundle.tar.gz
+database.sqlite
