@@ -1,4 +1,4 @@
-if (process.env.NODE_ENV !== 'production') {
+﻿if (process.env.NODE_ENV !== 'production') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 import express from 'express';
@@ -115,7 +115,7 @@ function resolveMercadoPagoSettings() {
 function createMercadoPagoPaymentClient() {
   const { accessToken } = resolveMercadoPagoSettings();
   if (!accessToken) {
-    throw new Error('MERCADOPAGO_ACCESS_TOKEN não configurado em settings');
+    throw new Error('MERCADOPAGO_ACCESS_TOKEN nÃ£o configurado em settings');
   }
 
   const client = new MercadoPagoConfig({ accessToken });
@@ -217,7 +217,7 @@ async function fetchMercadoPagoAccountInfo(accessToken: string) {
     } catch (error: any) {
       lastError = {
         status: 500,
-        message: error?.message || 'Erro de comunicação com Mercado Pago',
+        message: error?.message || 'Erro de comunicaÃ§Ã£o com Mercado Pago',
         details: null,
       };
     }
@@ -231,7 +231,7 @@ async function fetchMercadoPagoAccountInfo(accessToken: string) {
   };
 }
 
-// ConfiguraÃ§Ã£o do Multer para Uploads
+// ConfiguraÃƒÂ§ÃƒÂ£o do Multer para Uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = './public/uploads';
@@ -457,7 +457,7 @@ function canUserAccessDownloads(userId: number, userEmail: string, emailVerified
   const hasPaidOrder = db.get(
     `SELECT COUNT(1) AS total
      FROM orders o
-     WHERE (o.user_id = ? OR (o.user_id IS NULL AND LOWER(COALESCE(o.customer_email, '')) = ?))
+     WHERE (o.user_id = ? OR (o.user_id IS NULL AND COALESCE(o.customer_email, '') = ?))
        AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})`,
     userId,
     normalizedEmail,
@@ -543,15 +543,341 @@ function recordLoginAttempt(email: string, ip: string, success: boolean) {
 
 function getUserById(userId: number) {
   return db.get(
-    'SELECT id, name, email, role, status, email_verified_at FROM users WHERE id = ? LIMIT 1',
+    'SELECT id, name, email, role, status, email_verified_at, privacy_reaccept_required FROM users WHERE id = ? LIMIT 1',
     userId,
   ) as any;
+}
+
+function parseBooleanSetting(value: any, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(normalized);
+}
+
+function resolveLgpdSettings() {
+  const keys = [
+    'lgpd_enabled',
+    'lgpd_require_consent_register',
+    'lgpd_require_checkout_consent',
+    'lgpd_require_marketing_optin',
+    'lgpd_require_cookie_consent',
+    'lgpd_require_policy_acceptance',
+    'lgpd_require_terms_acceptance',
+    'lgpd_require_reaccept_on_policy_update',
+    'lgpd_dpo_name',
+    'lgpd_dpo_email',
+    'lgpd_dpo_phone',
+    'lgpd_privacy_url',
+    'lgpd_terms_url',
+    'lgpd_cookie_policy_url',
+    'lgpd_policy_version_privacy',
+    'lgpd_policy_version_terms',
+    'lgpd_policy_version_cookies',
+  ];
+  const s = loadSettingsMap(keys);
+  return {
+    enabled: parseBooleanSetting(s.lgpd_enabled, true),
+    requireConsentRegister: parseBooleanSetting(s.lgpd_require_consent_register, true),
+    requireCheckoutConsent: parseBooleanSetting(s.lgpd_require_checkout_consent, true),
+    requireMarketingOptin: parseBooleanSetting(s.lgpd_require_marketing_optin, false),
+    requireCookieConsent: parseBooleanSetting(s.lgpd_require_cookie_consent, true),
+    requirePolicyAcceptance: parseBooleanSetting(s.lgpd_require_policy_acceptance, true),
+    requireTermsAcceptance: parseBooleanSetting(s.lgpd_require_terms_acceptance, true),
+    requireReacceptOnPolicyUpdate: parseBooleanSetting(s.lgpd_require_reaccept_on_policy_update, true),
+    dpoName: String(s.lgpd_dpo_name || ''),
+    dpoEmail: String(s.lgpd_dpo_email || ''),
+    dpoPhone: String(s.lgpd_dpo_phone || ''),
+    privacyUrl: String(s.lgpd_privacy_url || '/politica'),
+    termsUrl: String(s.lgpd_terms_url || '/politica'),
+    cookiePolicyUrl: String(s.lgpd_cookie_policy_url || '/politica'),
+    policyVersionPrivacy: String(s.lgpd_policy_version_privacy || '1.0'),
+    policyVersionTerms: String(s.lgpd_policy_version_terms || '1.0'),
+    policyVersionCookies: String(s.lgpd_policy_version_cookies || '1.0'),
+  };
+}
+
+function logLgpdEvent(params: {
+  req?: express.Request;
+  userId?: number | null;
+  actorUserId?: number | null;
+  eventType: string;
+  action: string;
+  details?: Record<string, any> | null;
+}) {
+  try {
+    db.run(
+      `INSERT INTO lgpd_logs (user_id, actor_user_id, event_type, action, details_json, ip, user_agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      params.userId || null,
+      params.actorUserId || null,
+      params.eventType,
+      params.action,
+      params.details ? JSON.stringify(params.details) : null,
+      params.req ? getClientIp(params.req) : null,
+      params.req ? String(params.req.headers['user-agent'] || '').slice(0, 500) : null,
+    );
+  } catch (error) {
+    console.error('LGPD log error:', error);
+  }
+}
+
+function upsertUserConsent(params: {
+  userId: number;
+  consentKey: string;
+  granted: boolean;
+  req?: express.Request;
+  source?: string;
+  legalBasis?: string;
+  purpose?: string;
+  policyVersion?: string | null;
+}) {
+  const ip = params.req ? getClientIp(params.req) : null;
+  const userAgent = params.req ? String(params.req.headers['user-agent'] || '').slice(0, 500) : null;
+  db.run(
+    `INSERT INTO lgpd_consents (
+      user_id, consent_key, granted, legal_basis, purpose, source, policy_version, ip, user_agent, revoked_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      granted = VALUES(granted),
+      legal_basis = VALUES(legal_basis),
+      purpose = VALUES(purpose),
+      source = VALUES(source),
+      policy_version = VALUES(policy_version),
+      ip = VALUES(ip),
+      user_agent = VALUES(user_agent),
+      revoked_at = VALUES(revoked_at),
+      updated_at = CURRENT_TIMESTAMP`,
+    params.userId,
+    params.consentKey,
+    params.granted ? 1 : 0,
+    params.legalBasis || null,
+    params.purpose || null,
+    params.source || 'web',
+    params.policyVersion || null,
+    ip,
+    userAgent,
+    params.granted ? null : new Date().toISOString().slice(0, 19).replace('T', ' '),
+  );
+
+  logLgpdEvent({
+    req: params.req,
+    userId: params.userId,
+    actorUserId: params.userId,
+    eventType: 'consent',
+    action: params.granted ? 'consent_granted' : 'consent_revoked',
+    details: { consent_key: params.consentKey, policy_version: params.policyVersion || null },
+  });
+}
+
+function recordPolicyAcceptance(params: {
+  userId: number;
+  policyType: 'privacy' | 'terms' | 'cookies';
+  policyVersion: string;
+  req?: express.Request;
+  source?: string;
+}) {
+  db.run(
+    `INSERT INTO lgpd_user_acceptances (user_id, policy_type, policy_version, ip, user_agent, source)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    params.userId,
+    params.policyType,
+    params.policyVersion,
+    params.req ? getClientIp(params.req) : null,
+    params.req ? String(params.req.headers['user-agent'] || '').slice(0, 500) : null,
+    params.source || 'web',
+  );
+  db.run('UPDATE users SET privacy_reaccept_required = 0 WHERE id = ?', params.userId);
+  logLgpdEvent({
+    req: params.req,
+    userId: params.userId,
+    actorUserId: params.userId,
+    eventType: 'policy',
+    action: 'policy_accepted',
+    details: { policy_type: params.policyType, policy_version: params.policyVersion },
+  });
+}
+
+function userHasAcceptedPolicyVersion(userId: number, policyType: 'privacy' | 'terms' | 'cookies', policyVersion: string) {
+  const row = db.get(
+    `SELECT id FROM lgpd_user_acceptances
+     WHERE user_id = ? AND policy_type = ? AND policy_version = ?
+     ORDER BY accepted_at DESC LIMIT 1`,
+    userId,
+    policyType,
+    policyVersion,
+  ) as any;
+  return Boolean(row?.id);
+}
+
+function getActivePolicies() {
+  const policies = db.all(
+    `SELECT id, policy_type, version, title, content, is_active, force_reaccept, published_at, created_at, updated_at
+     FROM lgpd_policies
+     WHERE is_active = 1
+     ORDER BY policy_type ASC, updated_at DESC`,
+  ) as any[];
+  return policies;
+}
+
+function ensureUserLgpdCompliance(userId: number) {
+  const lgpd = resolveLgpdSettings();
+  if (!lgpd.enabled || !lgpd.requirePolicyAcceptance) {
+    return { ok: true };
+  }
+
+  const missing: string[] = [];
+  if (lgpd.requireTermsAcceptance && !userHasAcceptedPolicyVersion(userId, 'terms', lgpd.policyVersionTerms)) {
+    missing.push('terms');
+  }
+  if (!userHasAcceptedPolicyVersion(userId, 'privacy', lgpd.policyVersionPrivacy)) {
+    missing.push('privacy');
+  }
+  if (lgpd.requireCookieConsent && !userHasAcceptedPolicyVersion(userId, 'cookies', lgpd.policyVersionCookies)) {
+    missing.push('cookies');
+  }
+
+  if (missing.length > 0) {
+    return { ok: false, missing, code: 'LGPD_REACCEPT_REQUIRED' };
+  }
+  return { ok: true };
+}
+
+function normalizeDateFilter(input: any, endOfDay = false) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? `${raw}${endOfDay ? ' 23:59:59' : ' 00:00:00'}`
+    : raw;
+  const dt = new Date(normalized);
+  if (Number.isNaN(dt.getTime())) return '';
+  return normalized;
+}
+
+function notifyCustomersPolicyUpdated(params: {
+  policyType: 'privacy' | 'terms' | 'cookies';
+  policyVersion: string;
+  policyUrl: string;
+  actorUserId?: number;
+  req?: express.Request;
+}) {
+  const recipients = db.all(
+    `SELECT id, name, email
+     FROM users
+     WHERE role = 'customer'
+       AND status = 'active'
+       AND email IS NOT NULL
+       AND email <> ''`,
+  ) as any[];
+
+  if (!Array.isArray(recipients) || recipients.length === 0) {
+    return;
+  }
+
+  // Fire-and-forget, without blocking admin policy operations.
+  setImmediate(async () => {
+    let sent = 0;
+    for (const user of recipients) {
+      try {
+        const result = await sendEmail({
+          to: String(user.email),
+          templateKey: 'lgpd_policy_updated',
+          variables: {
+            name: user.name || 'Cliente',
+            policy_type: params.policyType,
+            policy_version: params.policyVersion,
+            policy_url: params.policyUrl,
+          },
+        });
+        if (result?.success) sent += 1;
+      } catch (error) {
+        console.error('LGPD policy notification error:', error);
+      }
+    }
+
+    logLgpdEvent({
+      req: params.req,
+      actorUserId: params.actorUserId || null,
+      eventType: 'policy',
+      action: 'policy_notification_sent',
+      details: {
+        policy_type: params.policyType,
+        policy_version: params.policyVersion,
+        recipients: recipients.length,
+        sent,
+      },
+    });
+  });
+}
+
+function computePolicyLineDiff(oldText: string, newText: string) {
+  const normalize = (value: string) =>
+    String(value || '')
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+  const before = normalize(oldText);
+  const after = normalize(newText);
+  const beforeSet = new Set(before);
+  const afterSet = new Set(after);
+
+  const added: string[] = [];
+  const removed: string[] = [];
+
+  for (const line of after) {
+    if (!beforeSet.has(line)) added.push(line);
+  }
+  for (const line of before) {
+    if (!afterSet.has(line)) removed.push(line);
+  }
+
+  return {
+    added,
+    removed,
+    added_count: added.length,
+    removed_count: removed.length,
+    before_count: before.length,
+    after_count: after.length,
+    unchanged_count: Math.max(0, Math.min(before.length, after.length) - Math.max(added.length, removed.length)),
+  };
+}
+
+function buildUserLgpdExportPayload(userId: number) {
+  const user = db.get('SELECT id, name, email, role, status, created_at, updated_at FROM users WHERE id = ?', userId) as any;
+  if (!user) return null;
+  const profile = db.get('SELECT * FROM customers WHERE user_id = ?', userId) as any;
+  const orders = db.all('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC', userId);
+  const orderItems = db.all(
+    `SELECT oi.* FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     WHERE o.user_id = ?
+     ORDER BY oi.order_id DESC`,
+    userId,
+  );
+  const favorites = db.all('SELECT * FROM favorites WHERE user_id = ? ORDER BY created_at DESC', userId);
+  const consents = db.all('SELECT * FROM lgpd_consents WHERE user_id = ? ORDER BY updated_at DESC', userId);
+  const acceptances = db.all('SELECT * FROM lgpd_user_acceptances WHERE user_id = ? ORDER BY accepted_at DESC', userId);
+  const requests = db.all('SELECT * FROM lgpd_requests WHERE user_id = ? ORDER BY created_at DESC', userId);
+
+  return {
+    exported_at: new Date().toISOString(),
+    user,
+    profile,
+    orders,
+    order_items: orderItems,
+    favorites,
+    consents,
+    policy_acceptances: acceptances,
+    lgpd_requests: requests,
+  };
 }
 
 function initSettings() {
   const defaultSettings = {
     site_name: 'Digital Bordados',
-    site_description: 'ExcelÃªncia em Matrizes de Bordado',
+    site_description: 'ExcelÃƒÂªncia em Matrizes de Bordado',
     logo_url: '',
     primary_color: '#3b82f6',
     secondary_color: '#1e293b',
@@ -584,10 +910,60 @@ function initSettings() {
     paypal_default_currency: 'USD',
     paypal_brl_usd_rate: '5.20',
     paypal_webhook_id: '',
+    lgpd_enabled: 'true',
+    lgpd_require_consent_register: 'true',
+    lgpd_require_checkout_consent: 'true',
+    lgpd_require_marketing_optin: 'false',
+    lgpd_require_cookie_consent: 'true',
+    lgpd_require_policy_acceptance: 'true',
+    lgpd_require_terms_acceptance: 'true',
+    lgpd_require_reaccept_on_policy_update: 'true',
+    lgpd_dpo_name: '',
+    lgpd_dpo_email: '',
+    lgpd_dpo_phone: '',
+    lgpd_privacy_url: '/politica',
+    lgpd_terms_url: '/politica',
+    lgpd_cookie_policy_url: '/politica',
+    lgpd_policy_version_privacy: '1.0',
+    lgpd_policy_version_terms: '1.0',
+    lgpd_policy_version_cookies: '1.0',
+    lgpd_export_ttl_hours: '24',
   };
 
   Object.entries(defaultSettings).forEach(([key, value]) => {
     db.run('INSERT IGNORE INTO settings (`key`, value) VALUES (?, COALESCE(?, \'\'))', key, value);
+  });
+
+  const defaultPolicies = [
+    {
+      policy_type: 'privacy',
+      version: '1.0',
+      title: 'Politica de Privacidade',
+      content: '<h2>Politica de Privacidade</h2><p>Utilizamos seus dados para processar pedidos, suporte e obrigacoes legais.</p>',
+    },
+    {
+      policy_type: 'terms',
+      version: '1.0',
+      title: 'Termos de Uso',
+      content: '<h2>Termos de Uso</h2><p>Ao utilizar a plataforma, voce concorda com os termos de compra e uso dos arquivos digitais.</p>',
+    },
+    {
+      policy_type: 'cookies',
+      version: '1.0',
+      title: 'Politica de Cookies',
+      content: '<h2>Politica de Cookies</h2><p>Utilizamos cookies necessarios e opcionais conforme suas preferencias.</p>',
+    },
+  ];
+
+  defaultPolicies.forEach((policy) => {
+    db.run(
+      `INSERT IGNORE INTO lgpd_policies (policy_type, version, title, content, is_active, force_reaccept)
+       VALUES (?, ?, ?, ?, 1, 0)`,
+      policy.policy_type,
+      policy.version,
+      policy.title,
+      policy.content,
+    );
   });
 }
 
@@ -596,7 +972,7 @@ async function initTestData() {
   const hashedPassword = await hashPassword('123456');
   const adrianoPassword = await hashPassword('04039866');
 
-  // 1. Novo UsuÃ¡rio Admin (Adriano Amorim)
+  // 1. Novo UsuÃƒÂ¡rio Admin (Adriano Amorim)
   const adrianoAdmin = db.get('SELECT * FROM users WHERE email = ?', 'contato@agenciagoodea.com');
   if (!adrianoAdmin) {
     db.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Adriano Amorim', 'contato@agenciagoodea.com', adrianoPassword, 'admin', 'ativo');
@@ -605,17 +981,17 @@ async function initTestData() {
     db.run('UPDATE users SET name = ?, password = ?, role = "admin", status = "ativo" WHERE email = ?', 'Adriano Amorim', adrianoPassword, 'contato@agenciagoodea.com');
   }
 
-  // 2. Antigo UsuÃ¡rio Admin (Digital Bordados)
+  // 2. Antigo UsuÃƒÂ¡rio Admin (Digital Bordados)
   const admin = db.get('SELECT * FROM users WHERE email = ?', 'admin@digitalbordados.com');
   if (!admin) {
     db.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Administrador', 'admin@digitalbordados.com', hashedPassword, 'admin', 'ativo');
     console.log('Test Admin created: admin@digitalbordados.com / 123456');
   } else {
-    // Garantir senha e status atualizados se jÃ¡ existir
+    // Garantir senha e status atualizados se jÃƒÂ¡ existir
     db.run('UPDATE users SET password = ?, role = "admin", status = "ativo" WHERE email = ?', hashedPassword, 'admin@digitalbordados.com');
   }
 
-  // 3. UsuÃ¡rio Cliente
+  // 3. UsuÃƒÂ¡rio Cliente
   const customerUser = db.get('SELECT * FROM users WHERE email = ?', 'cliente@teste.com');
   if (!customerUser) {
     const result = db.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Cliente Teste', 'cliente@teste.com', hashedPassword, 'customer', 'ativo');
@@ -624,7 +1000,7 @@ async function initTestData() {
     db.run('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', result.lastInsertRowid, '(11) 98888-7777', '123.456.789-00');
     console.log('Test Customer created: cliente@teste.com / 123456');
   } else {
-    // Garantir senha e status atualizados se jÃ¡ existir
+    // Garantir senha e status atualizados se jÃƒÂ¡ existir
     db.run('UPDATE users SET password = ?, role = "customer", status = "ativo" WHERE email = ?', hashedPassword, 'cliente@teste.com');
   }
 }
@@ -714,7 +1090,7 @@ async function startServer() {
 
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
-      return res.status(400).json({ error: 'JSON inválido no corpo da requisição' });
+      return res.status(400).json({ error: 'JSON invÃ¡lido no corpo da requisiÃ§Ã£o' });
     }
     return next(err);
   });
@@ -725,7 +1101,7 @@ async function startServer() {
   });
 
   // API Routes - AUTH
-  // Busca inteligente de produtos (Posicionada no início para evitar conflitos)
+  // Busca inteligente de produtos (Posicionada no inÃ­cio para evitar conflitos)
   app.get('/api/products/search', (req, res) => {
     try {
       const queryStr = req.query.q as string;
@@ -750,13 +1126,35 @@ async function startServer() {
   });
 
   app.post('/api/auth/register', async (req, res) => {
-    const { firstName, lastName, email, password } = req.body || {};
+    const {
+      firstName,
+      lastName,
+      email,
+      password,
+      terms_accepted,
+      privacy_accepted,
+      cookie_accepted,
+      marketing_accepted,
+    } = req.body || {};
 
     if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({ error: 'Todos os campos sao obrigatorios' });
     }
 
     try {
+      const lgpd = resolveLgpdSettings();
+      if (lgpd.enabled && lgpd.requireConsentRegister) {
+        if (lgpd.requireTermsAcceptance && !parseBooleanSetting(terms_accepted, false)) {
+          return res.status(400).json({ error: 'Voce precisa aceitar os Termos de Uso para continuar.', code: 'TERMS_REQUIRED' });
+        }
+        if (!parseBooleanSetting(privacy_accepted, false)) {
+          return res.status(400).json({ error: 'Voce precisa aceitar a Politica de Privacidade para continuar.', code: 'PRIVACY_REQUIRED' });
+        }
+        if (lgpd.requireCookieConsent && !parseBooleanSetting(cookie_accepted, false)) {
+          return res.status(400).json({ error: 'Voce precisa definir o consentimento de cookies para continuar.', code: 'COOKIES_REQUIRED' });
+        }
+      }
+
       const normalizedEmail = String(email).trim().toLowerCase();
       const trimmedFirstName = String(firstName).trim();
       const trimmedLastName = String(lastName).trim();
@@ -772,6 +1170,67 @@ async function startServer() {
 
       const userId = Number(userResult.lastInsertRowid);
       db.run('INSERT INTO customers (user_id) VALUES (?)', userId);
+
+      if (lgpd.enabled) {
+        if (parseBooleanSetting(privacy_accepted, false)) {
+          recordPolicyAcceptance({
+            userId,
+            policyType: 'privacy',
+            policyVersion: lgpd.policyVersionPrivacy,
+            req,
+            source: 'register',
+          });
+          upsertUserConsent({
+            userId,
+            consentKey: 'privacy_policy',
+            granted: true,
+            req,
+            source: 'register',
+            legalBasis: 'consent',
+            purpose: 'Criacao de conta e uso da plataforma.',
+            policyVersion: lgpd.policyVersionPrivacy,
+          });
+        }
+        if (parseBooleanSetting(terms_accepted, false)) {
+          recordPolicyAcceptance({
+            userId,
+            policyType: 'terms',
+            policyVersion: lgpd.policyVersionTerms,
+            req,
+            source: 'register',
+          });
+          upsertUserConsent({
+            userId,
+            consentKey: 'terms_of_use',
+            granted: true,
+            req,
+            source: 'register',
+            legalBasis: 'consent',
+            purpose: 'Aceite dos termos de uso da plataforma.',
+            policyVersion: lgpd.policyVersionTerms,
+          });
+        }
+        if (parseBooleanSetting(cookie_accepted, false)) {
+          recordPolicyAcceptance({
+            userId,
+            policyType: 'cookies',
+            policyVersion: lgpd.policyVersionCookies,
+            req,
+            source: 'register',
+          });
+        }
+
+        upsertUserConsent({
+          userId,
+          consentKey: 'marketing_communications',
+          granted: parseBooleanSetting(marketing_accepted, false),
+          req,
+          source: 'register',
+          legalBasis: 'consent',
+          purpose: 'Envio de ofertas e comunicacoes comerciais.',
+          policyVersion: lgpd.policyVersionPrivacy,
+        });
+      }
 
       const tokenPayload = {
         id: userId,
@@ -897,6 +1356,7 @@ async function startServer() {
         success: true,
         verification_required: verificationRequired,
         needs_email_verification: verificationRequired && !isEmailVerified,
+        needs_policy_reaccept: Boolean(user.privacy_reaccept_required),
         user: tokenPayload,
       });
     } catch (error) {
@@ -926,7 +1386,7 @@ async function startServer() {
 
     // Consulta o DB para retornar dados atualizados (incluindo avatar_url)
     try {
-      const fresh = db.get('SELECT id, name, email, role, avatar_url, email_verified_at FROM users WHERE id = ?', Number(decoded.id)) as any;
+      const fresh = db.get('SELECT id, name, email, role, avatar_url, email_verified_at, privacy_reaccept_required FROM users WHERE id = ?', Number(decoded.id)) as any;
       if (!fresh) return res.json({ user: null });
       const type = fresh.role === 'admin' ? 'user' : 'customer';
       return res.json({
@@ -938,6 +1398,7 @@ async function startServer() {
           role: fresh.role,
           avatar_url: fresh.avatar_url || null,
           email_verified: Boolean(fresh.email_verified_at),
+          privacy_reaccept_required: Boolean(fresh.privacy_reaccept_required),
         },
       });
     } catch {
@@ -1053,12 +1514,12 @@ async function startServer() {
     const productId = Number(req.params.productId);
 
     if (!Number.isInteger(productId) || productId <= 0) {
-      return res.status(400).json({ error: 'product_id inválido' });
+      return res.status(400).json({ error: 'product_id invÃ¡lido' });
     }
 
     const product = db.get('SELECT id, status FROM products WHERE id = ?', productId) as any;
     if (!product || product.status !== 'active') {
-      return res.status(404).json({ error: 'Produto não encontrado' });
+      return res.status(404).json({ error: 'Produto nÃ£o encontrado' });
     }
 
     try {
@@ -1075,7 +1536,7 @@ async function startServer() {
     const productId = Number(req.params.productId);
 
     if (!Number.isInteger(productId) || productId <= 0) {
-      return res.status(400).json({ error: 'product_id inválido' });
+      return res.status(400).json({ error: 'product_id invÃ¡lido' });
     }
 
     try {
@@ -1090,7 +1551,7 @@ async function startServer() {
   app.post('/api/auth/forgot-password', async (req, res) => {
     try {
       const { email } = req.body || {};
-      if (!email) return res.status(400).json({ error: 'E-mail obrigatório' });
+      if (!email) return res.status(400).json({ error: 'E-mail obrigatÃ³rio' });
 
       const user = db.get('SELECT * FROM users WHERE email = ?', email) as any;
       if (!user) {
@@ -1124,14 +1585,14 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Forgot password error:', error);
-      res.status(500).json({ error: 'Erro interno ao solicitar recuperação de senha' });
+      res.status(500).json({ error: 'Erro interno ao solicitar recuperaÃ§Ã£o de senha' });
     }
   });
 
   app.post('/api/auth/reset-password', async (req, res) => {
     try {
       const { token, new_password } = req.body || {};
-      if (!token || !new_password) return res.status(400).json({ error: 'Token e nova senha são obrigatórios' });
+      if (!token || !new_password) return res.status(400).json({ error: 'Token e nova senha sÃ£o obrigatÃ³rios' });
 
       const resetRequest = db.get(
         'SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0 AND expires_at > CURRENT_TIMESTAMP',
@@ -1139,7 +1600,7 @@ async function startServer() {
       ) as any;
 
       if (!resetRequest) {
-        return res.status(400).json({ error: 'Token inválido ou expirado' });
+        return res.status(400).json({ error: 'Token invÃ¡lido ou expirado' });
       }
 
       const hashedPassword = await hashPassword(new_password);
@@ -1255,7 +1716,7 @@ async function startServer() {
 
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome do produto Ã© obrigatÃ³rio' });
+      return res.status(400).json({ error: 'Nome do produto ÃƒÂ© obrigatÃƒÂ³rio' });
     }
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
@@ -1264,24 +1725,24 @@ async function startServer() {
     const productionSheetValue = productionSheetFile || (typeof production_sheet === 'string' ? production_sheet.trim() : '') || null;
     const finalPrice = Number(price);
     if (!Number.isFinite(finalPrice)) {
-      return res.status(400).json({ error: 'PreÃ§o invÃ¡lido' });
+      return res.status(400).json({ error: 'PreÃƒÂ§o invÃƒÂ¡lido' });
     }
     const finalSalePriceRaw = promotional_price ?? sale_price ?? null;
     const finalSalePrice = finalSalePriceRaw === null || finalSalePriceRaw === '' ? null : Number(finalSalePriceRaw);
     if (finalSalePrice !== null && !Number.isFinite(finalSalePrice)) {
-      return res.status(400).json({ error: 'PreÃ§o promocional invÃ¡lido' });
+      return res.status(400).json({ error: 'PreÃƒÂ§o promocional invÃƒÂ¡lido' });
     }
     const normalizedStitchCount = stitch_count === undefined || stitch_count === null || stitch_count === ''
       ? null
       : Number(stitch_count);
     if (normalizedStitchCount !== null && !Number.isFinite(normalizedStitchCount)) {
-      return res.status(400).json({ error: 'Quantidade de pontos invÃ¡lida' });
+      return res.status(400).json({ error: 'Quantidade de pontos invÃƒÂ¡lida' });
     }
     const normalizedCategoryId = category_id === undefined || category_id === null || category_id === ''
       ? null
       : Number(category_id);
     if (normalizedCategoryId !== null && !Number.isFinite(normalizedCategoryId)) {
-      return res.status(400).json({ error: 'Categoria principal invÃ¡lida' });
+      return res.status(400).json({ error: 'Categoria principal invÃƒÂ¡lida' });
     }
 
     const uniqueSlug = createUniqueProductSlug(normalizedName);
@@ -1335,7 +1796,7 @@ async function startServer() {
         });
       }
 
-      // Arquivos de ProduÃ§Ã£o
+      // Arquivos de ProduÃƒÂ§ÃƒÂ£o
       if (files['production_files']) {
         files['production_files'].forEach(f => {
           db.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, f.originalname, `/uploads/${f.filename}`, 'production');
@@ -1403,7 +1864,7 @@ async function startServer() {
     const existingProduct = db.get('SELECT * FROM products WHERE id = ?', productId) as any;
 
     if (!existingProduct) {
-      return res.status(404).json({ error: 'Produto nÃ£o encontrado' });
+      return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
     }
 
     const files = (req.files || {}) as { [fieldname: string]: Express.Multer.File[] };
@@ -1480,7 +1941,7 @@ async function startServer() {
       : existingProduct.colors;
 
     if (nextStitchCount !== null && !Number.isFinite(Number(nextStitchCount))) {
-      return res.status(400).json({ error: 'Quantidade de pontos inválida' });
+      return res.status(400).json({ error: 'Quantidade de pontos invÃ¡lida' });
     }
 
     const productionSheetFile = files['production_sheet']?.[0]?.filename
@@ -1529,7 +1990,7 @@ async function startServer() {
             fs.unlinkSync(oldSheetFsPath);
           }
         } catch (fileError) {
-          console.warn('Falha ao remover folha de produÃ§Ã£o antiga:', fileError);
+          console.warn('Falha ao remover folha de produÃƒÂ§ÃƒÂ£o antiga:', fileError);
         }
       }
 
@@ -1621,7 +2082,7 @@ async function startServer() {
 
   app.get('/api/admin/products/:id', authenticate, isAdmin, (req, res) => {
     const product = db.get('SELECT * FROM products WHERE id = ?', req.params.id) as any;
-    if (!product) return res.status(404).json({ error: 'Produto nÃ£o encontrado' });
+    if (!product) return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
 
     const images = db.all('SELECT * FROM product_images WHERE product_id = ?', req.params.id);
     const files = db.all('SELECT * FROM product_files WHERE product_id = ?', req.params.id);
@@ -1667,7 +2128,7 @@ async function startServer() {
     const { name, slug: rawSlug, parent_id, sort_order, status, description } = req.body;
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome da categoria Ã© obrigatÃ³rio' });
+      return res.status(400).json({ error: 'Nome da categoria ÃƒÂ© obrigatÃƒÂ³rio' });
     }
 
     const safeName = normalizedName.slice(0, 255);
@@ -1717,7 +2178,7 @@ async function startServer() {
     const { name, slug: rawSlug, parent_id, sort_order, status, description } = req.body;
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome da categoria Ã© obrigatÃ³rio' });
+      return res.status(400).json({ error: 'Nome da categoria ÃƒÂ© obrigatÃƒÂ³rio' });
     }
 
     const safeName = normalizedName.slice(0, 255);
@@ -1750,7 +2211,7 @@ async function startServer() {
       `, categoryId) as any;
 
       if (!updatedCategory) {
-        return res.status(404).json({ error: 'Categoria nÃ£o encontrada' });
+        return res.status(404).json({ error: 'Categoria nÃƒÂ£o encontrada' });
       }
 
       return res.status(200).json(updatedCategory);
@@ -1785,7 +2246,7 @@ async function startServer() {
       .filter((value: number) => Number.isInteger(value) && value > 0);
 
     if (normalizedIds.length === 0) {
-      return res.status(400).json({ error: 'Nenhuma categoria vÃ¡lida foi informada' });
+      return res.status(400).json({ error: 'Nenhuma categoria vÃƒÂ¡lida foi informada' });
     }
 
     try {
@@ -1842,6 +2303,7 @@ async function startServer() {
       items,
       payment_method,
       payer = {},
+      checkout_data_processing_accepted,
       card_token,
       installments,
       issuer_id,
@@ -1862,11 +2324,29 @@ async function startServer() {
       });
     }
 
+    const lgpd = resolveLgpdSettings();
+    if (lgpd.enabled) {
+      const compliance = ensureUserLgpdCompliance(Number(freshUser.id));
+      if (!compliance.ok) {
+        return res.status(403).json({
+          error: 'Aceite as politicas de privacidade/termos para continuar.',
+          code: compliance.code,
+          missing: compliance.missing,
+        });
+      }
+      if (lgpd.requireCheckoutConsent && !parseBooleanSetting(checkout_data_processing_accepted, false)) {
+        return res.status(400).json({
+          error: 'Voce precisa autorizar o processamento de dados para finalizar a compra.',
+          code: 'CHECKOUT_CONSENT_REQUIRED',
+        });
+      }
+    }
+
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Carrinho vazio' });
     }
     if (!['pix', 'credit_card', 'debit_card'].includes(payment_method)) {
-      return res.status(400).json({ error: 'Método de pagamento inválido' });
+      return res.status(400).json({ error: 'MÃ©todo de pagamento invÃ¡lido' });
     }
 
     try {
@@ -1877,12 +2357,12 @@ async function startServer() {
         const productId = Number(item?.product_id);
         const quantity = Number(item?.quantity || 1);
         if (!Number.isInteger(productId) || productId <= 0 || !Number.isInteger(quantity) || quantity <= 0) {
-          return res.status(400).json({ error: 'Itens inválidos no checkout' });
+          return res.status(400).json({ error: 'Itens invÃ¡lidos no checkout' });
         }
 
         const product = db.get('SELECT id, name, slug, price, sale_price FROM products WHERE id = ?', productId) as any;
         if (!product) {
-          return res.status(400).json({ error: `Produto ${productId} não encontrado` });
+          return res.status(400).json({ error: `Produto ${productId} nÃ£o encontrado` });
         }
 
         const unitPrice = product.sale_price !== null && product.sale_price !== undefined
@@ -1900,7 +2380,7 @@ async function startServer() {
       }
 
       if (orderItems.length === 0 || subtotal <= 0) {
-        return res.status(400).json({ error: 'Não foi possível calcular o total do pedido' });
+        return res.status(400).json({ error: 'NÃ£o foi possÃ­vel calcular o total do pedido' });
       }
 
       const payerEmail = String((payer as any)?.email || user?.email || '').trim().toLowerCase();
@@ -1909,10 +2389,10 @@ async function startServer() {
       const payerCpf = normalizeCPF((payer as any)?.cpf);
 
       if (!payerEmail) {
-        return res.status(400).json({ error: 'E-mail do pagador é obrigatório' });
+        return res.status(400).json({ error: 'E-mail do pagador Ã© obrigatÃ³rio' });
       }
       if (!payerCpf) {
-        return res.status(400).json({ error: 'CPF do pagador é obrigatório' });
+        return res.status(400).json({ error: 'CPF do pagador Ã© obrigatÃ³rio' });
       }
 
       const createOrderTransaction = db.transaction((payload: any) => {
@@ -1942,6 +2422,20 @@ async function startServer() {
       });
 
       const { mode, accessToken } = resolveMercadoPagoSettings();
+
+      if (lgpd.enabled && parseBooleanSetting(checkout_data_processing_accepted, false)) {
+        upsertUserConsent({
+          userId: Number(user.id),
+          consentKey: 'checkout_data_processing',
+          granted: true,
+          req,
+          source: 'checkout',
+          legalBasis: 'consent',
+          purpose: `Processamento de pagamento para pedido #${orderId}.`,
+          policyVersion: lgpd.policyVersionPrivacy,
+        });
+      }
+
       if (!accessToken) {
         db.run(`UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, orderId);
         return res.status(400).json({
@@ -2070,7 +2564,7 @@ async function startServer() {
     try {
       const user = (req as any).user;
       const paymentId = String(req.params.payment_id || '').trim();
-      if (!paymentId) return res.status(400).json({ error: 'payment_id inválido' });
+      if (!paymentId) return res.status(400).json({ error: 'payment_id invÃ¡lido' });
 
       const paymentClient = createMercadoPagoPaymentClient();
       const payment = await paymentClient.get({ id: paymentId });
@@ -2179,6 +2673,7 @@ async function startServer() {
   app.get('/api/customer/account', authenticate, (req, res) => {
     const user = (req as any).user;
     try {
+      const lgpd = resolveLgpdSettings();
       const profile = db.get(`
         SELECT
           u.id,
@@ -2186,6 +2681,8 @@ async function startServer() {
           u.email,
           u.first_name,
           u.last_name,
+          u.email_verified_at,
+          u.privacy_reaccept_required,
           c.phone,
           c.cpf,
           u.avatar_url,
@@ -2224,6 +2721,10 @@ async function startServer() {
 
       return res.json({
         user: profile || null,
+        lgpd: {
+          enabled: lgpd.enabled,
+          compliance: ensureUserLgpdCompliance(Number(user.id)),
+        },
         summary: {
           orders_count: Number(summary?.orders_count || 0),
           favorites_count: Number(summary?.favorites_count || 0),
@@ -2353,6 +2854,10 @@ async function startServer() {
       if (!canUserAccessDownloads(Number(freshUser.id), String(freshUser.email || ''), freshUser.email_verified_at)) {
         return res.status(403).json({ error: 'Confirme seu e-mail para acessar downloads.', code: 'EMAIL_NOT_VERIFIED' });
       }
+      const lgpdCompliance = ensureUserLgpdCompliance(Number(freshUser.id));
+      if (!lgpdCompliance.ok) {
+        return res.status(403).json({ error: 'Aceite as politicas LGPD para acessar seus downloads.', code: lgpdCompliance.code, missing: lgpdCompliance.missing });
+      }
 
       const allowedDomain = String(process.env.APP_DOMAIN || 'digitalbordados.com.br')
         .trim()
@@ -2403,7 +2908,7 @@ async function startServer() {
         FROM orders o
         JOIN order_items oi ON oi.order_id = o.id
         JOIN product_files f ON f.product_id = oi.product_id
-        WHERE (o.user_id = ? OR (o.user_id IS NULL AND LOWER(COALESCE(o.customer_email, '')) = ?))
+        WHERE (o.user_id = ? OR (o.user_id IS NULL AND COALESCE(o.customer_email, '') = ?))
           AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})
           AND f.file_path IN (${placeholders})
         LIMIT 1
@@ -2423,7 +2928,7 @@ async function startServer() {
         return res.status(400).json({ error: 'URL de arquivo invalida.' });
       }
 
-      // Redireciona para o arquivo autorizado (evita falhas de proxy em produção).
+      // Redireciona para o arquivo autorizado (evita falhas de proxy em produÃ§Ã£o).
       return res.redirect(302, targetUrl);
     } catch (error: any) {
       console.error('Erro no proxy de download:', error?.message || error);
@@ -2440,6 +2945,10 @@ async function startServer() {
       }
       if (!canUserAccessDownloads(Number(freshUser.id), String(freshUser.email || ''), freshUser.email_verified_at)) {
         return res.status(403).json({ error: 'Confirme seu e-mail para acessar downloads.', code: 'EMAIL_NOT_VERIFIED' });
+      }
+      const lgpdCompliance = ensureUserLgpdCompliance(Number(freshUser.id));
+      if (!lgpdCompliance.ok) {
+        return res.status(403).json({ error: 'Aceite as politicas LGPD para acessar seus downloads.', code: lgpdCompliance.code, missing: lgpdCompliance.missing });
       }
 
       const statusPlaceholders = getDownloadStatusPlaceholders();
@@ -2458,7 +2967,7 @@ async function startServer() {
         JOIN orders o ON oi.order_id = o.id
         LEFT JOIN products p ON p.id = oi.product_id
         LEFT JOIN product_files f ON f.product_id = oi.product_id
-        WHERE (o.user_id = ? OR (o.user_id IS NULL AND LOWER(COALESCE(o.customer_email, '')) = ?))
+        WHERE (o.user_id = ? OR (o.user_id IS NULL AND COALESCE(o.customer_email, '') = ?))
           AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})
           AND f.file_path IS NOT NULL
           AND f.file_path <> ''
@@ -2682,6 +3191,971 @@ async function startServer() {
     }
   });
 
+  app.get('/api/lgpd/policies/active', (req, res) => {
+    try {
+      const lgpd = resolveLgpdSettings();
+      const policies = getActivePolicies();
+      res.json({
+        enabled: lgpd.enabled,
+        versions: {
+          privacy: lgpd.policyVersionPrivacy,
+          terms: lgpd.policyVersionTerms,
+          cookies: lgpd.policyVersionCookies,
+        },
+        policies,
+      });
+    } catch (error) {
+      console.error('LGPD active policies error:', error);
+      res.status(500).json({ error: 'Erro ao carregar politicas LGPD' });
+    }
+  });
+
+  app.post('/api/lgpd/cookies/consent', (req, res) => {
+    try {
+      const {
+        necessary = true,
+        statistics = false,
+        marketing = false,
+        preferences = false,
+        consent_id,
+      } = req.body || {};
+      const user = (req as any).user || null;
+      const consentId = String(consent_id || crypto.randomBytes(16).toString('hex'));
+      const lgpd = resolveLgpdSettings();
+      db.run(
+        `INSERT INTO lgpd_cookie_consents (
+          user_id, consent_id, necessary, statistics, marketing, preferences, consent_version, ip, user_agent
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          necessary = VALUES(necessary),
+          statistics = VALUES(statistics),
+          marketing = VALUES(marketing),
+          preferences = VALUES(preferences),
+          consent_version = VALUES(consent_version),
+          ip = VALUES(ip),
+          user_agent = VALUES(user_agent),
+          updated_at = CURRENT_TIMESTAMP`,
+        user?.id || null,
+        consentId,
+        parseBooleanSetting(necessary, true) ? 1 : 0,
+        parseBooleanSetting(statistics, false) ? 1 : 0,
+        parseBooleanSetting(marketing, false) ? 1 : 0,
+        parseBooleanSetting(preferences, false) ? 1 : 0,
+        lgpd.policyVersionCookies,
+        getClientIp(req),
+        String(req.headers['user-agent'] || '').slice(0, 500),
+      );
+      if (user?.id) {
+        recordPolicyAcceptance({
+          userId: Number(user.id),
+          policyType: 'cookies',
+          policyVersion: lgpd.policyVersionCookies,
+          req,
+          source: 'cookie_banner',
+        });
+      }
+      return res.json({ success: true, consent_id: consentId });
+    } catch (error) {
+      console.error('LGPD cookie consent error:', error);
+      return res.status(500).json({ error: 'Erro ao registrar consentimento de cookies' });
+    }
+  });
+
+  app.get('/api/customer/privacy', authenticate, (req, res) => {
+    try {
+      const user = (req as any).user;
+      const lgpd = resolveLgpdSettings();
+      const consents = db.all(
+        `SELECT consent_key, granted, legal_basis, purpose, source, policy_version, updated_at, revoked_at
+         FROM lgpd_consents
+         WHERE user_id = ?
+         ORDER BY updated_at DESC`,
+        user.id,
+      );
+      const acceptances = db.all(
+        `SELECT policy_type, policy_version, accepted_at, source
+         FROM lgpd_user_acceptances
+         WHERE user_id = ?
+         ORDER BY accepted_at DESC`,
+        user.id,
+      );
+      const requests = db.all(
+        `SELECT id, request_type, status, payload, response_notes, created_at, handled_at
+         FROM lgpd_requests
+         WHERE user_id = ?
+         ORDER BY created_at DESC`,
+        user.id,
+      );
+      const compliance = ensureUserLgpdCompliance(Number(user.id));
+      res.json({
+        settings: lgpd,
+        compliance,
+        consents,
+        acceptances,
+        requests,
+      });
+    } catch (error) {
+      console.error('Customer privacy error:', error);
+      res.status(500).json({ error: 'Erro ao carregar dados de privacidade' });
+    }
+  });
+
+  app.put('/api/customer/privacy/consents', authenticate, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { marketing = false, policy_accept = false, terms_accept = false, cookies_accept = false } = req.body || {};
+      const lgpd = resolveLgpdSettings();
+
+      upsertUserConsent({
+        userId: Number(user.id),
+        consentKey: 'marketing_communications',
+        granted: parseBooleanSetting(marketing, false),
+        req,
+        source: 'my_account',
+        legalBasis: 'consent',
+        purpose: 'Envio de comunicacoes e ofertas.',
+        policyVersion: lgpd.policyVersionPrivacy,
+      });
+
+      if (parseBooleanSetting(policy_accept, false)) {
+        recordPolicyAcceptance({
+          userId: Number(user.id),
+          policyType: 'privacy',
+          policyVersion: lgpd.policyVersionPrivacy,
+          req,
+          source: 'my_account',
+        });
+      }
+
+      if (parseBooleanSetting(terms_accept, false)) {
+        recordPolicyAcceptance({
+          userId: Number(user.id),
+          policyType: 'terms',
+          policyVersion: lgpd.policyVersionTerms,
+          req,
+          source: 'my_account',
+        });
+      }
+      if (parseBooleanSetting(cookies_accept, false)) {
+        recordPolicyAcceptance({
+          userId: Number(user.id),
+          policyType: 'cookies',
+          policyVersion: lgpd.policyVersionCookies,
+          req,
+          source: 'my_account',
+        });
+      }
+
+      const freshUser = db.get('SELECT id, name, email FROM users WHERE id = ?', Number(user.id)) as any;
+      if (freshUser?.email) {
+        sendEmail({
+          to: freshUser.email,
+          templateKey: 'lgpd_consent_confirmation',
+          variables: {
+            name: freshUser.name || 'Cliente',
+            consent_key: 'marketing_communications',
+            consent_status: parseBooleanSetting(marketing, false) ? 'aceito' : 'revogado',
+          },
+        }).catch((err) => console.error('LGPD consent email error:', err));
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Update privacy consents error:', error);
+      res.status(500).json({ error: 'Erro ao atualizar consentimentos' });
+    }
+  });
+
+  app.post('/api/customer/privacy/request', authenticate, (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { request_type, details = '' } = req.body || {};
+      const allowed = ['export', 'delete', 'correction', 'revoke'];
+      const normalizedType = String(request_type || '').trim().toLowerCase();
+      if (!allowed.includes(normalizedType)) {
+        return res.status(400).json({ error: 'Tipo de solicitacao invalido' });
+      }
+
+      const result = db.run(
+        `INSERT INTO lgpd_requests (user_id, request_type, status, payload)
+         VALUES (?, ?, 'pending', ?)`,
+        Number(user.id),
+        normalizedType,
+        JSON.stringify({ details: String(details || '').slice(0, 4000) }),
+      );
+
+      const requestId = Number(result.lastInsertRowid);
+      logLgpdEvent({
+        req,
+        userId: Number(user.id),
+        actorUserId: Number(user.id),
+        eventType: 'request',
+        action: 'request_created',
+        details: { request_id: requestId, request_type: normalizedType },
+      });
+
+      const freshUser = db.get('SELECT id, name, email FROM users WHERE id = ?', Number(user.id)) as any;
+      if (freshUser?.email) {
+        sendEmail({
+          to: freshUser.email,
+          templateKey: 'lgpd_request_received',
+          variables: {
+            name: freshUser.name || 'Cliente',
+            request_type: normalizedType,
+            request_id: String(requestId),
+          },
+        }).catch((err) => console.error('LGPD request email error:', err));
+      }
+
+      res.status(201).json({ success: true, id: requestId, status: 'pending' });
+    } catch (error) {
+      console.error('Create LGPD request error:', error);
+      res.status(500).json({ error: 'Erro ao criar solicitacao LGPD' });
+    }
+  });
+
+  app.get('/api/customer/privacy/export', authenticate, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const format = String(req.query.format || 'json').toLowerCase();
+      const payload = buildUserLgpdExportPayload(Number(user.id));
+      if (!payload?.user) return res.status(404).json({ error: 'Usuario nao encontrado' });
+
+      logLgpdEvent({
+        req,
+        userId: Number(user.id),
+        actorUserId: Number(user.id),
+        eventType: 'export',
+        action: 'self_export',
+        details: { format },
+      });
+
+      if (format === 'csv') {
+        const csvLines = [
+          'section,key,value',
+          ...Object.entries(payload.user || {}).map(([k, v]) => `user,${k},"${String(v ?? '').replace(/"/g, '""')}"`),
+          ...Object.entries(payload.profile || {}).map(([k, v]) => `profile,${k},"${String(v ?? '').replace(/"/g, '""')}"`),
+        ];
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="meus-dados-lgpd.csv"');
+        return res.send(csvLines.join('\n'));
+      }
+
+      if (format === 'pdf') {
+        const { jsPDF } = await import('jspdf');
+        const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const marginX = 40;
+        const marginY = 44;
+        let cursorY = marginY;
+
+        const addLine = (text: string, isTitle = false) => {
+          const fontSize = isTitle ? 14 : 10;
+          doc.setFont('helvetica', isTitle ? 'bold' : 'normal');
+          doc.setFontSize(fontSize);
+          const wrapped = doc.splitTextToSize(text, pageWidth - marginX * 2);
+          const estimatedHeight = wrapped.length * (fontSize + 2);
+          if (cursorY + estimatedHeight > pageHeight - marginY) {
+            doc.addPage();
+            cursorY = marginY;
+          }
+          doc.text(wrapped, marginX, cursorY);
+          cursorY += estimatedHeight + 6;
+        };
+
+        addLine('Digital Bordados - ExportaÃ§Ã£o LGPD', true);
+        addLine(`Gerado em: ${new Date().toLocaleString('pt-BR')}`);
+        addLine(`UsuÃ¡rio: ${String(payload.user?.name || '')} (${String(payload.user?.email || '')})`);
+        addLine(`Status da conta: ${String(payload.user?.status || '')}`);
+        addLine('', false);
+
+        addLine('Dados cadastrais', true);
+        Object.entries(payload.user || {}).forEach(([key, value]) => addLine(`${key}: ${String(value ?? '-')}`));
+        if (payload.profile) {
+          addLine('Perfil do cliente', true);
+          Object.entries(payload.profile).forEach(([key, value]) => addLine(`${key}: ${String(value ?? '-')}`));
+        }
+
+        addLine(`Pedidos: ${Array.isArray(payload.orders) ? payload.orders.length : 0}`, true);
+        (payload.orders as any[]).forEach((order) => {
+          addLine(`#${order.id} â€¢ ${order.status} â€¢ Total: R$ ${Number(order.total || 0).toFixed(2)} â€¢ ${String(order.created_at || '')}`);
+        });
+
+        addLine(`Itens comprados: ${Array.isArray(payload.order_items) ? payload.order_items.length : 0}`, true);
+        (payload.order_items as any[]).forEach((item) => {
+          addLine(`#${item.order_id} â€¢ ${item.product_name} â€¢ Qtde: ${item.quantity} â€¢ R$ ${Number(item.price || 0).toFixed(2)}`);
+        });
+
+        addLine(`Favoritos: ${Array.isArray(payload.favorites) ? payload.favorites.length : 0}`, true);
+        (payload.favorites as any[]).forEach((fav) => addLine(`${fav.product_name || fav.product_id} â€¢ ${String(fav.created_at || '')}`));
+
+        addLine(`Consentimentos: ${Array.isArray(payload.consents) ? payload.consents.length : 0}`, true);
+        (payload.consents as any[]).forEach((consent) => {
+          addLine(`${consent.consent_key} â€¢ ${Number(consent.granted) ? 'ativo' : 'revogado'} â€¢ versÃ£o ${consent.policy_version || '-'} â€¢ ${String(consent.updated_at || '')}`);
+        });
+
+        addLine(`Aceites de polÃ­ticas: ${Array.isArray(payload.policy_acceptances) ? payload.policy_acceptances.length : 0}`, true);
+        (payload.policy_acceptances as any[]).forEach((acceptance) => {
+          addLine(`${acceptance.policy_type} â€¢ v${acceptance.policy_version} â€¢ ${String(acceptance.accepted_at || '')}`);
+        });
+
+        addLine(`SolicitaÃ§Ãµes LGPD: ${Array.isArray(payload.lgpd_requests) ? payload.lgpd_requests.length : 0}`, true);
+        (payload.lgpd_requests as any[]).forEach((requestItem) => {
+          addLine(`#${requestItem.id} â€¢ ${requestItem.request_type} â€¢ ${requestItem.status} â€¢ ${String(requestItem.created_at || '')}`);
+        });
+
+        const pdfBytes = doc.output('arraybuffer');
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="meus-dados-lgpd.pdf"');
+        return res.send(Buffer.from(pdfBytes));
+      }
+
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="meus-dados-lgpd.json"');
+      return res.send(JSON.stringify(payload, null, 2));
+    } catch (error) {
+      console.error('LGPD export error:', error);
+      res.status(500).json({ error: 'Erro ao exportar dados' });
+    }
+  });
+
+  app.get('/api/admin/lgpd/policies', authenticate, isAdmin, (req, res) => {
+    try {
+      const policies = db.all(
+        `SELECT id, policy_type, version, title, content, is_active, force_reaccept, published_at, created_at, updated_at
+         FROM lgpd_policies
+         ORDER BY policy_type ASC, created_at DESC`,
+      );
+      res.json(policies);
+    } catch (error) {
+      console.error('Admin LGPD policies error:', error);
+      res.status(500).json({ error: 'Erro ao buscar politicas LGPD' });
+    }
+  });
+
+  app.get('/api/admin/lgpd/policies/diff', authenticate, isAdmin, (req, res) => {
+    try {
+      const leftId = Number(req.query.left || 0);
+      const rightId = Number(req.query.right || 0);
+      if (!Number.isFinite(leftId) || leftId <= 0 || !Number.isFinite(rightId) || rightId <= 0) {
+        return res.status(400).json({ error: 'Parametros left e right sao obrigatorios' });
+      }
+
+      const leftPolicy = db.get(
+        'SELECT id, policy_type, version, title, content, is_active, updated_at FROM lgpd_policies WHERE id = ? LIMIT 1',
+        leftId,
+      ) as any;
+      const rightPolicy = db.get(
+        'SELECT id, policy_type, version, title, content, is_active, updated_at FROM lgpd_policies WHERE id = ? LIMIT 1',
+        rightId,
+      ) as any;
+
+      if (!leftPolicy || !rightPolicy) {
+        return res.status(404).json({ error: 'Uma ou mais politicas nao foram encontradas' });
+      }
+      if (String(leftPolicy.policy_type) !== String(rightPolicy.policy_type)) {
+        return res.status(400).json({ error: 'As politicas devem ser do mesmo tipo para comparacao' });
+      }
+
+      const titleDiff = computePolicyLineDiff(String(leftPolicy.title || ''), String(rightPolicy.title || ''));
+      const contentDiff = computePolicyLineDiff(String(leftPolicy.content || ''), String(rightPolicy.content || ''));
+
+      return res.json({
+        left: {
+          id: leftPolicy.id,
+          policy_type: leftPolicy.policy_type,
+          version: leftPolicy.version,
+          title: leftPolicy.title,
+          is_active: Number(leftPolicy.is_active) === 1,
+          updated_at: leftPolicy.updated_at,
+        },
+        right: {
+          id: rightPolicy.id,
+          policy_type: rightPolicy.policy_type,
+          version: rightPolicy.version,
+          title: rightPolicy.title,
+          is_active: Number(rightPolicy.is_active) === 1,
+          updated_at: rightPolicy.updated_at,
+        },
+        diff: {
+          title: titleDiff,
+          content: contentDiff,
+        },
+      });
+    } catch (error) {
+      console.error('Admin LGPD policy diff error:', error);
+      return res.status(500).json({ error: 'Erro ao comparar versoes de politicas' });
+    }
+  });
+
+  app.get('/api/admin/lgpd/export/user/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const targetUserId = Number(req.params.id);
+      const format = String(req.query.format || 'json').toLowerCase();
+      if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+        return res.status(400).json({ error: 'ID do usuario invalido' });
+      }
+
+      const payload = buildUserLgpdExportPayload(targetUserId);
+      if (!payload?.user) return res.status(404).json({ error: 'Usuario nao encontrado' });
+
+      logLgpdEvent({
+        req,
+        userId: targetUserId,
+        actorUserId: Number(adminUser.id),
+        eventType: 'export',
+        action: 'admin_export',
+        details: { format },
+      });
+
+      if (format === 'csv') {
+        const csvLines = [
+          'section,key,value',
+          ...Object.entries(payload.user || {}).map(([k, v]) => `user,${k},"${String(v ?? '').replace(/"/g, '""')}"`),
+          ...Object.entries(payload.profile || {}).map(([k, v]) => `profile,${k},"${String(v ?? '').replace(/"/g, '""')}"`),
+        ];
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="dados-lgpd-usuario-${targetUserId}.csv"`);
+        return res.send(csvLines.join('\n'));
+      }
+
+      if (format === 'pdf') {
+        const { jsPDF } = await import('jspdf');
+        const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const marginX = 40;
+        const marginY = 44;
+        let cursorY = marginY;
+
+        const addLine = (text: string, isTitle = false) => {
+          const fontSize = isTitle ? 14 : 10;
+          doc.setFont('helvetica', isTitle ? 'bold' : 'normal');
+          doc.setFontSize(fontSize);
+          const wrapped = doc.splitTextToSize(text, pageWidth - marginX * 2);
+          const estimatedHeight = wrapped.length * (fontSize + 2);
+          if (cursorY + estimatedHeight > pageHeight - marginY) {
+            doc.addPage();
+            cursorY = marginY;
+          }
+          doc.text(wrapped, marginX, cursorY);
+          cursorY += estimatedHeight + 6;
+        };
+
+        addLine('Digital Bordados - Exportacao LGPD (Admin)', true);
+        addLine(`Gerado em: ${new Date().toLocaleString('pt-BR')}`);
+        addLine(`Usuario: ${String(payload.user?.name || '')} (${String(payload.user?.email || '')})`);
+        addLine(`Status da conta: ${String(payload.user?.status || '')}`);
+        addLine('', false);
+
+        addLine('Dados cadastrais', true);
+        Object.entries(payload.user || {}).forEach(([key, value]) => addLine(`${key}: ${String(value ?? '-')}`));
+        if (payload.profile) {
+          addLine('Perfil do cliente', true);
+          Object.entries(payload.profile).forEach(([key, value]) => addLine(`${key}: ${String(value ?? '-')}`));
+        }
+
+        addLine(`Pedidos: ${Array.isArray(payload.orders) ? payload.orders.length : 0}`, true);
+        (payload.orders as any[]).forEach((order) => {
+          addLine(`#${order.id} - ${order.status} - Total: R$ ${Number(order.total || 0).toFixed(2)} - ${String(order.created_at || '')}`);
+        });
+
+        addLine(`Itens comprados: ${Array.isArray(payload.order_items) ? payload.order_items.length : 0}`, true);
+        (payload.order_items as any[]).forEach((item) => {
+          addLine(`#${item.order_id} - ${item.product_name} - Qtde: ${item.quantity} - R$ ${Number(item.price || 0).toFixed(2)}`);
+        });
+
+        addLine(`Favoritos: ${Array.isArray(payload.favorites) ? payload.favorites.length : 0}`, true);
+        (payload.favorites as any[]).forEach((fav) => addLine(`${fav.product_name || fav.product_id} - ${String(fav.created_at || '')}`));
+
+        addLine(`Consentimentos: ${Array.isArray(payload.consents) ? payload.consents.length : 0}`, true);
+        (payload.consents as any[]).forEach((consent) => {
+          addLine(`${consent.consent_key} - ${Number(consent.granted) ? 'ativo' : 'revogado'} - versao ${consent.policy_version || '-'} - ${String(consent.updated_at || '')}`);
+        });
+
+        addLine(`Aceites de politicas: ${Array.isArray(payload.policy_acceptances) ? payload.policy_acceptances.length : 0}`, true);
+        (payload.policy_acceptances as any[]).forEach((acceptance) => {
+          addLine(`${acceptance.policy_type} - v${acceptance.policy_version} - ${String(acceptance.accepted_at || '')}`);
+        });
+
+        addLine(`Solicitacoes LGPD: ${Array.isArray(payload.lgpd_requests) ? payload.lgpd_requests.length : 0}`, true);
+        (payload.lgpd_requests as any[]).forEach((requestItem) => {
+          addLine(`#${requestItem.id} - ${requestItem.request_type} - ${requestItem.status} - ${String(requestItem.created_at || '')}`);
+        });
+
+        const pdfBytes = doc.output('arraybuffer');
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="dados-lgpd-usuario-${targetUserId}.pdf"`);
+        return res.send(Buffer.from(pdfBytes));
+      }
+
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="dados-lgpd-usuario-${targetUserId}.json"`);
+      return res.send(JSON.stringify(payload, null, 2));
+    } catch (error) {
+      console.error('Admin LGPD export user error:', error);
+      return res.status(500).json({ error: 'Erro ao exportar dados do usuario' });
+    }
+  });
+
+  app.post('/api/admin/lgpd/policies', authenticate, isAdmin, (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const { policy_type, version, title, content, is_active = false, force_reaccept = false } = req.body || {};
+      const normalizedType = String(policy_type || '').toLowerCase();
+      if (!['privacy', 'terms', 'cookies'].includes(normalizedType)) {
+        return res.status(400).json({ error: 'Tipo de politica invalido' });
+      }
+      if (!version || !title || !content) {
+        return res.status(400).json({ error: 'version, title e content sao obrigatorios' });
+      }
+
+      const result = db.run(
+        `INSERT INTO lgpd_policies (policy_type, version, title, content, is_active, force_reaccept, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        normalizedType,
+        String(version).trim(),
+        String(title).trim(),
+        String(content),
+        parseBooleanSetting(is_active, false) ? 1 : 0,
+        parseBooleanSetting(force_reaccept, false) ? 1 : 0,
+        Number(adminUser.id),
+      );
+
+      if (parseBooleanSetting(is_active, false)) {
+        db.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ? AND id <> ?', normalizedType, Number(result.lastInsertRowid));
+        if (normalizedType === 'privacy') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', String(version).trim());
+        if (normalizedType === 'terms') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', String(version).trim());
+        if (normalizedType === 'cookies') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', String(version).trim());
+      }
+
+      if (parseBooleanSetting(force_reaccept, false)) {
+        db.run('UPDATE users SET privacy_reaccept_required = 1 WHERE role = "customer"');
+      }
+
+      if (parseBooleanSetting(is_active, false)) {
+        const lgpd = resolveLgpdSettings();
+        const policyUrl =
+          normalizedType === 'privacy'
+            ? lgpd.privacyUrl
+            : normalizedType === 'terms'
+              ? lgpd.termsUrl
+              : lgpd.cookiePolicyUrl;
+        notifyCustomersPolicyUpdated({
+          policyType: normalizedType as 'privacy' | 'terms' | 'cookies',
+          policyVersion: String(version).trim(),
+          policyUrl,
+          actorUserId: Number(adminUser.id),
+          req,
+        });
+      }
+
+      logLgpdEvent({
+        req,
+        actorUserId: Number(adminUser.id),
+        eventType: 'policy',
+        action: 'policy_created',
+        details: { policy_type: normalizedType, version: String(version).trim(), force_reaccept: parseBooleanSetting(force_reaccept, false) },
+      });
+
+      res.status(201).json({ success: true, id: Number(result.lastInsertRowid) });
+    } catch (error: any) {
+      console.error('Create policy error:', error);
+      if (String(error?.message || '').includes('uq_lgpd_policy_type_version') || error?.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ error: 'Ja existe uma politica com este tipo e versao' });
+      }
+      res.status(500).json({ error: 'Erro ao criar politica LGPD' });
+    }
+  });
+
+  app.post('/api/admin/lgpd/policies/:id/activate', authenticate, isAdmin, (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const policy = db.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', Number(req.params.id)) as any;
+      if (!policy) return res.status(404).json({ error: 'Politica nao encontrada' });
+
+      db.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ?', policy.policy_type);
+      db.run('UPDATE lgpd_policies SET is_active = 1 WHERE id = ?', Number(policy.id));
+
+      if (policy.policy_type === 'privacy') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', String(policy.version));
+      if (policy.policy_type === 'terms') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', String(policy.version));
+      if (policy.policy_type === 'cookies') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', String(policy.version));
+
+      if (parseBooleanSetting(req.body?.force_reaccept, false) || Number(policy.force_reaccept) === 1) {
+        db.run('UPDATE users SET privacy_reaccept_required = 1 WHERE role = "customer"');
+      }
+
+      const lgpd = resolveLgpdSettings();
+      const policyUrl =
+        policy.policy_type === 'privacy'
+          ? lgpd.privacyUrl
+          : policy.policy_type === 'terms'
+            ? lgpd.termsUrl
+            : lgpd.cookiePolicyUrl;
+      notifyCustomersPolicyUpdated({
+        policyType: String(policy.policy_type) as 'privacy' | 'terms' | 'cookies',
+        policyVersion: String(policy.version),
+        policyUrl,
+        actorUserId: Number(adminUser.id),
+        req,
+      });
+
+      logLgpdEvent({
+        req,
+        actorUserId: Number(adminUser.id),
+        eventType: 'policy',
+        action: 'policy_activated',
+        details: { policy_id: policy.id, policy_type: policy.policy_type, version: policy.version },
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Activate policy error:', error);
+      res.status(500).json({ error: 'Erro ao ativar politica LGPD' });
+    }
+  });
+
+  app.get('/api/admin/lgpd/consents', authenticate, isAdmin, (req, res) => {
+    try {
+      const page = Math.max(1, Number(req.query.page || 1));
+      const limit = Math.min(500, Math.max(10, Number(req.query.limit || 100)));
+      const offset = (page - 1) * limit;
+      const where: string[] = [];
+      const params: any[] = [];
+
+      const q = String(req.query.q || '').trim();
+      const consentKey = String(req.query.consent_key || '').trim().toLowerCase();
+      const grantedRaw = String(req.query.granted || '').trim().toLowerCase();
+      const userId = Number(req.query.user_id || 0);
+      const ip = String(req.query.ip || '').trim();
+      const from = normalizeDateFilter(req.query.from, false);
+      const to = normalizeDateFilter(req.query.to, true);
+
+      if (q) {
+        where.push('(u.name LIKE ? OR u.email LIKE ?)');
+        params.push(`%${q}%`, `%${q}%`);
+      }
+      if (consentKey) {
+        where.push('LOWER(c.consent_key) = ?');
+        params.push(consentKey);
+      }
+      if (grantedRaw) {
+        const granted = ['1', 'true', 'yes', 'on'].includes(grantedRaw) ? 1 : 0;
+        where.push('c.granted = ?');
+        params.push(granted);
+      }
+      if (Number.isFinite(userId) && userId > 0) {
+        where.push('c.user_id = ?');
+        params.push(userId);
+      }
+      if (ip) {
+        where.push('c.ip LIKE ?');
+        params.push(`%${ip}%`);
+      }
+      if (from) {
+        where.push('c.updated_at >= ?');
+        params.push(from);
+      }
+      if (to) {
+        where.push('c.updated_at <= ?');
+        params.push(to);
+      }
+
+      const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      const countRow = db.get(
+        `SELECT COUNT(*) AS total
+         FROM lgpd_consents c
+         JOIN users u ON u.id = c.user_id
+         ${whereClause}`,
+        ...params,
+      ) as any;
+      const total = Number(countRow?.total || 0);
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const rows = db.all(
+        `SELECT c.id, c.user_id, u.name AS user_name, u.email AS user_email, c.consent_key, c.granted, c.legal_basis,
+                c.source, c.policy_version, c.updated_at, c.revoked_at, c.ip
+         FROM lgpd_consents c
+         JOIN users u ON u.id = c.user_id
+         ${whereClause}
+         ORDER BY c.updated_at DESC
+         LIMIT ? OFFSET ?`,
+        ...params,
+        limit,
+        offset,
+      );
+
+      if (parseBooleanSetting(req.query.flat, false)) {
+        return res.json(rows);
+      }
+      return res.json({
+        data: rows,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasPrev: page > 1,
+          hasNext: page < totalPages,
+        },
+      });
+    } catch (error) {
+      console.error('Admin consents error:', error);
+      res.status(500).json({ error: 'Erro ao buscar consentimentos LGPD' });
+    }
+  });
+
+  app.get('/api/admin/lgpd/requests', authenticate, isAdmin, (req, res) => {
+    try {
+      const page = Math.max(1, Number(req.query.page || 1));
+      const limit = Math.min(500, Math.max(10, Number(req.query.limit || 100)));
+      const offset = (page - 1) * limit;
+      const status = String(req.query.status || '').trim().toLowerCase();
+      const requestType = String(req.query.request_type || '').trim().toLowerCase();
+      const q = String(req.query.q || '').trim();
+      const from = normalizeDateFilter(req.query.from, false);
+      const to = normalizeDateFilter(req.query.to, true);
+      const params: any[] = [];
+      const where: string[] = [];
+      if (status) {
+        where.push('r.status = ?');
+        params.push(status);
+      }
+      if (requestType) {
+        where.push('r.request_type = ?');
+        params.push(requestType);
+      }
+      if (q) {
+        where.push('(u.name LIKE ? OR u.email LIKE ?)');
+        params.push(`%${q}%`, `%${q}%`);
+      }
+      if (from) {
+        where.push('r.created_at >= ?');
+        params.push(from);
+      }
+      if (to) {
+        where.push('r.created_at <= ?');
+        params.push(to);
+      }
+      const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      const countRow = db.get(
+        `SELECT COUNT(*) AS total
+         FROM lgpd_requests r
+         JOIN users u ON u.id = r.user_id
+         ${whereClause}`,
+        ...params,
+      ) as any;
+      const total = Number(countRow?.total || 0);
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const rows = db.all(
+        `SELECT r.*, u.name AS user_name, u.email AS user_email, a.name AS handled_by_name
+         FROM lgpd_requests r
+         JOIN users u ON u.id = r.user_id
+         LEFT JOIN users a ON a.id = r.handled_by
+         ${whereClause}
+         ORDER BY r.created_at DESC
+         LIMIT ? OFFSET ?`,
+        ...params,
+        limit,
+        offset,
+      );
+      if (parseBooleanSetting(req.query.flat, false)) {
+        return res.json(rows);
+      }
+      return res.json({
+        data: rows,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasPrev: page > 1,
+          hasNext: page < totalPages,
+        },
+      });
+    } catch (error) {
+      console.error('Admin requests error:', error);
+      res.status(500).json({ error: 'Erro ao buscar solicitacoes LGPD' });
+    }
+  });
+
+  app.put('/api/admin/lgpd/requests/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const adminUser = (req as any).user;
+      const requestId = Number(req.params.id);
+      const { status, response_notes = '' } = req.body || {};
+      const normalizedStatus = String(status || '').trim().toLowerCase();
+      if (!['pending', 'in_review', 'completed', 'refused'].includes(normalizedStatus)) {
+        return res.status(400).json({ error: 'Status invalido' });
+      }
+
+      const requestRow = db.get('SELECT * FROM lgpd_requests WHERE id = ?', requestId) as any;
+      if (!requestRow) return res.status(404).json({ error: 'Solicitacao nao encontrada' });
+      const targetUser = db.get('SELECT id, name, email FROM users WHERE id = ?', Number(requestRow.user_id)) as any;
+
+      db.run(
+        `UPDATE lgpd_requests
+         SET status = ?, response_notes = ?, handled_by = ?, handled_at = CASE WHEN ? IN ('completed','refused') THEN CURRENT_TIMESTAMP ELSE handled_at END
+         WHERE id = ?`,
+        normalizedStatus,
+        String(response_notes || '').slice(0, 5000),
+        Number(adminUser.id),
+        normalizedStatus,
+        requestId,
+      );
+
+      if (normalizedStatus === 'completed' && String(requestRow.request_type) === 'delete') {
+        const targetUserId = Number(requestRow.user_id);
+        const targetUserBeforeAnonymize = db.get('SELECT email, name FROM users WHERE id = ?', targetUserId) as any;
+        db.run(
+          `UPDATE users
+           SET name = CONCAT('Usuario ', id), email = CONCAT('anon+', id, '@anon.local'),
+               phone = NULL, cpf = NULL, first_name = NULL, last_name = NULL,
+               avatar_url = NULL, status = 'inactive', anonymized_at = CURRENT_TIMESTAMP, deleted_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          targetUserId,
+        );
+        db.run('UPDATE customers SET phone = NULL, cpf = NULL, address = NULL, city = NULL, state = NULL, zip = NULL, country = NULL, billing_address = NULL, billing_city = NULL, billing_state = NULL, billing_zip = NULL, billing_country = NULL, shipping_address = NULL, shipping_city = NULL, shipping_state = NULL, shipping_zip = NULL, shipping_country = NULL WHERE user_id = ?', targetUserId);
+        db.run('DELETE FROM favorites WHERE user_id = ?', targetUserId);
+        db.run('UPDATE lgpd_consents SET granted = 0, revoked_at = CURRENT_TIMESTAMP WHERE user_id = ?', targetUserId);
+        db.run('DELETE FROM download_tokens WHERE user_id = ?', targetUserId);
+        db.run('DELETE FROM email_verification_tokens WHERE user_id = ?', targetUserId);
+        db.run('DELETE FROM password_reset_tokens WHERE user_id = ?', targetUserId);
+        db.run('DELETE FROM login_attempts WHERE email = ?', String(targetUserBeforeAnonymize?.email || ''));
+
+        if (targetUserBeforeAnonymize?.email) {
+          sendEmail({
+            to: targetUserBeforeAnonymize.email,
+            templateKey: 'lgpd_deletion_completed',
+            variables: { name: targetUserBeforeAnonymize.name || 'Cliente' },
+          }).catch((err) => console.error('LGPD deletion email error:', err));
+        }
+      }
+
+      if (normalizedStatus === 'completed' && String(requestRow.request_type) === 'export' && targetUser?.email) {
+        const settings = loadSettingsMap(['app_url', 'lgpd_export_ttl_hours']);
+        const appUrl = String(settings.app_url || process.env.APP_URL || 'https://digitalbordados.com.br').replace(/\/$/, '');
+        const downloadUrl = `${appUrl}/minha-conta/privacidade`;
+        const expiresIn = String(settings.lgpd_export_ttl_hours || '24');
+        sendEmail({
+          to: targetUser.email,
+          templateKey: 'lgpd_export_ready',
+          variables: {
+            name: targetUser.name || 'Cliente',
+            download_url: downloadUrl,
+            expires_in: expiresIn,
+          },
+        }).catch((err) => console.error('LGPD export-ready email error:', err));
+      }
+
+      logLgpdEvent({
+        req,
+        userId: Number(requestRow.user_id),
+        actorUserId: Number(adminUser.id),
+        eventType: 'request',
+        action: 'request_status_changed',
+        details: { request_id: requestId, status: normalizedStatus },
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Update request status error:', error);
+      res.status(500).json({ error: 'Erro ao atualizar solicitacao LGPD' });
+    }
+  });
+
+  app.get('/api/admin/lgpd/logs', authenticate, isAdmin, (req, res) => {
+    try {
+      const page = Math.max(1, Number(req.query.page || 1));
+      const limit = Math.min(1000, Math.max(20, Number(req.query.limit || 200)));
+      const offset = (page - 1) * limit;
+      const where: string[] = [];
+      const params: any[] = [];
+      const eventType = String(req.query.event_type || '').trim().toLowerCase();
+      const action = String(req.query.action || '').trim().toLowerCase();
+      const q = String(req.query.q || '').trim();
+      const ip = String(req.query.ip || '').trim();
+      const from = normalizeDateFilter(req.query.from, false);
+      const to = normalizeDateFilter(req.query.to, true);
+      const userId = Number(req.query.user_id || 0);
+      const actorUserId = Number(req.query.actor_user_id || 0);
+
+      if (eventType) {
+        where.push('LOWER(l.event_type) = ?');
+        params.push(eventType);
+      }
+      if (action) {
+        where.push('LOWER(l.action) = ?');
+        params.push(action);
+      }
+      if (q) {
+        where.push('(u.name LIKE ? OR u.email LIKE ? OR a.name LIKE ?)');
+        params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+      }
+      if (ip) {
+        where.push('l.ip LIKE ?');
+        params.push(`%${ip}%`);
+      }
+      if (Number.isFinite(userId) && userId > 0) {
+        where.push('l.user_id = ?');
+        params.push(userId);
+      }
+      if (Number.isFinite(actorUserId) && actorUserId > 0) {
+        where.push('l.actor_user_id = ?');
+        params.push(actorUserId);
+      }
+      if (from) {
+        where.push('l.created_at >= ?');
+        params.push(from);
+      }
+      if (to) {
+        where.push('l.created_at <= ?');
+        params.push(to);
+      }
+      const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      const countRow = db.get(
+        `SELECT COUNT(*) AS total
+         FROM lgpd_logs l
+         LEFT JOIN users u ON u.id = l.user_id
+         LEFT JOIN users a ON a.id = l.actor_user_id
+         ${whereClause}`,
+        ...params,
+      ) as any;
+      const total = Number(countRow?.total || 0);
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const rows = db.all(
+        `SELECT l.*, u.name AS user_name, u.email AS user_email, a.name AS actor_name
+         FROM lgpd_logs l
+         LEFT JOIN users u ON u.id = l.user_id
+         LEFT JOIN users a ON a.id = l.actor_user_id
+         ${whereClause}
+         ORDER BY l.created_at DESC
+         LIMIT ? OFFSET ?`,
+        ...params,
+        limit,
+        offset,
+      );
+      if (parseBooleanSetting(req.query.flat, false)) {
+        return res.json(rows);
+      }
+      return res.json({
+        data: rows,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasPrev: page > 1,
+          hasNext: page < totalPages,
+        },
+      });
+    } catch (error) {
+      console.error('Admin LGPD logs error:', error);
+      res.status(500).json({ error: 'Erro ao carregar logs LGPD' });
+    }
+  });
+
   // ROTA DE DESENVOLVIMENTO: Simular pagamento aprovado
   app.post('/api/dev/approve-order/:id', authenticate, (req, res) => {
     const orderId = req.params.id;
@@ -2698,7 +4172,7 @@ async function startServer() {
     const normalizedName = typeof name === 'string' ? name.trim() : '';
 
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome da tag Ã© obrigatÃ³rio' });
+      return res.status(400).json({ error: 'Nome da tag ÃƒÂ© obrigatÃƒÂ³rio' });
     }
 
     const safeName = normalizedName.slice(0, 255);
@@ -2753,11 +4227,11 @@ async function startServer() {
 
     const orderTotal = Number(total);
     if (!Number.isFinite(orderTotal) || orderTotal < 0) {
-      return res.status(400).json({ error: 'total inválido' });
+      return res.status(400).json({ error: 'total invÃ¡lido' });
     }
 
     if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'items é obrigatório e deve conter ao menos 1 item' });
+      return res.status(400).json({ error: 'items Ã© obrigatÃ³rio e deve conter ao menos 1 item' });
     }
 
     let normalizedItems: Array<{
@@ -2798,12 +4272,12 @@ async function startServer() {
       if (typeof error?.message === 'string' && error.message.startsWith('item_')) {
         return res.status(400).json({ error: error.message });
       }
-      return res.status(400).json({ error: 'items inválidos' });
+      return res.status(400).json({ error: 'items invÃ¡lidos' });
     }
 
     const rawUserId = user_id === null || user_id === undefined || user_id === '' ? null : Number(user_id);
     if (rawUserId !== null && (!Number.isInteger(rawUserId) || rawUserId <= 0)) {
-      return res.status(400).json({ error: 'user_id inválido' });
+      return res.status(400).json({ error: 'user_id invÃ¡lido' });
     }
 
     try {
@@ -2890,7 +4364,7 @@ async function startServer() {
         WHERE o.id = ?
       `, req.params.id) as any;
 
-      if (!order) return res.status(404).json({ error: 'Pedido nÃ£o encontrado' });
+      if (!order) return res.status(404).json({ error: 'Pedido nÃƒÂ£o encontrado' });
 
       const items = db.all(`
         SELECT oi.*, p.name 
@@ -2943,7 +4417,7 @@ async function startServer() {
       res.json(users);
     } catch (error) {
       console.error('Admin Fetch Users Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar usuÃ¡rios' });
+      res.status(500).json({ error: 'Erro ao buscar usuÃƒÂ¡rios' });
     }
   });
 
@@ -2972,12 +4446,12 @@ async function startServer() {
     const normalizedStatus = typeof status === 'string' && status.trim() ? status.trim() : 'ativo';
 
     if (!normalizedName || !normalizedEmail || !password) {
-      return res.status(400).json({ error: 'Nome, e-mail e senha sÃ£o obrigatÃ³rios' });
+      return res.status(400).json({ error: 'Nome, e-mail e senha sÃƒÂ£o obrigatÃƒÂ³rios' });
     }
 
     const existingUser = db.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
     if (existingUser) {
-      return res.status(409).json({ error: 'E-mail jÃ¡ cadastrado' });
+      return res.status(409).json({ error: 'E-mail jÃƒÂ¡ cadastrado' });
     }
 
     const hashedPassword = await hashPassword(String(password));
@@ -3053,10 +4527,10 @@ async function startServer() {
       return res.status(201).json(createdUser);
     } catch (error: any) {
       if (error?.message?.includes('Duplicate entry') || error?.code === 'ER_DUP_ENTRY') {
-        return res.status(409).json({ error: 'E-mail jÃ¡ cadastrado' });
+        return res.status(409).json({ error: 'E-mail jÃƒÂ¡ cadastrado' });
       }
       console.error('Admin Create User Error:', error);
-      return res.status(500).json({ error: 'Erro ao cadastrar usuÃ¡rio' });
+      return res.status(500).json({ error: 'Erro ao cadastrar usuÃƒÂ¡rio' });
     }
   });
 
@@ -3086,7 +4560,7 @@ async function startServer() {
     const normalizedStatus = typeof status === 'string' && status.trim() ? status.trim() : 'ativo';
 
     if (!normalizedName || !normalizedEmail || !password) {
-      return res.status(400).json({ error: 'name, email e password são obrigatórios' });
+      return res.status(400).json({ error: 'name, email e password sÃ£o obrigatÃ³rios' });
     }
 
     const existingUser = db.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
@@ -3159,14 +4633,14 @@ async function startServer() {
         return res.status(409).json({ error: 'already_exists', id: duplicate ? Number(duplicate.id) : null });
       }
       console.error('Admin Import User Error:', error);
-      return res.status(500).json({ error: 'Erro ao importar usuário' });
+      return res.status(500).json({ error: 'Erro ao importar usuÃ¡rio' });
     }
   });
 
   const adminUpdateUserHandler = async (req: express.Request, res: express.Response) => {
     const userId = Number(req.params.id);
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: 'ID de usuário inválido' });
+      return res.status(400).json({ error: 'ID de usuÃ¡rio invÃ¡lido' });
     }
 
     const {
@@ -3194,17 +4668,17 @@ async function startServer() {
     const normalizedPassword = typeof password === 'string' ? password.trim() : '';
 
     if (!normalizedName || !normalizedEmail) {
-      return res.status(400).json({ error: 'Nome e e-mail são obrigatórios' });
+      return res.status(400).json({ error: 'Nome e e-mail sÃ£o obrigatÃ³rios' });
     }
 
     const existingUser = db.get('SELECT id FROM users WHERE id = ?', userId) as any;
     if (!existingUser) {
-      return res.status(404).json({ error: 'Usuário não encontrado' });
+      return res.status(404).json({ error: 'UsuÃ¡rio nÃ£o encontrado' });
     }
 
     const duplicateEmail = db.get('SELECT id FROM users WHERE email = ? AND id <> ?', normalizedEmail, userId) as any;
     if (duplicateEmail) {
-      return res.status(409).json({ error: 'E-mail já cadastrado' });
+      return res.status(409).json({ error: 'E-mail jÃ¡ cadastrado' });
     }
 
     try {
@@ -3322,7 +4796,7 @@ async function startServer() {
       return res.json(updatedUser);
     } catch (error) {
       console.error('Admin Update User Error:', error);
-      return res.status(500).json({ error: 'Erro ao atualizar usuário' });
+      return res.status(500).json({ error: 'Erro ao atualizar usuÃ¡rio' });
     }
   };
 
@@ -3336,7 +4810,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Admin Update User Role Error:', error);
-      res.status(500).json({ error: 'Erro ao atualizar cargo do usuÃ¡rio' });
+      res.status(500).json({ error: 'Erro ao atualizar cargo do usuÃƒÂ¡rio' });
     }
   });
 
@@ -3344,13 +4818,13 @@ async function startServer() {
     try {
       // Don't allow deleting self
       if (req.params.id === (req as any).user.id.toString()) {
-        return res.status(400).json({ error: 'VocÃª nÃ£o pode excluir a si mesmo' });
+        return res.status(400).json({ error: 'VocÃƒÂª nÃƒÂ£o pode excluir a si mesmo' });
       }
       db.run('DELETE FROM users WHERE id = ?', req.params.id);
       res.json({ success: true });
     } catch (error) {
       console.error('Admin Delete User Error:', error);
-      res.status(500).json({ error: 'Erro ao excluir usuÃ¡rio' });
+      res.status(500).json({ error: 'Erro ao excluir usuÃƒÂ¡rio' });
     }
   });
   
@@ -3362,7 +4836,7 @@ async function startServer() {
       res.json(settings);
     } catch (error) {
       console.error('Fetch Settings Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar configuraÃ§Ãµes' });
+      res.status(500).json({ error: 'Erro ao buscar configuraÃƒÂ§ÃƒÂµes' });
     }
   });
 
@@ -3383,7 +4857,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Update Settings Error:', error);
-      res.status(500).json({ error: 'Erro ao atualizar configurações' });
+      res.status(500).json({ error: 'Erro ao atualizar configuraÃ§Ãµes' });
     }
   });
 
@@ -3399,7 +4873,7 @@ async function startServer() {
       ).trim();
 
       if (!accessToken) {
-        return res.status(400).json({ connected: false, error: 'Access Token não informado.' });
+        return res.status(400).json({ connected: false, error: 'Access Token nÃ£o informado.' });
       }
 
       const testResult = await fetchMercadoPagoAccountInfo(accessToken);
@@ -3419,7 +4893,7 @@ async function startServer() {
       console.error('Mercado Pago test-connection error:', error);
       return res.status(500).json({
         connected: false,
-        error: 'Erro ao testar conexão com Mercado Pago.',
+        error: 'Erro ao testar conexÃ£o com Mercado Pago.',
       });
     }
   });
@@ -3438,7 +4912,7 @@ async function startServer() {
   app.get('/api/admin/email-templates/:key', authenticate, isAdmin, (req, res) => {
     try {
       const template = db.get('SELECT * FROM email_templates WHERE `key` = ?', req.params.key);
-      if (!template) return res.status(404).json({ error: 'Template não encontrado' });
+      if (!template) return res.status(404).json({ error: 'Template nÃ£o encontrado' });
       res.json(template);
     } catch (error) {
       console.error('Error fetching email template:', error);
@@ -3449,14 +4923,14 @@ async function startServer() {
   app.put('/api/admin/email-templates/:key', authenticate, isAdmin, (req, res) => {
     try {
       const { subject, body } = req.body;
-      if (!subject || !body) return res.status(400).json({ error: 'Subject e body são obrigatórios' });
+      if (!subject || !body) return res.status(400).json({ error: 'Subject e body sÃ£o obrigatÃ³rios' });
 
       const changes = db.run(
         'UPDATE email_templates SET subject = ?, body = ? WHERE `key` = ?',
         subject, body, req.params.key
       );
 
-      if (changes.changes === 0) return res.status(404).json({ error: 'Template não encontrado' });
+      if (changes.changes === 0) return res.status(404).json({ error: 'Template nÃ£o encontrado' });
       res.json({ success: true });
     } catch (error) {
       console.error('Error updating email template:', error);
@@ -3499,10 +4973,10 @@ async function startServer() {
   app.post('/api/admin/email/send-test', authenticate, isAdmin, async (req, res) => {
     try {
       const { to, template_key } = req.body;
-      if (!to || !template_key) return res.status(400).json({ error: 'Destinatário e template_key são obrigatórios' });
+      if (!to || !template_key) return res.status(400).json({ error: 'DestinatÃ¡rio e template_key sÃ£o obrigatÃ³rios' });
 
       const testVars = {
-        name: 'Usuário Teste',
+        name: 'UsuÃ¡rio Teste',
         email: to,
         login_url: 'https://digitalbordados.com.br/login',
         reset_url: 'https://digitalbordados.com.br/redefinir-senha?token=test',
@@ -3540,19 +5014,19 @@ async function startServer() {
         {
           key: 'user_welcome',
           name: 'Boas-vindas (Novo Cadastro)',
-          subject: 'Bem-vindo(a) à {{store_name}}! 🎉',
+          subject: 'Bem-vindo(a) Ã  {{store_name}}! ðŸŽ‰',
           variables: '["name", "email", "login_url"]',
           body: `<div style="font-family: sans-serif; max-w: 600px; margin: 0 auto; padding: 20px;">
   <div style="text-align: center; margin-bottom: 30px;">
     {{#if store_logo}}<img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 60px;">{{else}}<h2>{{store_name}}</h2>{{/if}}
   </div>
   <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-    <h1 style="color: #1e293b; margin-top: 0;">Olá, {{name}}!</h1>
-    <p style="color: #475569; font-size: 16px; line-height: 1.6;">Que alegria ter você conosco. Sua conta foi criada com sucesso e você já pode explorar todas as nossas matrizes de bordado.</p>
+    <h1 style="color: #1e293b; margin-top: 0;">OlÃ¡, {{name}}!</h1>
+    <p style="color: #475569; font-size: 16px; line-height: 1.6;">Que alegria ter vocÃª conosco. Sua conta foi criada com sucesso e vocÃª jÃ¡ pode explorar todas as nossas matrizes de bordado.</p>
     <div style="text-align: center; margin: 30px 0;">
       <a href="{{login_url}}" style="background-color: #3b82f6; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Acessar Minha Conta</a>
     </div>
-    <p style="color: #475569; font-size: 14px;">Seu e-mail de acesso é: <strong>{{email}}</strong></p>
+    <p style="color: #475569; font-size: 14px;">Seu e-mail de acesso Ã©: <strong>{{email}}</strong></p>
   </div>
 </div>`
         }
@@ -3589,7 +5063,7 @@ async function startServer() {
     if (cached) return res.json(cached);
 
     try {
-      // Período Atual (30 dias)
+      // PerÃ­odo Atual (30 dias)
       const currentStats = db.get(`
         SELECT 
           SUM(total) as totalSales,
@@ -3599,7 +5073,7 @@ async function startServer() {
           AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
       `) as any;
 
-      // Período Anterior (30-60 dias atrás) para cálculo de tendência
+      // PerÃ­odo Anterior (30-60 dias atrÃ¡s) para cÃ¡lculo de tendÃªncia
       const previousStats = db.get(`
         SELECT 
           SUM(total) as totalSales,
@@ -3619,7 +5093,7 @@ async function startServer() {
         AND created_at < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
       `) as any;
 
-      // Funções de cálculo de tendência
+      // FunÃ§Ãµes de cÃ¡lculo de tendÃªncia
       const calcTrend = (curr: number, prev: number) => {
         if (!prev || prev === 0) return curr > 0 ? '+100%' : '0%';
         const diff = ((curr - prev) / prev) * 100;
@@ -3703,7 +5177,7 @@ async function startServer() {
           AND created_at >= DATE_SUB(CURDATE(), ${interval})
       `) as any;
 
-      // Gráfico de Vendas
+      // GrÃ¡fico de Vendas
       const salesChart = db.all(`
         SELECT DATE_FORMAT(created_at, '${dateFormat}') as name, SUM(total) as value
         FROM orders 
@@ -3728,7 +5202,7 @@ async function startServer() {
         LIMIT 5
       `);
 
-      // Métodos de Pagamento
+      // MÃ©todos de Pagamento
       const paymentMethods = db.all(`
         SELECT payment_method as name, COUNT(*) as value
         FROM orders
@@ -3766,7 +5240,7 @@ async function startServer() {
       });
     } catch (error) {
       console.error('Reports Stats Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar dados dos relatórios' });
+      res.status(500).json({ error: 'Erro ao buscar dados dos relatÃ³rios' });
     }
   });
 
@@ -3776,13 +5250,13 @@ async function startServer() {
       const cached = apiCache.get('public_settings');
       if (cached) return res.json(cached);
 
-      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "brand_logos", "facebook_url", "instagram_url", "youtube_url")') as any[];
+      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "brand_logos", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);
     } catch (error) {
       console.error('Fetch Public Settings Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar configuraÃ§Ãµes' });
+      res.status(500).json({ error: 'Erro ao buscar configuraÃƒÂ§ÃƒÂµes' });
     }
   });
 
@@ -4074,12 +5548,12 @@ async function startServer() {
     }
   });
 
-  // ─── Reviews ────────────────────────────────────────────────────────────────
+  // â”€â”€â”€ Reviews â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   app.get('/api/products/:slug/reviews', (req, res) => {
     try {
       const { slug } = req.params;
       const product = db.get('SELECT id FROM products WHERE slug = ?', slug) as any;
-      if (!product) return res.status(404).json({ error: 'Produto não encontrado' });
+      if (!product) return res.status(404).json({ error: 'Produto nÃ£o encontrado' });
 
       const reviews = db.all(`
         SELECT r.*, u.name as user_name 
@@ -4094,7 +5568,7 @@ async function startServer() {
       res.json({ reviews, avgRating: stats?.avgRating || 0 });
     } catch (error) {
       console.error('Fetch reviews error:', error);
-      res.status(500).json({ error: 'Erro ao buscar avaliações' });
+      res.status(500).json({ error: 'Erro ao buscar avaliaÃ§Ãµes' });
     }
   });
 
@@ -4105,11 +5579,11 @@ async function startServer() {
       const user = (req as any).user;
 
       if (!rating || !comment) {
-        return res.status(400).json({ error: 'Nota e comentário são obrigatórios' });
+        return res.status(400).json({ error: 'Nota e comentÃ¡rio sÃ£o obrigatÃ³rios' });
       }
 
       const product = db.get('SELECT id FROM products WHERE slug = ?', slug) as any;
-      if (!product) return res.status(404).json({ error: 'Produto não encontrado' });
+      if (!product) return res.status(404).json({ error: 'Produto nÃ£o encontrado' });
 
       db.run(`
         INSERT INTO reviews (user_id, product_id, rating, comment, status) 
@@ -4119,13 +5593,13 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Submit review error:', error);
-      res.status(500).json({ error: 'Erro ao enviar avaliação' });
+      res.status(500).json({ error: 'Erro ao enviar avaliaÃ§Ã£o' });
     }
   });
 
 
 
-  // ─── PayPal Utilities ────────────────────────────────────────────────────────
+  // â”€â”€â”€ PayPal Utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   function getPayPalConfig() {
     const s = loadSettingsMap([
@@ -4170,7 +5644,7 @@ async function startServer() {
     return Math.round((totalBrl / rate) * 100) / 100;
   }
 
-  // ─── PayPal Endpoints ────────────────────────────────────────────────────────
+  // â”€â”€â”€ PayPal Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // POST /api/paypal/create-order
   app.post('/api/paypal/create-order', authenticate, async (req, res) => {
@@ -4185,14 +5659,44 @@ async function startServer() {
         return res.status(403).json({ error: 'Confirme seu e-mail para finalizar compras.', code: 'EMAIL_NOT_VERIFIED' });
       }
 
-      const { items } = req.body || {};
+      const { items, checkout_data_processing_accepted } = req.body || {};
       if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Carrinho vazio' });
       }
 
+      const lgpd = resolveLgpdSettings();
+      if (lgpd.enabled) {
+        const lgpdCompliance = ensureUserLgpdCompliance(Number(freshUser.id));
+        if (!lgpdCompliance.ok) {
+          return res.status(403).json({
+            error: 'Aceite as polÃ­ticas de privacidade e termos para concluir a compra.',
+            code: lgpdCompliance.code,
+            missing: lgpdCompliance.missing,
+          });
+        }
+
+        if (lgpd.requireCheckoutConsent && !parseBooleanSetting(checkout_data_processing_accepted, false)) {
+          return res.status(403).json({
+            error: 'Ã‰ necessÃ¡rio consentir com o processamento de dados para finalizar a compra.',
+            code: 'LGPD_CHECKOUT_CONSENT_REQUIRED',
+          });
+        }
+
+        if (parseBooleanSetting(checkout_data_processing_accepted, false)) {
+          upsertUserConsent({
+            userId: Number(freshUser.id),
+            consentKey: 'checkout_data_processing',
+            granted: true,
+            source: 'checkout_paypal',
+            policyVersion: lgpd.policyVersionPrivacy,
+            req,
+          });
+        }
+      }
+
       const cfg = getPayPalConfig();
-      if (!cfg.enabled) return res.status(400).json({ error: 'PayPal não está habilitado' });
-      if (!cfg.clientId || !cfg.clientSecret) return res.status(400).json({ error: 'Credenciais PayPal não configuradas' });
+      if (!cfg.enabled) return res.status(400).json({ error: 'PayPal nÃ£o estÃ¡ habilitado' });
+      if (!cfg.clientId || !cfg.clientSecret) return res.status(400).json({ error: 'Credenciais PayPal nÃ£o configuradas' });
 
       // Validate products and calculate total in BRL
       let totalBrl = 0;
@@ -4200,7 +5704,7 @@ async function startServer() {
       for (const item of items) {
         const product = db.get('SELECT id, name, price, sale_price, status FROM products WHERE id = ?', item.product_id) as any;
         if (!product || product.status !== 'active') {
-          return res.status(400).json({ error: `Produto ID ${item.product_id} não encontrado ou inativo` });
+          return res.status(400).json({ error: `Produto ID ${item.product_id} nÃ£o encontrado ou inativo` });
         }
         const price = product.sale_price || product.price;
         totalBrl += price;
@@ -4279,7 +5783,7 @@ async function startServer() {
     try {
       const user = (req as any).user;
       const { paypal_order_id } = req.body || {};
-      if (!paypal_order_id) return res.status(400).json({ error: 'paypal_order_id é obrigatório' });
+      if (!paypal_order_id) return res.status(400).json({ error: 'paypal_order_id Ã© obrigatÃ³rio' });
 
       const order = db.get('SELECT * FROM orders WHERE paypal_order_id = ?', paypal_order_id) as any;
       if (!order) return res.status(404).json({ error: 'Pedido nao encontrado' });
@@ -4314,7 +5818,7 @@ async function startServer() {
         db.run("UPDATE orders SET paypal_status = ? WHERE id = ?", captureStatus, order.id);
         db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
           'paypal', order.id, captureId || paypal_order_id, captureStatus, `Captura com status: ${captureStatus}`);
-        return res.status(400).json({ success: false, status: captureStatus, error: 'Pagamento não foi completado' });
+        return res.status(400).json({ success: false, status: captureStatus, error: 'Pagamento nÃ£o foi completado' });
       }
     } catch (error: any) {
       console.error('PayPal capture-order error:', error?.response?.data || error?.message || error);
@@ -4322,7 +5826,7 @@ async function startServer() {
     }
   });
 
-  // POST /api/webhooks/paypal (público)
+  // POST /api/webhooks/paypal (pÃºblico)
   app.post('/api/webhooks/paypal', async (req, res) => {
     try {
       const payload = req.body || {};
@@ -4379,17 +5883,17 @@ async function startServer() {
     try {
       const cfg = getPayPalConfig();
       if (!cfg.clientId || !cfg.clientSecret) {
-        return res.status(400).json({ ok: false, error: 'Credenciais PayPal não configuradas no painel' });
+        return res.status(400).json({ ok: false, error: 'Credenciais PayPal nÃ£o configuradas no painel' });
       }
       const baseUrl = getPayPalBaseUrl(cfg.mode);
       const token = await getPayPalAccessToken(cfg.clientId, cfg.clientSecret, baseUrl);
       if (token) {
-        return res.json({ ok: true, mode: cfg.mode, message: `Conexão PayPal (${cfg.mode}) estabelecida com sucesso!` });
+        return res.json({ ok: true, mode: cfg.mode, message: `ConexÃ£o PayPal (${cfg.mode}) estabelecida com sucesso!` });
       }
-      return res.status(400).json({ ok: false, error: 'Não foi possível obter access token' });
+      return res.status(400).json({ ok: false, error: 'NÃ£o foi possÃ­vel obter access token' });
     } catch (error: any) {
       console.error('PayPal test error:', error?.response?.data || error?.message);
-      return res.status(400).json({ ok: false, error: error?.response?.data?.error_description || error?.message || 'Falha na conexão PayPal' });
+      return res.status(400).json({ ok: false, error: error?.response?.data?.error_description || error?.message || 'Falha na conexÃ£o PayPal' });
     }
   });
 
@@ -4404,7 +5908,7 @@ async function startServer() {
     }
   });
 
-  // GET /api/checkout/paypal/config (público - retorna apenas client_id e modo)
+  // GET /api/checkout/paypal/config (pÃºblico - retorna apenas client_id e modo)
   app.get('/api/checkout/paypal/config', (req, res) => {
     try {
       const cfg = getPayPalConfig();
@@ -4471,8 +5975,8 @@ async function startServer() {
               name: order.customer_name || 'Cliente',
               order_id: order.id,
               order_total: `R$ ${order.total.toFixed(2)}`,
-              pix_code: 'O código PIX foi enviado no momento do checkout. Acesse sua conta para ver os detalhes.',
-              expires_at: '24 horas após a compra',
+              pix_code: 'O cÃ³digo PIX foi enviado no momento do checkout. Acesse sua conta para ver os detalhes.',
+              expires_at: '24 horas apÃ³s a compra',
             }
           }).catch(err => console.error(`[Cron] Failed to send reminder for order #${order.id}:`, err));
         }
@@ -4510,6 +6014,7 @@ export default async (req: any, res: any) => {
   const app = await appPromise;
   return app(req, res);
 };
+
 
 
 

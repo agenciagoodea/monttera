@@ -4,6 +4,7 @@ import { Trash2, ShoppingBag, ChevronLeft, Copy, CreditCard } from 'lucide-react
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
+import { useAppData } from '../contexts/AppDataContext';
 
 type CheckoutMethod = 'pix' | 'credit_card' | 'debit_card' | 'paypal';
 
@@ -56,6 +57,7 @@ function formatSeconds(totalSeconds: number) {
 export default function CartPage() {
   const { items, removeFromCart, totalPrice, totalItems, clearCart } = useCart();
   const { user } = useAuth();
+  const { settings } = useAppData();
   const navigate = useNavigate();
 
   const [checkoutMethod, setCheckoutMethod] = useState<CheckoutMethod>('pix');
@@ -80,6 +82,7 @@ export default function CartPage() {
   const [pixExpiresAt, setPixExpiresAt] = useState<number | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(30 * 60);
   const [statusMessage, setStatusMessage] = useState('');
+  const [checkoutConsent, setCheckoutConsent] = useState(false);
   const [payerErrors, setPayerErrors] = useState<string[]>([]);
   const [payerTouched, setPayerTouched] = useState<Record<string, boolean>>({
     first_name: false,
@@ -99,6 +102,10 @@ export default function CartPage() {
   const canSubmitPayer = useMemo(() => {
     return payerErrors.length === 0;
   }, [payerErrors]);
+
+  const requireCheckoutConsent =
+    String(settings.lgpd_enabled || 'true') === 'true' &&
+    String(settings.lgpd_require_checkout_consent || 'true') === 'true';
 
   useEffect(() => {
     const errors: string[] = [];
@@ -245,6 +252,7 @@ export default function CartPage() {
               body: JSON.stringify({
                 items,
                 payment_method: checkoutMethod,
+                checkout_data_processing_accepted: checkoutConsent,
                 payer: {
                   email: cardPayerEmail,
                   first_name: firstName || payer.first_name,
@@ -333,6 +341,7 @@ export default function CartPage() {
         body: JSON.stringify({
           items,
           payment_method: 'pix',
+          checkout_data_processing_accepted: checkoutConsent,
           payer,
         }),
       });
@@ -362,7 +371,10 @@ export default function CartPage() {
       const res = await fetch('/api/paypal/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items }),
+        body: JSON.stringify({
+          items,
+          checkout_data_processing_accepted: checkoutConsent,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.approval_url) {
@@ -624,15 +636,39 @@ export default function CartPage() {
             </div>
 
             {checkoutMethod === 'pix' ? (
-              <button
-                onClick={handlePixCheckout}
-                disabled={loadingCheckout || !canSubmitPayer}
-                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50"
-              >
-                {loadingCheckout ? 'Gerando PIX...' : 'Gerar PIX'}
-              </button>
+              <>
+                {requireCheckoutConsent && (
+                  <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={checkoutConsent}
+                      onChange={(e) => setCheckoutConsent(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>Autorizo o processamento dos meus dados para concluir esta compra.</span>
+                  </label>
+                )}
+                <button
+                  onClick={handlePixCheckout}
+                  disabled={loadingCheckout || !canSubmitPayer || (requireCheckoutConsent && !checkoutConsent)}
+                  className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50"
+                >
+                  {loadingCheckout ? 'Gerando PIX...' : 'Gerar PIX'}
+                </button>
+              </>
             ) : checkoutMethod === 'paypal' ? (
               <div className="space-y-4">
+                {requireCheckoutConsent && (
+                  <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={checkoutConsent}
+                      onChange={(e) => setCheckoutConsent(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>Autorizo o processamento dos meus dados para concluir esta compra.</span>
+                  </label>
+                )}
                 <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 text-sm text-blue-800 font-medium">
                   🌐 <strong>Pagamento internacional em dólar (USD).</strong><br />
                   O valor será convertido pela cotação configurada pela loja.
@@ -653,7 +689,7 @@ export default function CartPage() {
                 </div>
                 <button
                   onClick={handlePayPalCheckout}
-                  disabled={loadingCheckout}
+                  disabled={loadingCheckout || (requireCheckoutConsent && !checkoutConsent)}
                   className="w-full bg-[#0070ba] hover:bg-[#005ea6] text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 transition-colors"
                 >
                   {loadingCheckout ? 'Redirecionando...' : '🅿 Pagar com PayPal →'}
@@ -661,6 +697,17 @@ export default function CartPage() {
               </div>
             ) : (
               <form id="form-checkout" className="space-y-3">
+                {requireCheckoutConsent && (
+                  <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={checkoutConsent}
+                      onChange={(e) => setCheckoutConsent(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>Autorizo o processamento dos meus dados para concluir esta compra.</span>
+                  </label>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1 col-span-2">
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Número do Cartão</label>
@@ -701,7 +748,7 @@ export default function CartPage() {
                     <input id="form-checkout__email" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
                   </div>
                 </div>
-                <button type="submit" disabled={loadingCheckout || !canSubmitPayer} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 inline-flex items-center justify-center gap-2">
+                <button type="submit" disabled={loadingCheckout || !canSubmitPayer || (requireCheckoutConsent && !checkoutConsent)} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 inline-flex items-center justify-center gap-2">
                   <CreditCard className="w-4 h-4" />
                   {loadingCheckout ? 'Processando...' : checkoutMethod === 'debit_card' ? 'Pagar com débito' : 'Pagar com cartão'}
                 </button>

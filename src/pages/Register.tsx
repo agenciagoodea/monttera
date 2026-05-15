@@ -2,23 +2,58 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { User, Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react';
+import { useAppData } from '../contexts/AppDataContext';
 
 export default function Register() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [cookieAccepted, setCookieAccepted] = useState(false);
+  const [marketingAccepted, setMarketingAccepted] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
+  const { settings } = useAppData();
   const navigate = useNavigate();
+
+  const requireConsent = String(settings.lgpd_enabled || 'true') === 'true' && String(settings.lgpd_require_consent_register || 'true') === 'true';
+  const requireTerms = requireConsent && String(settings.lgpd_require_terms_acceptance || 'true') === 'true';
+  const requireCookies = requireConsent && String(settings.lgpd_require_cookie_consent || 'true') === 'true';
+  const privacyUrl = settings.lgpd_privacy_url || '/politica';
+  const termsUrl = settings.lgpd_terms_url || '/politica';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (requireConsent) {
+      if (requireTerms && !termsAccepted) {
+        setError('Você precisa aceitar os Termos de Uso para continuar.');
+        return;
+      }
+      if (!privacyAccepted) {
+        setError('Você precisa aceitar a Política de Privacidade para continuar.');
+        return;
+      }
+      if (requireCookies && !cookieAccepted) {
+        setError('Você precisa aceitar a Política de Cookies para continuar.');
+        return;
+      }
+    }
     setLoading(true);
     try {
-      await register({ firstName, lastName, email, password });
+      await register({
+        firstName,
+        lastName,
+        email,
+        password,
+        terms_accepted: termsAccepted,
+        privacy_accepted: privacyAccepted,
+        cookie_accepted: cookieAccepted,
+        marketing_accepted: marketingAccepted,
+      });
       navigate('/minha-conta');
     } catch (err: any) {
       setError(err.message || 'Erro ao criar conta');
@@ -107,6 +142,52 @@ export default function Register() {
             </div>
 
             <div className="pt-4">
+              {requireConsent && (
+                <div className="mb-5 space-y-2 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                  <label className="flex items-start gap-2 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={termsAccepted}
+                      onChange={(e) => setTermsAccepted(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      Li e concordo com os <a href={termsUrl} className="text-blue-600 underline">Termos de Uso</a>.
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={privacyAccepted}
+                      onChange={(e) => setPrivacyAccepted(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      Li e concordo com a <a href={privacyUrl} className="text-blue-600 underline">Política de Privacidade</a>.
+                    </span>
+                  </label>
+                  {requireCookies && (
+                    <label className="flex items-start gap-2 text-xs font-semibold text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={cookieAccepted}
+                        onChange={(e) => setCookieAccepted(e.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>Aceito a Política de Cookies.</span>
+                    </label>
+                  )}
+                  <label className="flex items-start gap-2 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={marketingAccepted}
+                      onChange={(e) => setMarketingAccepted(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>Aceito receber ofertas e comunicações.</span>
+                  </label>
+                </div>
+              )}
               <button
                 type="submit"
                 disabled={loading}

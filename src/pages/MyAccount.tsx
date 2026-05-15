@@ -17,6 +17,8 @@ import {
   FileText,
   CheckCircle2,
   Loader2,
+  ShieldCheck,
+  FileWarning,
 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,7 +26,7 @@ import { useAppData } from '../contexts/AppDataContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { formatCurrency } from '../lib/utils';
 
-type AccountTab = 'dashboard' | 'orders' | 'downloads' | 'address' | 'profile' | 'wishlist';
+type AccountTab = 'dashboard' | 'orders' | 'downloads' | 'address' | 'profile' | 'wishlist' | 'privacy';
 
 type AddressForm = {
   address: string;
@@ -88,6 +90,31 @@ type FavoriteItem = {
   sale_price?: number | null;
 };
 
+type PrivacyData = {
+  settings: Record<string, any>;
+  consents: Array<{
+    id: number;
+    consent_key: string;
+    granted: number;
+    source: string | null;
+    policy_version: string | null;
+    updated_at: string;
+  }>;
+  policy_acceptances: Array<{
+    id: number;
+    policy_type: string;
+    policy_version: string;
+    accepted_at: string;
+  }>;
+  requests: Array<{
+    id: number;
+    request_type: string;
+    status: string;
+    notes: string | null;
+    created_at: string;
+  }>;
+};
+
 type AccountUser = {
   id: number;
   name: string;
@@ -148,6 +175,11 @@ export default function MyAccount() {
   const [passwordMessage, setPasswordMessage] = useState<string>('');
   const [addressMessage, setAddressMessage] = useState<string>('');
   const [accountMessage, setAccountMessage] = useState<string>('');
+  const [privacyData, setPrivacyData] = useState<PrivacyData | null>(null);
+  const [privacyLoading, setPrivacyLoading] = useState(false);
+  const [privacyMessage, setPrivacyMessage] = useState('');
+  const [privacyRequestType, setPrivacyRequestType] = useState<'export' | 'delete' | 'correction' | 'revoke'>('export');
+  const [privacyRequestNotes, setPrivacyRequestNotes] = useState('');
 
   const [profileForm, setProfileForm] = useState({
     first_name: '',
@@ -194,6 +226,7 @@ export default function MyAccount() {
     if (location.pathname.endsWith('/enderecos')) return setActiveTab('address');
     if (location.pathname.endsWith('/perfil')) return setActiveTab('profile');
     if (location.pathname.endsWith('/lista-de-desejos')) return setActiveTab('wishlist');
+    if (location.pathname.endsWith('/privacidade')) return setActiveTab('privacy');
     setActiveTab('dashboard');
   }, [location.pathname]);
 
@@ -219,23 +252,25 @@ export default function MyAccount() {
           }
         };
 
-        const [accountRes, ordersRes, downloadsRes, favoritesRes] = await Promise.all([
+        const [accountRes, ordersRes, downloadsRes, favoritesRes, privacyRes] = await Promise.all([
           fetch('/api/customer/account'),
           fetch('/api/customer/orders'),
           fetch('/api/customer/downloads'),
           fetch('/api/favorites'),
+          fetch('/api/customer/privacy'),
         ]);
 
-        if ([accountRes, ordersRes, downloadsRes, favoritesRes].some((r) => r.status === 401)) {
+        if ([accountRes, ordersRes, downloadsRes, favoritesRes, privacyRes].some((r) => r.status === 401)) {
           navigate('/login?redirect=/minha-conta');
           return;
         }
 
-        const [accountData, ordersData, downloadsData, favoritesData] = await Promise.all([
+        const [accountData, ordersData, downloadsData, favoritesData, privacyPayload] = await Promise.all([
           parseResponse(accountRes),
           parseResponse(ordersRes),
           parseResponse(downloadsRes),
           parseResponse(favoritesRes),
+          parseResponse(privacyRes),
         ]);
 
         if (!accountRes.ok || !ordersRes.ok || !favoritesRes.ok) {
@@ -251,6 +286,11 @@ export default function MyAccount() {
 
         const userData: AccountUser | null = accountData?.user || null;
         setAccountUser(userData);
+        const lgpdCompliance = accountData?.lgpd?.compliance;
+        if (lgpdCompliance && lgpdCompliance.ok === false) {
+          const missing = Array.isArray(lgpdCompliance.missing) ? lgpdCompliance.missing.join(', ') : 'políticas obrigatórias';
+          setAccountMessage(`Para continuar, revise e aceite os itens LGPD pendentes: ${missing}.`);
+        }
         setOrders(Array.isArray(ordersData) ? ordersData : []);
         if (downloadsRes.ok) {
           setDownloads(Array.isArray(downloadsData) ? downloadsData : []);
@@ -262,6 +302,11 @@ export default function MyAccount() {
           setAccountMessage(downloadError);
         }
         setFavorites(Array.isArray(favoritesData?.favorites) ? favoritesData.favorites : []);
+        if (privacyRes.ok) {
+          setPrivacyData(privacyPayload as PrivacyData);
+        } else {
+          setPrivacyData(null);
+        }
 
         if (userData) {
           setProfileForm({
@@ -326,6 +371,7 @@ export default function MyAccount() {
     { key: 'downloads', label: 'Matrizes Compradas', icon: Download },
     { key: 'address', label: 'Endereco', icon: MapPinHouse },
     { key: 'profile', label: 'Perfil', icon: UserRound },
+    { key: 'privacy', label: 'Privacidade e Dados', icon: ShieldCheck },
     { key: 'wishlist', label: 'Favoritos', icon: Heart },
     { key: 'logout', label: 'Sair', icon: LogOut },
   ];
@@ -359,6 +405,7 @@ export default function MyAccount() {
       downloads: '/minha-conta/downloads',
       address: '/minha-conta/enderecos',
       profile: '/minha-conta/perfil',
+      privacy: '/minha-conta/privacidade',
       wishlist: '/minha-conta/lista-de-desejos',
     };
     // Troca instantânea de estado sem aguardar a rota
@@ -565,6 +612,101 @@ export default function MyAccount() {
     }
   };
 
+  const reloadPrivacyData = async () => {
+    setPrivacyLoading(true);
+    try {
+      const res = await fetch('/api/customer/privacy');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPrivacyMessage(data?.error || 'Não foi possível atualizar os dados de privacidade.');
+        return;
+      }
+      setPrivacyData(data as PrivacyData);
+    } catch {
+      setPrivacyMessage('Erro ao atualizar dados de privacidade.');
+    } finally {
+      setPrivacyLoading(false);
+    }
+  };
+
+  const updateMarketingConsent = async (enabled: boolean) => {
+    setPrivacyLoading(true);
+    setPrivacyMessage('');
+    try {
+      const res = await fetch('/api/customer/privacy/consents', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ marketing_accepted: enabled }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPrivacyMessage(data?.error || 'Não foi possível atualizar o consentimento.');
+        return;
+      }
+      setPrivacyMessage('Preferências de consentimento atualizadas com sucesso.');
+      await reloadPrivacyData();
+    } catch {
+      setPrivacyMessage('Erro ao atualizar consentimento.');
+    } finally {
+      setPrivacyLoading(false);
+    }
+  };
+
+  const acceptRequiredPolicies = async () => {
+    setPrivacyLoading(true);
+    setPrivacyMessage('');
+    try {
+      const res = await fetch('/api/customer/privacy/consents', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          privacy_accepted: true,
+          terms_accepted: true,
+          cookie_accepted: true,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPrivacyMessage(data?.error || 'Não foi possível registrar os aceites de política.');
+        return;
+      }
+      setPrivacyMessage('Políticas aceitas com sucesso.');
+      setAccountMessage('');
+      await reloadPrivacyData();
+    } catch {
+      setPrivacyMessage('Erro ao registrar os aceites de política.');
+    } finally {
+      setPrivacyLoading(false);
+    }
+  };
+
+  const submitPrivacyRequest = async () => {
+    setPrivacyLoading(true);
+    setPrivacyMessage('');
+    try {
+      const res = await fetch('/api/customer/privacy/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request_type: privacyRequestType,
+          notes: privacyRequestNotes,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPrivacyMessage(data?.error || 'Não foi possível enviar a solicitação LGPD.');
+        return;
+      }
+      setPrivacyMessage('Solicitação LGPD enviada com sucesso.');
+      setPrivacyRequestNotes('');
+      await reloadPrivacyData();
+    } catch {
+      setPrivacyMessage('Erro ao enviar solicitação LGPD.');
+    } finally {
+      setPrivacyLoading(false);
+    }
+  };
+
   if (authLoading || loading) {
     return (
       <div className="max-w-[1280px] mx-auto px-4 md:px-10 py-16 flex items-center justify-center">
@@ -672,7 +814,16 @@ export default function MyAccount() {
         <section className="space-y-6">
           {accountMessage ? (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
-              {accountMessage}
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <span>{accountMessage}</span>
+                <button
+                  type="button"
+                  onClick={() => handleMenuClick('privacy')}
+                  className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-3 py-2 text-[11px] font-black uppercase tracking-wider text-white"
+                >
+                  Revisar privacidade
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -1024,6 +1175,154 @@ export default function MyAccount() {
                     {passwordMessage && <p className="text-xs font-bold text-slate-600">{passwordMessage}</p>}
                   </div>
                 </form>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'privacy' && (
+            <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 shadow-sm space-y-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black text-slate-900">Privacidade e Dados</h2>
+                  <p className="text-sm font-semibold text-slate-600 mt-1">
+                    Gerencie consentimentos, exporte seus dados e solicite exclusão/retificação conforme LGPD.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={reloadPrivacyData}
+                  className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-black uppercase tracking-wider"
+                >
+                  Atualizar
+                </button>
+              </div>
+
+              {privacyMessage && (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+                  {privacyMessage}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5 space-y-4">
+                  <h3 className="text-sm font-black uppercase tracking-wider text-slate-800">Consentimentos</h3>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={acceptRequiredPolicies}
+                      disabled={privacyLoading}
+                      className="px-4 py-2 rounded-xl bg-blue-600 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
+                    >
+                      Aceitar políticas obrigatórias
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {privacyData?.consents?.map((consent) => (
+                      <div key={consent.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-black text-slate-800">{consent.consent_key}</p>
+                            <p className="text-[11px] text-slate-500 font-semibold">Versão {consent.policy_version || '-'} • {consent.updated_at}</p>
+                          </div>
+                          <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${Number(consent.granted) ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                            {Number(consent.granted) ? 'Ativo' : 'Revogado'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                    {!privacyData?.consents?.length && (
+                      <p className="text-sm text-slate-500 font-semibold">Nenhum consentimento registrado ainda.</p>
+                    )}
+                  </div>
+                  <div className="pt-2 border-t border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const marketingConsent = privacyData?.consents?.find((c) => c.consent_key === 'marketing_communications');
+                        const next = !Boolean(Number(marketingConsent?.granted || 0));
+                        updateMarketingConsent(next);
+                      }}
+                      disabled={privacyLoading}
+                      className="px-4 py-2 rounded-xl bg-blue-600 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
+                    >
+                      Alternar permissões de marketing
+                    </button>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-black text-slate-800 mb-2">Histórico de aceite de políticas</p>
+                    {!privacyData?.policy_acceptances?.length ? (
+                      <p className="text-[11px] text-slate-500 font-semibold">Sem aceite registrado.</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {privacyData.policy_acceptances.slice(0, 5).map((acceptance) => (
+                          <p key={acceptance.id} className="text-[11px] text-slate-600 font-semibold">
+                            {acceptance.policy_type} v{acceptance.policy_version} • {acceptance.accepted_at}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5 space-y-4">
+                  <h3 className="text-sm font-black uppercase tracking-wider text-slate-800">Exportação e Solicitações</h3>
+                  <div className="flex flex-wrap gap-2">
+                    <a href="/api/customer/privacy/export?format=json" className="px-3 py-2 rounded-lg bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest">Exportar JSON</a>
+                    <a href="/api/customer/privacy/export?format=csv" className="px-3 py-2 rounded-lg bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest">Exportar CSV</a>
+                    <a href="/api/customer/privacy/export?format=pdf" className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest">Exportar PDF</a>
+                  </div>
+                  <div className="space-y-3">
+                    <select
+                      value={privacyRequestType}
+                      onChange={(e) => setPrivacyRequestType(e.target.value as any)}
+                      className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm font-semibold"
+                    >
+                      <option value="export">Solicitar exportação</option>
+                      <option value="delete">Solicitar exclusão de conta</option>
+                      <option value="correction">Solicitar correção de dados</option>
+                      <option value="revoke">Revogar consentimentos</option>
+                    </select>
+                    <textarea
+                      value={privacyRequestNotes}
+                      onChange={(e) => setPrivacyRequestNotes(e.target.value)}
+                      className="w-full rounded-xl bg-white border border-slate-200 px-3 py-2.5 text-sm font-semibold min-h-[90px]"
+                      placeholder="Descreva os detalhes da sua solicitação..."
+                    />
+                    <button
+                      type="button"
+                      onClick={submitPrivacyRequest}
+                      disabled={privacyLoading}
+                      className="px-4 py-2 rounded-xl bg-rose-600 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
+                    >
+                      Enviar solicitação
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-5">
+                <h3 className="text-sm font-black uppercase tracking-wider text-slate-800 mb-3">Histórico de solicitações LGPD</h3>
+                {!privacyData?.requests?.length ? (
+                  <p className="text-sm text-slate-500 font-semibold">Você ainda não possui solicitações LGPD.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {privacyData.requests.map((request) => (
+                      <div key={request.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-xs font-black text-slate-800">#{request.id} • {request.request_type}</p>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-blue-700">{request.status}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-semibold mt-1">{request.created_at}</p>
+                        {request.notes ? <p className="text-[11px] text-slate-600 mt-1">{request.notes}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-800 text-sm font-semibold flex items-start gap-2">
+                <FileWarning className="w-4 h-4 shrink-0 mt-0.5" />
+                A solicitação de exclusão pode anonimizar seus dados pessoais, preservando apenas registros obrigatórios fiscais/financeiros.
               </div>
             </div>
           )}

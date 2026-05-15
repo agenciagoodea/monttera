@@ -6,6 +6,7 @@ import {
   ChevronDown, 
   Calendar, 
   Package, 
+  ShoppingCart,
   CheckCircle2, 
   Clock, 
   XCircle,

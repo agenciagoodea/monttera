@@ -442,6 +442,108 @@ export function initDb() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  query(`
+    CREATE TABLE IF NOT EXISTS lgpd_policies (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      policy_type VARCHAR(50) NOT NULL,
+      version VARCHAR(50) NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      content LONGTEXT NOT NULL,
+      is_active TINYINT(1) DEFAULT 0,
+      force_reaccept TINYINT(1) DEFAULT 0,
+      published_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_by INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_lgpd_policy_type_version (policy_type, version)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS lgpd_user_acceptances (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      policy_type VARCHAR(50) NOT NULL,
+      policy_version VARCHAR(50) NOT NULL,
+      accepted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      ip VARCHAR(64) NULL,
+      user_agent TEXT NULL,
+      source VARCHAR(50) DEFAULT 'web',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_lgpd_acceptance_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS lgpd_consents (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      consent_key VARCHAR(100) NOT NULL,
+      granted TINYINT(1) DEFAULT 0,
+      legal_basis VARCHAR(100) NULL,
+      purpose TEXT NULL,
+      source VARCHAR(50) DEFAULT 'web',
+      policy_version VARCHAR(50) NULL,
+      ip VARCHAR(64) NULL,
+      user_agent TEXT NULL,
+      revoked_at DATETIME NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_lgpd_user_consent (user_id, consent_key),
+      CONSTRAINT fk_lgpd_consents_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS lgpd_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      request_type VARCHAR(50) NOT NULL,
+      status VARCHAR(50) DEFAULT 'pending',
+      payload LONGTEXT NULL,
+      response_notes LONGTEXT NULL,
+      handled_by INT NULL,
+      handled_at DATETIME NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_lgpd_requests_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS lgpd_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NULL,
+      actor_user_id INT NULL,
+      event_type VARCHAR(80) NOT NULL,
+      action VARCHAR(120) NOT NULL,
+      details_json LONGTEXT NULL,
+      ip VARCHAR(64) NULL,
+      user_agent TEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_lgpd_logs_event_type (event_type),
+      INDEX idx_lgpd_logs_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS lgpd_cookie_consents (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NULL,
+      consent_id VARCHAR(64) NOT NULL UNIQUE,
+      necessary TINYINT(1) DEFAULT 1,
+      statistics TINYINT(1) DEFAULT 0,
+      marketing TINYINT(1) DEFAULT 0,
+      preferences TINYINT(1) DEFAULT 0,
+      consent_version VARCHAR(50) NULL,
+      ip VARCHAR(64) NULL,
+      user_agent TEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_lgpd_cookie_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
   const defaultTemplates = [
     {
       key: 'user_welcome',
@@ -547,6 +649,41 @@ export function initDb() {
       subject: 'Seu pedido de matriz ja esta em analise - {{store_name}}',
       variables: JSON.stringify(['request_id', 'name', 'email', 'whatsapp', 'details', 'reference_image', 'store_name']),
       body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Recebemos seu pedido, {{name}}!</h2><p>Seu pedido de matriz <strong>#{{request_id}}</strong> ja esta em analise pela nossa equipe.</p><p>Assim que concluirmos a avaliacao, entraremos em contato no e-mail <strong>{{email}}</strong> e no WhatsApp <strong>{{whatsapp}}</strong>.</p>{{#if details}}<p><strong>Resumo enviado:</strong><br/>{{details}}</p>{{/if}}<p>Obrigado por confiar na {{store_name}}.</p></div>'
+    },
+    {
+      key: 'lgpd_consent_confirmation',
+      name: 'LGPD - Confirmacao de Consentimento',
+      subject: 'Confirmacao de consentimento de dados - {{store_name}}',
+      variables: JSON.stringify(['name', 'consent_key', 'consent_status', 'store_name']),
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Consentimento atualizado</h2><p>Ola, {{name}}.</p><p>Registramos sua preferencia de consentimento para <strong>{{consent_key}}</strong> como <strong>{{consent_status}}</strong>.</p><p>Se voce nao reconhece esta alteracao, responda este e-mail.</p><p>Equipe {{store_name}}</p></div>'
+    },
+    {
+      key: 'lgpd_policy_updated',
+      name: 'LGPD - Politica Atualizada',
+      subject: 'Atualizamos nossas politicas - {{store_name}}',
+      variables: JSON.stringify(['name', 'policy_type', 'policy_version', 'policy_url', 'store_name']),
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Atualizacao de politica</h2><p>Ola, {{name}}.</p><p>Publicamos uma nova versao de <strong>{{policy_type}}</strong> (versao {{policy_version}}).</p><p>Acesse aqui: <a href="{{policy_url}}">{{policy_url}}</a></p><p>Equipe {{store_name}}</p></div>'
+    },
+    {
+      key: 'lgpd_request_received',
+      name: 'LGPD - Solicitacao Recebida',
+      subject: 'Recebemos sua solicitacao LGPD - {{store_name}}',
+      variables: JSON.stringify(['name', 'request_type', 'request_id', 'store_name']),
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Solicitacao LGPD recebida</h2><p>Ola, {{name}}.</p><p>Recebemos sua solicitacao <strong>{{request_type}}</strong> sob o protocolo <strong>#{{request_id}}</strong>.</p><p>Nosso time vai analisar e responder o mais rapido possivel.</p><p>Equipe {{store_name}}</p></div>'
+    },
+    {
+      key: 'lgpd_export_ready',
+      name: 'LGPD - Exportacao Concluida',
+      subject: 'Seus dados estao prontos para download - {{store_name}}',
+      variables: JSON.stringify(['name', 'download_url', 'expires_in', 'store_name']),
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Exportacao concluida</h2><p>Ola, {{name}}.</p><p>Sua exportacao de dados pessoais foi concluida. Use o link abaixo:</p><p><a href="{{download_url}}">{{download_url}}</a></p><p>Validade: {{expires_in}} horas.</p><p>Equipe {{store_name}}</p></div>'
+    },
+    {
+      key: 'lgpd_deletion_completed',
+      name: 'LGPD - Exclusao Concluida',
+      subject: 'Sua solicitacao de exclusao foi processada - {{store_name}}',
+      variables: JSON.stringify(['name', 'store_name']),
+      body: '<div style="font-family: Arial, sans-serif; padding: 20px; background: #fff; max-width: 600px; margin: 0 auto; color: #333;"><div style="text-align: center; margin-bottom: 20px;"><img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 80px;" /></div><h2>Exclusao concluida</h2><p>Ola, {{name}}.</p><p>Concluimos o processamento da sua solicitacao de exclusao/anonimizacao de dados pessoais, conforme a LGPD.</p><p>Equipe {{store_name}}</p></div>'
     }
   ];
 
@@ -573,6 +710,10 @@ export function initDb() {
   createIndexIfNotExists('login_attempts', 'idx_login_attempts_ip_time', 'CREATE INDEX idx_login_attempts_ip_time ON login_attempts(ip, attempted_at)');
   createIndexIfNotExists('download_tokens', 'idx_download_tokens_user_item', 'CREATE INDEX idx_download_tokens_user_item ON download_tokens(user_id, order_item_id)');
   createIndexIfNotExists('download_tokens', 'idx_download_tokens_expires', 'CREATE INDEX idx_download_tokens_expires ON download_tokens(expires_at)');
+  createIndexIfNotExists('lgpd_requests', 'idx_lgpd_requests_user', 'CREATE INDEX idx_lgpd_requests_user ON lgpd_requests(user_id, created_at)');
+  createIndexIfNotExists('lgpd_requests', 'idx_lgpd_requests_status', 'CREATE INDEX idx_lgpd_requests_status ON lgpd_requests(status, created_at)');
+  createIndexIfNotExists('lgpd_consents', 'idx_lgpd_consents_key', 'CREATE INDEX idx_lgpd_consents_key ON lgpd_consents(consent_key, updated_at)');
+  createIndexIfNotExists('lgpd_user_acceptances', 'idx_lgpd_acceptances_user', 'CREATE INDEX idx_lgpd_acceptances_user ON lgpd_user_acceptances(user_id, accepted_at)');
 
   ensureColumn('products', 'short_description', 'TEXT NULL');
   ensureColumn('products', 'production_sheet', 'TEXT NULL');
@@ -581,6 +722,9 @@ export function initDb() {
   ensureColumn('product_images', 'file_type', "VARCHAR(50) NULL DEFAULT 'gallery'");
   ensureColumn('settings', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
   ensureColumn('users', 'email_verified_at', 'DATETIME NULL');
+  ensureColumn('users', 'privacy_reaccept_required', 'TINYINT(1) DEFAULT 0');
+  ensureColumn('users', 'anonymized_at', 'DATETIME NULL');
+  ensureColumn('users', 'deleted_at', 'DATETIME NULL');
 
   // WooCommerce migration compatibility expansions
   query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20) NULL`);

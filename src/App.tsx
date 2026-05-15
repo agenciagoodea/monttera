@@ -2,6 +2,7 @@ import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
+import CookieConsentBanner from './components/CookieConsentBanner';
 
 // Lazy load pages
 const Home = lazy(() => import('./pages/Home'));
@@ -93,6 +94,7 @@ export default function App() {
                   <Route path="/minha-conta/downloads" element={<MyAccount />} />
                   <Route path="/minha-conta/enderecos" element={<MyAccount />} />
                   <Route path="/minha-conta/perfil" element={<MyAccount />} />
+                  <Route path="/minha-conta/privacidade" element={<MyAccount />} />
                   <Route path="/minha-conta/lista-de-desejos" element={<MyAccount />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/cadastro" element={<Register />} />
@@ -105,6 +107,7 @@ export default function App() {
                 </Routes>
             </Suspense>
               </div>
+              <CookieConsentBanner />
               <Footer />
             </div>
           } />
