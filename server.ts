@@ -1,4 +1,4 @@
-﻿if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== 'production') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 import express from 'express';
@@ -546,6 +546,10 @@ function getDownloadRoots(): string[] {
     path.resolve(process.cwd(), 'uploads', 'woocommerce_uploads'),
     path.resolve(process.cwd(), '..', 'wp-content', 'uploads', 'woocommerce_uploads'),
     path.resolve(process.cwd(), '..', 'uploads', 'woocommerce_uploads'),
+    // Diretório de uploads local (arquivos enviados pelo admin)
+    path.resolve(process.cwd(), 'uploads'),
+    // Raiz do projeto (para paths como /uploads/arquivo.zip)
+    path.resolve(process.cwd()),
   ];
 
   return Array.from(new Set([...configured, ...defaults]));
@@ -557,15 +561,38 @@ function isInsideRoot(absPath: string, absRoot: string) {
 }
 
 function resolveDownloadAbsolutePath(rawInput: string): { absolutePath: string; relativePath: string } | null {
-  const relativePath = extractWooUploadsRelativePath(rawInput);
-  if (!relativePath) return null;
-
   const roots = getDownloadRoots();
-  for (const root of roots) {
-    const absolutePath = path.resolve(root, relativePath);
-    if (!isInsideRoot(absolutePath, root)) continue;
-    if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile()) {
-      return { absolutePath, relativePath };
+
+  // Tentativa 1: Extrai path relativo no formato WooCommerce
+  const wooRelativePath = extractWooUploadsRelativePath(rawInput);
+  if (wooRelativePath) {
+    for (const root of roots) {
+      const absolutePath = path.resolve(root, wooRelativePath);
+      if (!isInsideRoot(absolutePath, root)) continue;
+      if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile()) {
+        return { absolutePath, relativePath: wooRelativePath };
+      }
+    }
+  }
+
+  // Tentativa 2: Resolve path direto (para uploads locais como /uploads/arquivo.zip)
+  let directPath = decodePathComponentSafe(String(rawInput || '').trim());
+  // Remove URL completa, mantendo apenas o pathname
+  if (/^https?:\/\//i.test(directPath)) {
+    try {
+      const parsed = new URL(directPath);
+      directPath = parsed.pathname || '';
+    } catch { /* ignora */ }
+  }
+  // Remove barra inicial para montar path relativo
+  const cleanRelative = directPath.replace(/^\/+/, '');
+  if (cleanRelative && !cleanRelative.startsWith('..') && !cleanRelative.includes('/../')) {
+    for (const root of roots) {
+      const absolutePath = path.resolve(root, cleanRelative);
+      if (!isInsideRoot(absolutePath, root)) continue;
+      if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile()) {
+        return { absolutePath, relativePath: cleanRelative };
+      }
     }
   }
 
