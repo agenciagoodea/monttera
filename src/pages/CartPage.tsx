@@ -330,7 +330,7 @@ export default function CartPage() {
 
   const handlePixCheckout = async () => {
     if (!user) {
-      navigate('/login?redirect=/carrinho');
+      navigate('/cadastro?redirect=/carrinho');
       return;
     }
     if (!canSubmitPayer) {
@@ -373,7 +373,7 @@ export default function CartPage() {
 
   const handlePayPalCheckout = async () => {
     if (!user) {
-      navigate('/login?redirect=/carrinho');
+      navigate('/cadastro?redirect=/carrinho');
       return;
     }
     setLoadingCheckout(true);

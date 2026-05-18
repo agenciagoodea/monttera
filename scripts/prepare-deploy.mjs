@@ -61,6 +61,7 @@ const includes = [
   'package-lock.json',
   '.npmrc',
   'index.html',
+  'app.js',
   'scripts',
   '.env.example',
 ].filter(f => fs.existsSync(path.join(ROOT, f)));

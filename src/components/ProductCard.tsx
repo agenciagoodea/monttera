@@ -1,7 +1,7 @@
 import React from 'react';
 import { Heart, ShoppingBag, Check } from 'lucide-react';
 import { Product } from '../types';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency, isNewProduct, normalizePublicMediaUrl } from '../lib/utils';
 import { motion } from 'motion/react';
 import { useCart } from '../contexts/CartContext';
 import { Link, useNavigate } from 'react-router-dom';
@@ -20,12 +20,17 @@ export default function ProductCard({ product }: ProductCardProps) {
   const { isFavorite, toggleFavorite } = useFavorites();
   const isInCart = items.some(item => item.product_id === product.id);
   const isProductFavorite = isFavorite(product.id);
-  const showNewBadge = Number(product.is_new) === 1;
+  const showNewBadge = isNewProduct(
+    product.created_at,
+    settings.new_badge_days,
+    Number(product.is_new) === 1,
+  );
   const redirectToCheckout = String(settings.redirect_to_checkout_after_add_to_cart || 'false') === 'true';
 
   const discount = product.sale_price 
     ? Math.round(((product.price - product.sale_price) / product.price) * 100)
     : 0;
+  const productImageUrl = normalizePublicMediaUrl(product.image);
 
   return (
     <motion.div 
@@ -60,7 +65,7 @@ export default function ProductCard({ product }: ProductCardProps) {
       {/* Image Container */}
       <Link to={`/produto/${product.slug}`} className="relative aspect-square mb-4 bg-slate-50 rounded-2xl overflow-hidden group-hover:bg-slate-100/50 transition-colors block">
         <img 
-          src={product.image} 
+          src={productImageUrl} 
           alt={product.name}
           loading="lazy"
           className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-700 p-6"

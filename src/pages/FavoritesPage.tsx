@@ -13,6 +13,7 @@ interface FavoriteApiItem {
   price: number;
   sale_price?: number | null;
   is_new?: number | boolean;
+  product_created_at?: string;
 }
 
 function mapFavoriteToProduct(item: FavoriteApiItem): Product {
@@ -27,6 +28,7 @@ function mapFavoriteToProduct(item: FavoriteApiItem): Product {
     is_new: item.is_new ?? 0,
     is_featured: 0,
     status: 'active',
+    created_at: item.product_created_at,
   };
 }
 
@@ -118,4 +120,3 @@ export default function FavoritesPage() {
     </main>
   );
 }
-

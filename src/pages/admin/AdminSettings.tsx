@@ -111,11 +111,12 @@ export default function AdminSettings() {
     address: '',
     contact_hours: 'Seg a Sex, 8h às 18h',
     contact_whatsapp: '',
-    new_badge_days: '20',
+    new_badge_days: '10',
     redirect_to_checkout_after_add_to_cart: 'false',
     // Suporte ao Cliente
     support_whatsapp: '',
     support_email: '',
+    order_notifications_email: '',
 
     // Mercado Pago
     mp_public_key: '',
@@ -1002,7 +1003,7 @@ export default function AdminSettings() {
                           value={settings.new_badge_days}
                           onChange={(e) => {
                             const onlyDigits = e.target.value.replace(/\D/g, '');
-                            setSettings({ ...settings, new_badge_days: onlyDigits || '20' });
+                            setSettings({ ...settings, new_badge_days: onlyDigits || '10' });
                           }}
                         />
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
@@ -1375,6 +1376,19 @@ export default function AdminSettings() {
                             onChange={e => setSettings({...settings, smtp_from_email: e.target.value})}
                             placeholder="nao-responda@seusite.com"
                           />
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail para Pedidos (Solicitado/Confirmado)</label>
+                          <input
+                            type="email"
+                            className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                            value={settings.order_notifications_email}
+                            onChange={e => setSettings({ ...settings, order_notifications_email: e.target.value })}
+                            placeholder="pedidos@seusite.com"
+                          />
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                            Recebe notificação quando um pedido é criado e quando é confirmado (pago).
+                          </p>
                         </div>
                         <div className="space-y-2 md:col-span-2">
                           <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail da Equipe (Solicitacao de Matriz)</label>

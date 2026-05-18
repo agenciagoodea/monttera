@@ -16,6 +16,7 @@ import {
   Palette
 } from 'lucide-react';
 import HtmlRichEditor from '../../components/admin/HtmlRichEditor';
+import { normalizePublicMediaUrl } from '../../lib/utils';
 
 interface Category {
   id: number;
@@ -76,6 +77,7 @@ export default function AdminProductForm() {
   const [productionSheetFile, setProductionSheetFile] = useState<File | null>(null);
   const [downloadableFiles, setDownloadableFiles] = useState<DownloadableFile[]>([]);
   const [previews, setPreviews] = useState<{main: string, gallery: string[]}>({ main: '', gallery: [] });
+  const [existingGalleryUrls, setExistingGalleryUrls] = useState<string[]>([]);
 
   useEffect(() => {
     async function fetchData() {
@@ -156,8 +158,18 @@ export default function AdminProductForm() {
             file_type: file.file_type || 'downloadable',
           }))
         );
-        if (prod.image) setPreviews(p => ({ ...p, main: prod.image }));
-        if (prod.images) setPreviews(p => ({ ...p, gallery: prod.images.map((img: any) => img.url) }));
+        const normalizedMainImage = normalizePublicMediaUrl(prod.image || '');
+        const normalizedGallery = Array.isArray(prod.images)
+          ? prod.images.map((img: any) => normalizePublicMediaUrl(img?.url || '')).filter(Boolean)
+          : [];
+        if (normalizedMainImage) setPreviews(p => ({ ...p, main: normalizedMainImage }));
+        setExistingGalleryUrls(normalizedGallery);
+        setPreviews(p => ({ ...p, gallery: [...normalizedGallery] }));
+        if (import.meta.env.DEV) {
+          console.debug('[AdminProductForm] production_sheet db/raw:', prod.production_sheet);
+          console.debug('[AdminProductForm] production_sheet normalized:', normalizePublicMediaUrl(prod.production_sheet || ''));
+          console.debug('[AdminProductForm] gallery normalized:', normalizedGallery);
+        }
       }
     }
     fetchData();
@@ -181,7 +193,15 @@ export default function AdminProductForm() {
   };
 
   const removeGalleryItem = (index: number) => {
-    setGallery(prev => prev.filter((_, i) => i !== index));
+    const existingCount = existingGalleryUrls.length;
+    if (index < existingCount) {
+      setExistingGalleryUrls(prev => prev.filter((_, i) => i !== index));
+      setPreviews(prev => ({ ...prev, gallery: prev.gallery.filter((_, i) => i !== index) }));
+      return;
+    }
+
+    const newFileIndex = index - existingCount;
+    setGallery(prev => prev.filter((_, i) => i !== newFileIndex));
     setPreviews(prev => ({ ...prev, gallery: prev.gallery.filter((_, i) => i !== index) }));
   };
 
@@ -326,6 +346,7 @@ export default function AdminProductForm() {
 
     if (mainImage) data.append('image', mainImage);
     gallery.forEach(f => data.append('gallery', f));
+    data.append('gallery_urls', JSON.stringify(existingGalleryUrls));
     productionFiles.forEach(f => data.append('production_files', f));
     data.append('tags', JSON.stringify(selectedTagIds));
     data.append('promotional_price', payload.sale_price);
@@ -545,7 +566,15 @@ export default function AdminProductForm() {
               <div className="grid grid-cols-4 md:grid-cols-6 gap-4 pt-4">
                 {previews.gallery.map((url, i) => (
                   <div key={i} className="relative aspect-square rounded-2xl overflow-hidden border border-slate-100 group">
-                    <img src={url} className="w-full h-full object-cover" />
+                    <img
+                      src={url}
+                      onError={(event) => {
+                        if (import.meta.env.DEV) {
+                          console.debug('[AdminProductForm] gallery preview error:', (event.currentTarget as HTMLImageElement).src);
+                        }
+                      }}
+                      className="w-full h-full object-cover"
+                    />
                     <button 
                       onClick={() => removeGalleryItem(i)}
                       className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
@@ -942,6 +971,16 @@ export default function AdminProductForm() {
                   className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold"
                   placeholder="https://.../folha-producao.pdf ou /uploads/arquivo.pdf"
                 />
+                {normalizePublicMediaUrl(productionSheetUrl) && !productionSheetFile && (
+                  <a
+                    href={normalizePublicMediaUrl(productionSheetUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-red-700 text-[10px] font-black uppercase tracking-widest hover:bg-red-100"
+                  >
+                    Abrir PDF
+                  </a>
+                )}
               </div>
 
               <div className="relative w-full py-6 border-2 border-dashed border-slate-100 rounded-3xl bg-slate-50/50 flex flex-col items-center justify-center gap-2 group hover:border-blue-200 transition-all cursor-pointer">

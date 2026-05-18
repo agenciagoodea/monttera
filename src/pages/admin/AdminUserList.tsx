@@ -10,6 +10,7 @@ import {
   Pencil,
   X,
   Save,
+  Download,
 } from 'lucide-react';
 
 interface UserType {
@@ -74,27 +75,75 @@ export default function AdminUserList() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [exporting, setExporting] = useState<'csv' | 'excel' | null>(null);
   const [formData, setFormData] = useState<UserFormState>(emptyForm);
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [page, limit, searchTerm, roleFilter]);
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/users');
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(limit),
+        search: searchTerm,
+        role: roleFilter,
+      });
+      const res = await fetch(`/api/admin/users?${params.toString()}`);
       const data = await res.json();
-      setUsers(Array.isArray(data) ? data : []);
+      if (Array.isArray(data)) {
+        setUsers(data);
+        setTotal(data.length);
+        setTotalPages(1);
+      } else {
+        setUsers(Array.isArray(data?.data) ? data.data : []);
+        setTotal(Number(data?.pagination?.total || 0));
+        setTotalPages(Math.max(1, Number(data?.pagination?.totalPages || 1)));
+      }
     } catch (error) {
       console.error('Failed to fetch users:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async (format: 'csv' | 'excel') => {
+    setExporting(format);
+    try {
+      const params = new URLSearchParams({
+        format,
+        search: searchTerm,
+        role: roleFilter,
+      });
+      const res = await fetch(`/api/admin/users/export?${params.toString()}`);
+      if (!res.ok) throw new Error('Falha ao exportar');
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const date = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = format === 'excel' ? `clientes_${date}.xls` : `clientes_${date}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to export users:', error);
+      alert('Não foi possível exportar o relatório de clientes.');
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -241,14 +290,7 @@ export default function AdminUserList() {
     }
   };
 
-  const filteredUsers = useMemo(() => users.filter((user) => {
-    const search = searchTerm.toLowerCase();
-    const role = user.role === 'user' ? 'customer' : user.role;
-    return (
-      (user.name?.toLowerCase().includes(search) || user.email?.toLowerCase().includes(search))
-      && (roleFilter === 'all' || role === roleFilter)
-    );
-  }), [users, searchTerm, roleFilter]);
+  const filteredUsers = useMemo(() => users, [users]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
@@ -271,7 +313,7 @@ export default function AdminUserList() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total de Usuários</p>
-          <p className="text-2xl font-black text-slate-800">{users.length}</p>
+          <p className="text-2xl font-black text-slate-800">{total}</p>
         </div>
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm border-l-4 border-l-blue-500">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Administradores</p>
@@ -292,19 +334,43 @@ export default function AdminUserList() {
               placeholder="Buscar por nome ou e-mail..."
               className="w-full pl-11 pr-4 py-3 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
+              onChange={(event) => {
+                setSearchTerm(event.target.value);
+                setPage(1);
+              }}
             />
           </div>
 
           <select
             className="bg-slate-50 border-none rounded-xl text-[10px] font-black uppercase tracking-widest px-4 py-3 focus:ring-2 focus:ring-blue-500"
             value={roleFilter}
-            onChange={(event) => setRoleFilter(event.target.value)}
+            onChange={(event) => {
+              setRoleFilter(event.target.value);
+              setPage(1);
+            }}
           >
             <option value="all">Todos os cargos</option>
             <option value="admin">Administradores</option>
             <option value="customer">Clientes</option>
           </select>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleExport('csv')}
+              disabled={exporting !== null}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:border-blue-300 hover:text-blue-600 disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              {exporting === 'csv' ? 'Exportando...' : 'CSV'}
+            </button>
+            <button
+              onClick={() => handleExport('excel')}
+              disabled={exporting !== null}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:border-emerald-300 hover:text-emerald-600 disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              {exporting === 'excel' ? 'Exportando...' : 'Excel'}
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -402,6 +468,43 @@ export default function AdminUserList() {
               <p className="text-slate-400 text-xs font-black uppercase tracking-widest">Nenhum usuário encontrado</p>
             </div>
           )}
+        </div>
+      </div>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <p className="text-[11px] font-bold text-slate-500">
+          Exibindo {total > 0 ? (page - 1) * limit + 1 : 0} - {Math.min(page * limit, total)} de {total} clientes
+        </p>
+        <div className="flex items-center gap-2">
+          <select
+            value={limit}
+            onChange={(event) => {
+              setLimit(Number(event.target.value));
+              setPage(1);
+            }}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600"
+          >
+            <option value={10}>10 / página</option>
+            <option value={20}>20 / página</option>
+            <option value={50}>50 / página</option>
+            <option value={100}>100 / página</option>
+          </select>
+          <button
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            disabled={page <= 1}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 disabled:opacity-40"
+          >
+            Anterior
+          </button>
+          <span className="px-3 text-[10px] font-black uppercase tracking-widest text-slate-500">
+            Página {page} de {totalPages}
+          </span>
+          <button
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={page >= totalPages}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 disabled:opacity-40"
+          >
+            Próxima
+          </button>
         </div>
       </div>
 

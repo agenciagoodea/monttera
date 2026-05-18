@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, FileText, ShoppingCart, Zap, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileText, ShoppingCart, Zap, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send, Search } from 'lucide-react';
 import { Product } from '../types';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency, normalizePublicMediaUrl } from '../lib/utils';
 import { useCart } from '../contexts/CartContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useAppData } from '../contexts/AppDataContext';
@@ -26,6 +26,9 @@ export default function ProductDetail() {
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'description' | 'reviews'>('description');
+  const [isImageZoomed, setIsImageZoomed] = useState(false);
+  const [zoomPosition, setZoomPosition] = useState({ x: 50, y: 50 });
+  const imageZoomContainerRef = useRef<HTMLDivElement | null>(null);
   const relatedTrackRef = useRef<HTMLDivElement | null>(null);
   const relatedAutoplaySpeed = 4200;
   const [relatedPaused, setRelatedPaused] = useState(false);
@@ -49,8 +52,22 @@ export default function ProductDetail() {
           return;
         }
         const data = await res.json();
-        setProduct(data);
-        setActiveImage(data.image || data.gallery?.[0] || null);
+        const normalizedProduct = {
+          ...data,
+          image: normalizePublicMediaUrl(data?.image),
+          production_sheet: normalizePublicMediaUrl(data?.production_sheet),
+          gallery: Array.isArray(data?.gallery) ? data.gallery.map((img: string) => normalizePublicMediaUrl(img)).filter(Boolean) : [],
+          relatedProducts: Array.isArray(data?.relatedProducts)
+            ? data.relatedProducts.map((item: any) => ({ ...item, image: normalizePublicMediaUrl(item?.image) }))
+            : [],
+        };
+        if (import.meta.env.DEV) {
+          console.debug('[ProductDetail] production_sheet db/raw:', data?.production_sheet);
+          console.debug('[ProductDetail] production_sheet normalized:', normalizedProduct.production_sheet);
+          console.debug('[ProductDetail] gallery normalized:', normalizedProduct.gallery);
+        }
+        setProduct(normalizedProduct);
+        setActiveImage(normalizedProduct.image || normalizedProduct.gallery?.[0] || null);
         
         // Fetch reviews
         fetchReviews(slug);
@@ -115,6 +132,18 @@ export default function ProductDetail() {
   }
 
   const relatedProducts = product?.relatedProducts || [];
+
+  const handleImageMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    const container = imageZoomContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    setZoomPosition({
+      x: Math.max(0, Math.min(100, x)),
+      y: Math.max(0, Math.min(100, y)),
+    });
+  };
 
   useEffect(() => {
     if (relatedPaused || relatedProducts.length <= 1) return;
@@ -208,10 +237,14 @@ export default function ProductDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-start">
         {/* Left: Image & Gallery */}
         <div className="space-y-6">
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             className="relative bg-white border border-slate-100 rounded-[40px] overflow-hidden group shadow-xl shadow-slate-200/50"
+            ref={imageZoomContainerRef}
+            onMouseEnter={() => setIsImageZoomed(true)}
+            onMouseLeave={() => setIsImageZoomed(false)}
+            onMouseMove={handleImageMouseMove}
           >
             <div className="aspect-square relative flex items-center justify-center p-8 bg-slate-50/50">
               <div className="absolute inset-0 opacity-[0.03] pointer-events-none grid grid-cols-4 grid-rows-4 rotate-12 scale-150 select-none">
@@ -231,16 +264,44 @@ export default function ProductDetail() {
                   transition={{ duration: 0.3 }}
                   src={activeImage || product.image} 
                   alt={product.name} 
+                  onError={(event) => {
+                    if (import.meta.env.DEV) {
+                      console.debug('[ProductDetail] image load error:', (event.currentTarget as HTMLImageElement).src);
+                    }
+                  }}
                   className="w-full h-full object-contain relative z-10 drop-shadow-2xl" 
                 />
               </AnimatePresence>
-              
+
               {discount > 0 && (
                 <div className="absolute top-8 left-8 z-20 bg-emerald-500 text-white px-4 py-1.5 rounded-full text-sm font-black shadow-lg">
                   {discount}% OFF
                 </div>
               )}
+
+              <div
+                className="absolute top-6 right-6 z-20 flex h-11 w-11 items-center justify-center rounded-full border-2 border-white text-white shadow-xl"
+                style={{
+                  backgroundColor: settings.primary_color || '#3b82f6',
+                  boxShadow: '0 12px 24px rgba(15, 23, 42, 0.28)',
+                }}
+              >
+                <Search className="h-5 w-5" />
+              </div>
             </div>
+
+            {isImageZoomed && (
+              <div
+                className="pointer-events-none absolute inset-0 z-30 hidden lg:block"
+                style={{
+                  backgroundColor: '#ffffff',
+                  backgroundImage: `url(${activeImage || product.image})`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: `${zoomPosition.x}% ${zoomPosition.y}%`,
+                  backgroundSize: '200%',
+                }}
+              />
+            )}
             
             <div className="p-4 bg-white border-t border-slate-50 flex items-center justify-center gap-2">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Categoria:</span>
@@ -264,7 +325,17 @@ export default function ProductDetail() {
                     activeImage === img ? 'border-blue-600 shadow-lg shadow-blue-100 scale-95' : 'border-slate-100 hover:border-slate-300'
                   }`}
                 >
-                  <img src={img} alt={`${product.name} - ${idx}`} loading="lazy" className="w-full h-full object-cover" />
+                  <img
+                    src={img}
+                    alt={`${product.name} - ${idx}`}
+                    loading="lazy"
+                    onError={(event) => {
+                      if (import.meta.env.DEV) {
+                        console.debug('[ProductDetail] gallery image load error:', (event.currentTarget as HTMLImageElement).src);
+                      }
+                    }}
+                    className="w-full h-full object-cover"
+                  />
                 </button>
               ))}
             </motion.div>
@@ -414,6 +485,7 @@ export default function ProductDetail() {
           </button>
         </motion.div>
       </div>
+
 
       {/* Tabs Section */}
       <section className="mt-16 border-t border-slate-100 pt-16">

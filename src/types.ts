@@ -27,6 +27,8 @@ export interface Product {
   is_new: boolean | number;
   is_featured: boolean | number;
   status: string;
+  created_at?: string;
+  updated_at?: string;
   gallery?: string[];
   relatedProducts?: Product[];
 }

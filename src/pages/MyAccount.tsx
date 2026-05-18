@@ -1,4 +1,4 @@
-﻿import React, { FormEvent, useEffect, useMemo, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   Camera,
   ChevronRight,
@@ -1176,7 +1176,7 @@ export default function MyAccount() {
                       <div className="flex flex-wrap gap-2">
                         <a
                           href={`/api/customer/download-file?path=${encodeURIComponent(item.file_path || '')}`}
-                          download
+                          target="_blank" rel="noreferrer"
                           onClick={(e) => { if (!item.file_path) e.preventDefault(); }}
                           className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-white text-xs font-black transition-all hover:scale-105 active:scale-95 ${
                             item.file_path ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-300 cursor-not-allowed'

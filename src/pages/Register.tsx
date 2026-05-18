@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { User, Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react';
 import { useAppData } from '../contexts/AppDataContext';
 
@@ -18,6 +18,7 @@ export default function Register() {
   const { register } = useAuth();
   const { settings } = useAppData();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const requireConsent = String(settings.lgpd_enabled || 'true') === 'true' && String(settings.lgpd_require_consent_register || 'true') === 'true';
   const requireTerms = requireConsent && String(settings.lgpd_require_terms_acceptance || 'true') === 'true';
@@ -54,7 +55,12 @@ export default function Register() {
         cookie_accepted: cookieAccepted,
         marketing_accepted: marketingAccepted,
       });
-      navigate('/minha-conta');
+      const redirectTo = searchParams.get('redirect');
+      if (redirectTo && redirectTo.startsWith('/')) {
+        navigate(redirectTo);
+      } else {
+        navigate('/minha-conta');
+      }
     } catch (err: any) {
       setError(err.message || 'Erro ao criar conta');
     } finally {

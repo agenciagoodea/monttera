@@ -1,5 +1,5 @@
 import { useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import CookieConsentBanner from './components/CookieConsentBanner';
@@ -39,12 +39,25 @@ import { AuthProvider } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import { FavoritesProvider } from './contexts/FavoritesContext';
 import { AppDataProvider } from './contexts/AppDataContext';
+import { useAuth } from './contexts/AuthContext';
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-white/50 backdrop-blur-sm fixed inset-0 z-50">
     <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin shadow-lg shadow-blue-600/20"></div>
   </div>
 );
+
+function RequireRegisteredUser({ children }: { children: JSX.Element }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) return <PageLoader />;
+  if (!user) {
+    const redirect = encodeURIComponent(`${location.pathname}${location.search}`);
+    return <Navigate to={`/cadastro?redirect=${redirect}`} replace />;
+  }
+  return children;
+}
 
 export default function App() {
 
@@ -88,7 +101,14 @@ export default function App() {
                   <Route path="/orcamento" element={<BudgetPage />} />
                   <Route path="/contato" element={<ContactPage />} />
                   <Route path="/produto/:slug" element={<ProductDetail />} />
-                  <Route path="/carrinho" element={<CartPage />} />
+                  <Route
+                    path="/carrinho"
+                    element={
+                      <RequireRegisteredUser>
+                        <CartPage />
+                      </RequireRegisteredUser>
+                    }
+                  />
                   <Route path="/favoritos" element={<FavoritesPage />} />
                   <Route path="/minha-conta" element={<MyAccount />} />
                   <Route path="/minha-conta/pedidos" element={<MyAccount />} />

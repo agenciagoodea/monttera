@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { 
+import {
   Plus, 
   Search, 
   MoreHorizontal, 
@@ -14,6 +14,7 @@ import {
   Filter
 } from 'lucide-react';
 import { useAppData } from '../../contexts/AppDataContext';
+import { normalizePublicMediaUrl } from '../../lib/utils';
 
 interface Product {
   id: number;
@@ -175,7 +176,7 @@ export default function AdminProductList() {
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-slate-100 rounded-xl overflow-hidden border border-slate-100">
                         {product.image ? (
-                          <img src={product.image} alt={product.name || ''} className="w-full h-full object-cover" />
+                          <img src={normalizePublicMediaUrl(product.image)} alt={product.name || ''} className="w-full h-full object-cover" />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-slate-300">
                             <Eye className="w-5 h-5" />

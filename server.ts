@@ -1,4 +1,4 @@
-if (process.env.NODE_ENV !== 'production') {
+﻿if (process.env.NODE_ENV !== 'production') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 import express from 'express';
@@ -116,7 +116,7 @@ function resolveMercadoPagoSettings() {
 function createMercadoPagoPaymentClient() {
   const { accessToken } = resolveMercadoPagoSettings();
   if (!accessToken) {
-    throw new Error('MERCADOPAGO_ACCESS_TOKEN nÃ£o configurado em settings');
+    throw new Error('MERCADOPAGO_ACCESS_TOKEN nÃƒÂ£o configurado em settings');
   }
 
   const client = new MercadoPagoConfig({ accessToken });
@@ -218,7 +218,7 @@ async function fetchMercadoPagoAccountInfo(accessToken: string) {
     } catch (error: any) {
       lastError = {
         status: 500,
-        message: error?.message || 'Erro de comunicaÃ§Ã£o com Mercado Pago',
+        message: error?.message || 'Erro de comunicaÃƒÂ§ÃƒÂ£o com Mercado Pago',
         details: null,
       };
     }
@@ -232,7 +232,7 @@ async function fetchMercadoPagoAccountInfo(accessToken: string) {
   };
 }
 
-// ConfiguraÃƒÂ§ÃƒÂ£o do Multer para Uploads
+// ConfiguraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o do Multer para Uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = './public/uploads';
@@ -267,13 +267,15 @@ function resolveNewBadgeDays() {
   if (Number.isFinite(parsed) && parsed > 0) {
     return Math.floor(parsed);
   }
-  return 20;
+  return 10;
 }
 
 function isProductWithinNewWindow(createdAt: any, days: number) {
   if (!createdAt || days <= 0) return false;
+  const raw = String(createdAt).trim();
+  const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
   const normalizedDateString = typeof createdAt === 'string'
-    ? createdAt.replace(' ', 'T')
+    ? (hasTimezone ? raw : `${raw.replace(' ', 'T')}Z`)
     : createdAt;
   const createdDate = new Date(normalizedDateString as any);
   if (Number.isNaN(createdDate.getTime())) return false;
@@ -282,7 +284,13 @@ function isProductWithinNewWindow(createdAt: any, days: number) {
   if (ageMs < 0) return true;
 
   const ageDays = ageMs / (1000 * 60 * 60 * 24);
-  return ageDays <= days;
+  return ageDays < days;
+}
+
+function resolveProductIsNew(product: any, newBadgeDays: number) {
+  const manualOverride = Number(product?.is_new) === 1;
+  const autoByCreatedAt = isProductWithinNewWindow(product?.created_at, newBadgeDays);
+  return (manualOverride || autoByCreatedAt) ? 1 : 0;
 }
 
 function extractMercadoPagoSignature(signatureHeader: string) {
@@ -464,11 +472,50 @@ function canUserAccessDownloads(userId: number, userEmail: string, emailVerified
      )
        AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})`,
     userId,
-    normalizedEmail,
+    normalizedEmail || '___nomail___',
     ...DOWNLOAD_ALLOWED_STATUSES,
   ) as any;
 
   return Number(hasPaidOrder?.total || 0) > 0;
+}
+
+function escapeCsvValue(value: unknown) {
+  const raw = String(value ?? '');
+  if (/[",;\n\r]/.test(raw)) {
+    return `"${raw.replace(/"/g, '""')}"`;
+  }
+  return raw;
+}
+
+function buildUsersBaseQuery({
+  searchTerm,
+  roleFilter,
+}: {
+  searchTerm: string;
+  roleFilter: string;
+}) {
+  const where: string[] = [];
+  const params: any[] = [];
+
+  if (searchTerm) {
+    where.push('(LOWER(u.name) LIKE ? OR LOWER(u.email) LIKE ?)');
+    const like = `%${searchTerm}%`;
+    params.push(like, like);
+  }
+
+  if (roleFilter === 'admin') {
+    where.push("u.role = 'admin'");
+  } else if (roleFilter === 'customer') {
+    where.push("u.role IN ('customer', 'user')");
+  }
+
+  const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+  return { whereClause, params };
+}
+
+function getOrderNotificationEmail() {
+  const settings = loadSettingsMap(['order_notifications_email', 'email_contact']);
+  return String(settings.order_notifications_email || settings.email_contact || '').trim().toLowerCase();
 }
 
 function decodePathComponentSafe(value: string) {
@@ -546,7 +593,7 @@ function getDownloadRoots(): string[] {
     path.resolve(process.cwd(), 'uploads', 'woocommerce_uploads'),
     path.resolve(process.cwd(), '..', 'wp-content', 'uploads', 'woocommerce_uploads'),
     path.resolve(process.cwd(), '..', 'uploads', 'woocommerce_uploads'),
-    // Diretório de uploads local (arquivos enviados pelo admin)
+    // DiretÃ³rio de uploads local (arquivos enviados pelo admin)
     path.resolve(process.cwd(), 'uploads'),
     // Raiz do projeto (para paths como /uploads/arquivo.zip)
     path.resolve(process.cwd()),
@@ -654,6 +701,22 @@ async function computeFileSha256(filePath: string): Promise<string> {
 function buildBaseAppUrl(req: express.Request) {
   const settings = loadSettingsMap(['app_url']);
   return process.env.APP_URL || settings.app_url || `${req.protocol}://${req.get('host')}`;
+}
+
+function normalizePublicMediaUrl(value: unknown) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  const domain = String(process.env.APP_DOMAIN || 'digitalbordados.com.br').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  const base = `https://${domain}`;
+  const noLeadingSlash = raw.replace(/^\/+/, '');
+
+  if (raw.startsWith('/wp-content/uploads/')) return `${base}${raw}`;
+  if (raw.startsWith('wp-content/uploads/')) return `${base}/${noLeadingSlash}`;
+
+  return raw;
 }
 
 function sha256(value: string) {
@@ -1202,7 +1265,7 @@ function buildUserLgpdExportPayload(userId: number) {
 function initSettings() {
   const defaultSettings = {
     site_name: 'Digital Bordados',
-    site_description: 'ExcelÃƒÂªncia em Matrizes de Bordado',
+    site_description: 'ExcelÃƒÆ’Ã‚Âªncia em Matrizes de Bordado',
     logo_url: '',
     primary_color: '#3b82f6',
     secondary_color: '#1e293b',
@@ -1213,6 +1276,7 @@ function initSettings() {
     contact_whatsapp: '',
     support_whatsapp: '',
     support_email: '',
+    order_notifications_email: '',
     mp_mode: 'sandbox',
     modo_operacao: 'sandbox',
     mp_public_key: '',
@@ -1220,7 +1284,7 @@ function initSettings() {
     mp_webhook_secret: '',
     mercadopago_public_key: '',
     mercadopago_access_token: '',
-    new_badge_days: '20',
+    new_badge_days: '10',
     redirect_to_checkout_after_add_to_cart: 'false',
     smtp_from_name: '',
     smtp_from_email: '',
@@ -1298,7 +1362,7 @@ async function initTestData() {
   const hashedPassword = await hashPassword('123456');
   const adrianoPassword = await hashPassword('04039866');
 
-  // 1. Novo UsuÃƒÂ¡rio Admin (Adriano Amorim)
+  // 1. Novo UsuÃƒÆ’Ã‚Â¡rio Admin (Adriano Amorim)
   const adrianoAdmin = db.get('SELECT * FROM users WHERE email = ?', 'contato@agenciagoodea.com');
   if (!adrianoAdmin) {
     db.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Adriano Amorim', 'contato@agenciagoodea.com', adrianoPassword, 'admin', 'ativo');
@@ -1307,17 +1371,17 @@ async function initTestData() {
     db.run('UPDATE users SET name = ?, password = ?, role = "admin", status = "ativo" WHERE email = ?', 'Adriano Amorim', adrianoPassword, 'contato@agenciagoodea.com');
   }
 
-  // 2. Antigo UsuÃƒÂ¡rio Admin (Digital Bordados)
+  // 2. Antigo UsuÃƒÆ’Ã‚Â¡rio Admin (Digital Bordados)
   const admin = db.get('SELECT * FROM users WHERE email = ?', 'admin@digitalbordados.com');
   if (!admin) {
     db.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Administrador', 'admin@digitalbordados.com', hashedPassword, 'admin', 'ativo');
     console.log('Test Admin created: admin@digitalbordados.com / 123456');
   } else {
-    // Garantir senha e status atualizados se jÃƒÂ¡ existir
+    // Garantir senha e status atualizados se jÃƒÆ’Ã‚Â¡ existir
     db.run('UPDATE users SET password = ?, role = "admin", status = "ativo" WHERE email = ?', hashedPassword, 'admin@digitalbordados.com');
   }
 
-  // 3. UsuÃƒÂ¡rio Cliente
+  // 3. UsuÃƒÆ’Ã‚Â¡rio Cliente
   const customerUser = db.get('SELECT * FROM users WHERE email = ?', 'cliente@teste.com');
   if (!customerUser) {
     const result = db.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Cliente Teste', 'cliente@teste.com', hashedPassword, 'customer', 'ativo');
@@ -1326,7 +1390,7 @@ async function initTestData() {
     db.run('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', result.lastInsertRowid, '(11) 98888-7777', '123.456.789-00');
     console.log('Test Customer created: cliente@teste.com / 123456');
   } else {
-    // Garantir senha e status atualizados se jÃƒÂ¡ existir
+    // Garantir senha e status atualizados se jÃƒÆ’Ã‚Â¡ existir
     db.run('UPDATE users SET password = ?, role = "customer", status = "ativo" WHERE email = ?', hashedPassword, 'cliente@teste.com');
   }
 }
@@ -1416,7 +1480,7 @@ async function startServer() {
 
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
-      return res.status(400).json({ error: 'JSON invÃ¡lido no corpo da requisiÃ§Ã£o' });
+      return res.status(400).json({ error: 'JSON invÃƒÂ¡lido no corpo da requisiÃƒÂ§ÃƒÂ£o' });
     }
     return next(err);
   });
@@ -1427,7 +1491,7 @@ async function startServer() {
   });
 
   // API Routes - AUTH
-  // Busca inteligente de produtos (Posicionada no inÃ­cio para evitar conflitos)
+  // Busca inteligente de produtos (Posicionada no inÃƒÂ­cio para evitar conflitos)
   app.get('/api/products/search', (req, res) => {
     try {
       const queryStr = req.query.q as string;
@@ -1820,6 +1884,7 @@ async function startServer() {
   app.get('/api/favorites', authenticate, (req, res) => {
     try {
       const user = (req as any).user;
+      const newBadgeDays = resolveNewBadgeDays();
       const favorites = db.all(`
         SELECT
           f.product_id,
@@ -1829,7 +1894,9 @@ async function startServer() {
           p.image,
           p.price,
           p.sale_price,
-          p.status
+          p.status,
+          p.is_new,
+          p.created_at AS product_created_at
         FROM favorites f
         JOIN products p ON p.id = f.product_id
         WHERE f.user_id = ?
@@ -1837,8 +1904,14 @@ async function startServer() {
         ORDER BY f.created_at DESC
       `, user.id) as any[];
 
-      const favoriteIds = favorites.map((item) => Number(item.product_id));
-      return res.json({ favorites, favorite_ids: favoriteIds });
+      const normalizedFavorites = favorites.map((item) => ({
+        ...item,
+        image: normalizePublicMediaUrl(item?.image),
+        is_new: resolveProductIsNew({ is_new: item?.is_new, created_at: item?.product_created_at }, newBadgeDays),
+      }));
+
+      const favoriteIds = normalizedFavorites.map((item) => Number(item.product_id));
+      return res.json({ favorites: normalizedFavorites, favorite_ids: favoriteIds });
     } catch (error) {
       console.error('Fetch Favorites Error:', error);
       return res.status(500).json({ error: 'Erro ao buscar favoritos' });
@@ -1850,12 +1923,12 @@ async function startServer() {
     const productId = Number(req.params.productId);
 
     if (!Number.isInteger(productId) || productId <= 0) {
-      return res.status(400).json({ error: 'product_id invÃ¡lido' });
+      return res.status(400).json({ error: 'product_id invÃƒÂ¡lido' });
     }
 
     const product = db.get('SELECT id, status FROM products WHERE id = ?', productId) as any;
     if (!product || product.status !== 'active') {
-      return res.status(404).json({ error: 'Produto nÃ£o encontrado' });
+      return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
     }
 
     try {
@@ -1872,7 +1945,7 @@ async function startServer() {
     const productId = Number(req.params.productId);
 
     if (!Number.isInteger(productId) || productId <= 0) {
-      return res.status(400).json({ error: 'product_id invÃ¡lido' });
+      return res.status(400).json({ error: 'product_id invÃƒÂ¡lido' });
     }
 
     try {
@@ -1887,7 +1960,7 @@ async function startServer() {
   app.post('/api/auth/forgot-password', async (req, res) => {
     try {
       const { email } = req.body || {};
-      if (!email) return res.status(400).json({ error: 'E-mail obrigatÃ³rio' });
+      if (!email) return res.status(400).json({ error: 'E-mail obrigatÃƒÂ³rio' });
 
       const user = db.get('SELECT * FROM users WHERE email = ?', email) as any;
       if (!user) {
@@ -1921,14 +1994,14 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Forgot password error:', error);
-      res.status(500).json({ error: 'Erro interno ao solicitar recuperaÃ§Ã£o de senha' });
+      res.status(500).json({ error: 'Erro interno ao solicitar recuperaÃƒÂ§ÃƒÂ£o de senha' });
     }
   });
 
   app.post('/api/auth/reset-password', async (req, res) => {
     try {
       const { token, new_password } = req.body || {};
-      if (!token || !new_password) return res.status(400).json({ error: 'Token e nova senha sÃ£o obrigatÃ³rios' });
+      if (!token || !new_password) return res.status(400).json({ error: 'Token e nova senha sÃƒÂ£o obrigatÃƒÂ³rios' });
 
       const resetRequest = db.get(
         'SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0 AND expires_at > CURRENT_TIMESTAMP',
@@ -1936,7 +2009,7 @@ async function startServer() {
       ) as any;
 
       if (!resetRequest) {
-        return res.status(400).json({ error: 'Token invÃ¡lido ou expirado' });
+        return res.status(400).json({ error: 'Token invÃƒÂ¡lido ou expirado' });
       }
 
       const hashedPassword = await hashPassword(new_password);
@@ -1993,7 +2066,12 @@ async function startServer() {
         ${whereClause}
         ORDER BY p.created_at DESC
         LIMIT ? OFFSET ?
-      `, ...params, limit, offset);
+      `, ...params, limit, offset) as any[];
+
+      const normalizedProducts = products.map((product) => ({
+        ...product,
+        image: normalizePublicMediaUrl(product?.image),
+      }));
 
       const totalResult = db.get(`
         SELECT COUNT(*) as total 
@@ -2004,7 +2082,7 @@ async function startServer() {
       const total = totalResult?.total || 0;
 
       res.json({
-        products,
+        products: normalizedProducts,
         pagination: {
           page,
           limit,
@@ -2052,7 +2130,7 @@ async function startServer() {
 
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome do produto ÃƒÂ© obrigatÃƒÂ³rio' });
+      return res.status(400).json({ error: 'Nome do produto ÃƒÆ’Ã‚Â© obrigatÃƒÆ’Ã‚Â³rio' });
     }
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
@@ -2061,24 +2139,24 @@ async function startServer() {
     const productionSheetValue = productionSheetFile || (typeof production_sheet === 'string' ? production_sheet.trim() : '') || null;
     const finalPrice = Number(price);
     if (!Number.isFinite(finalPrice)) {
-      return res.status(400).json({ error: 'PreÃƒÂ§o invÃƒÂ¡lido' });
+      return res.status(400).json({ error: 'PreÃƒÆ’Ã‚Â§o invÃƒÆ’Ã‚Â¡lido' });
     }
     const finalSalePriceRaw = promotional_price ?? sale_price ?? null;
     const finalSalePrice = finalSalePriceRaw === null || finalSalePriceRaw === '' ? null : Number(finalSalePriceRaw);
     if (finalSalePrice !== null && !Number.isFinite(finalSalePrice)) {
-      return res.status(400).json({ error: 'PreÃƒÂ§o promocional invÃƒÂ¡lido' });
+      return res.status(400).json({ error: 'PreÃƒÆ’Ã‚Â§o promocional invÃƒÆ’Ã‚Â¡lido' });
     }
     const normalizedStitchCount = stitch_count === undefined || stitch_count === null || stitch_count === ''
       ? null
       : Number(stitch_count);
     if (normalizedStitchCount !== null && !Number.isFinite(normalizedStitchCount)) {
-      return res.status(400).json({ error: 'Quantidade de pontos invÃƒÂ¡lida' });
+      return res.status(400).json({ error: 'Quantidade de pontos invÃƒÆ’Ã‚Â¡lida' });
     }
     const normalizedCategoryId = category_id === undefined || category_id === null || category_id === ''
       ? null
       : Number(category_id);
     if (normalizedCategoryId !== null && !Number.isFinite(normalizedCategoryId)) {
-      return res.status(400).json({ error: 'Categoria principal invÃƒÂ¡lida' });
+      return res.status(400).json({ error: 'Categoria principal invÃƒÆ’Ã‚Â¡lida' });
     }
 
     const uniqueSlug = createUniqueProductSlug(normalizedName);
@@ -2132,7 +2210,7 @@ async function startServer() {
         });
       }
 
-      // Arquivos de ProduÃƒÂ§ÃƒÂ£o
+      // Arquivos de ProduÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o
       if (files['production_files']) {
         files['production_files'].forEach(f => {
           db.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, f.originalname, `/uploads/${f.filename}`, 'production');
@@ -2200,7 +2278,7 @@ async function startServer() {
     const existingProduct = db.get('SELECT * FROM products WHERE id = ?', productId) as any;
 
     if (!existingProduct) {
-      return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
+      return res.status(404).json({ error: 'Produto nÃƒÆ’Ã‚Â£o encontrado' });
     }
 
     const files = (req.files || {}) as { [fieldname: string]: Express.Multer.File[] };
@@ -2219,7 +2297,8 @@ async function startServer() {
       colors,
       tags,
       tag_ids,
-      downloadable_files
+      downloadable_files,
+      gallery_urls
     } = req.body;
 
     const parseIdArray = (rawValue: any): number[] => {
@@ -2277,7 +2356,7 @@ async function startServer() {
       : existingProduct.colors;
 
     if (nextStitchCount !== null && !Number.isFinite(Number(nextStitchCount))) {
-      return res.status(400).json({ error: 'Quantidade de pontos invÃ¡lida' });
+      return res.status(400).json({ error: 'Quantidade de pontos invÃƒÂ¡lida' });
     }
 
     const productionSheetFile = files['production_sheet']?.[0]?.filename
@@ -2326,7 +2405,7 @@ async function startServer() {
             fs.unlinkSync(oldSheetFsPath);
           }
         } catch (fileError) {
-          console.warn('Falha ao remover folha de produÃƒÂ§ÃƒÂ£o antiga:', fileError);
+          console.warn('Falha ao remover folha de produÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o antiga:', fileError);
         }
       }
 
@@ -2349,6 +2428,40 @@ async function startServer() {
 
         if (finalCategoryIds.length > 0) {
           finalCategoryIds.forEach((cid) => db.run('INSERT IGNORE INTO product_category_relations (product_id, category_id) VALUES (?, ?)', productId, cid));
+        }
+      }
+
+      const hasNewGalleryFiles = Array.isArray(files['gallery']) && files['gallery'].length > 0;
+      const hasGalleryUrlsPayload = gallery_urls !== undefined;
+      if (hasNewGalleryFiles || hasGalleryUrlsPayload) {
+        db.run(`
+          DELETE FROM product_images
+          WHERE product_id = ?
+            AND (file_type = 'gallery' OR file_type IS NULL OR file_type = '')
+        `, productId);
+
+        if (hasGalleryUrlsPayload) {
+          let parsedGalleryUrls: string[] = [];
+          if (Array.isArray(gallery_urls)) {
+            parsedGalleryUrls = gallery_urls.map((value) => String(value).trim()).filter(Boolean);
+          } else if (typeof gallery_urls === 'string' && gallery_urls.trim()) {
+            try {
+              const parsed = JSON.parse(gallery_urls);
+              parsedGalleryUrls = Array.isArray(parsed) ? parsed.map((value) => String(value).trim()).filter(Boolean) : [];
+            } catch {
+              parsedGalleryUrls = gallery_urls.split(',').map((value) => value.trim()).filter(Boolean);
+            }
+          }
+
+          parsedGalleryUrls.forEach((url) => {
+            db.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, url, 'gallery');
+          });
+        }
+
+        if (hasNewGalleryFiles) {
+          files['gallery'].forEach((file) => {
+            db.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${file.filename}`, 'gallery');
+          });
         }
       }
 
@@ -2418,9 +2531,12 @@ async function startServer() {
 
   app.get('/api/admin/products/:id', authenticate, isAdmin, (req, res) => {
     const product = db.get('SELECT * FROM products WHERE id = ?', req.params.id) as any;
-    if (!product) return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
+    if (!product) return res.status(404).json({ error: 'Produto nÃƒÆ’Ã‚Â£o encontrado' });
 
-    const images = db.all('SELECT * FROM product_images WHERE product_id = ?', req.params.id);
+    const images = (db.all('SELECT * FROM product_images WHERE product_id = ?', req.params.id) as any[]).map((image) => ({
+      ...image,
+      url: normalizePublicMediaUrl(image?.url),
+    }));
     const files = db.all('SELECT * FROM product_files WHERE product_id = ?', req.params.id);
     const categoryRelations = db.all('SELECT category_id FROM product_category_relations WHERE product_id = ?', req.params.id) as any[];
     const tags = db.all(`
@@ -2430,7 +2546,12 @@ async function startServer() {
       WHERE pt.product_id = ?
     `, req.params.id);
 
-    res.json({ ...product, images, files, tags, category_ids: categoryRelations.map((row) => row.category_id) });
+    const normalizedProduct = {
+      ...product,
+      image: normalizePublicMediaUrl(product?.image),
+      production_sheet: normalizePublicMediaUrl(product?.production_sheet),
+    };
+    res.json({ ...normalizedProduct, images, files, tags, category_ids: categoryRelations.map((row) => row.category_id) });
   });
 
   app.delete('/api/admin/products/:id', authenticate, isAdmin, (req, res) => {
@@ -2464,7 +2585,7 @@ async function startServer() {
     const { name, slug: rawSlug, parent_id, sort_order, status, description } = req.body;
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome da categoria ÃƒÂ© obrigatÃƒÂ³rio' });
+      return res.status(400).json({ error: 'Nome da categoria ÃƒÆ’Ã‚Â© obrigatÃƒÆ’Ã‚Â³rio' });
     }
 
     const safeName = normalizedName.slice(0, 255);
@@ -2514,7 +2635,7 @@ async function startServer() {
     const { name, slug: rawSlug, parent_id, sort_order, status, description } = req.body;
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome da categoria ÃƒÂ© obrigatÃƒÂ³rio' });
+      return res.status(400).json({ error: 'Nome da categoria ÃƒÆ’Ã‚Â© obrigatÃƒÆ’Ã‚Â³rio' });
     }
 
     const safeName = normalizedName.slice(0, 255);
@@ -2547,7 +2668,7 @@ async function startServer() {
       `, categoryId) as any;
 
       if (!updatedCategory) {
-        return res.status(404).json({ error: 'Categoria nÃƒÂ£o encontrada' });
+        return res.status(404).json({ error: 'Categoria nÃƒÆ’Ã‚Â£o encontrada' });
       }
 
       return res.status(200).json(updatedCategory);
@@ -2582,7 +2703,7 @@ async function startServer() {
       .filter((value: number) => Number.isInteger(value) && value > 0);
 
     if (normalizedIds.length === 0) {
-      return res.status(400).json({ error: 'Nenhuma categoria vÃƒÂ¡lida foi informada' });
+      return res.status(400).json({ error: 'Nenhuma categoria vÃƒÆ’Ã‚Â¡lida foi informada' });
     }
 
     try {
@@ -2682,7 +2803,7 @@ async function startServer() {
       return res.status(400).json({ error: 'Carrinho vazio' });
     }
     if (!['pix', 'credit_card', 'debit_card'].includes(payment_method)) {
-      return res.status(400).json({ error: 'MÃ©todo de pagamento invÃ¡lido' });
+      return res.status(400).json({ error: 'MÃƒÂ©todo de pagamento invÃƒÂ¡lido' });
     }
 
     try {
@@ -2693,12 +2814,12 @@ async function startServer() {
         const productId = Number(item?.product_id);
         const quantity = Number(item?.quantity || 1);
         if (!Number.isInteger(productId) || productId <= 0 || !Number.isInteger(quantity) || quantity <= 0) {
-          return res.status(400).json({ error: 'Itens invÃ¡lidos no checkout' });
+          return res.status(400).json({ error: 'Itens invÃƒÂ¡lidos no checkout' });
         }
 
         const product = db.get('SELECT id, name, slug, price, sale_price FROM products WHERE id = ?', productId) as any;
         if (!product) {
-          return res.status(400).json({ error: `Produto ${productId} nÃ£o encontrado` });
+          return res.status(400).json({ error: `Produto ${productId} nÃƒÂ£o encontrado` });
         }
 
         const unitPrice = product.sale_price !== null && product.sale_price !== undefined
@@ -2716,7 +2837,7 @@ async function startServer() {
       }
 
       if (orderItems.length === 0 || subtotal <= 0) {
-        return res.status(400).json({ error: 'NÃ£o foi possÃ­vel calcular o total do pedido' });
+        return res.status(400).json({ error: 'NÃƒÂ£o foi possÃƒÂ­vel calcular o total do pedido' });
       }
 
       const payerEmail = String((payer as any)?.email || user?.email || '').trim().toLowerCase();
@@ -2725,10 +2846,10 @@ async function startServer() {
       const payerCpf = normalizeCPF((payer as any)?.cpf);
 
       if (!payerEmail) {
-        return res.status(400).json({ error: 'E-mail do pagador Ã© obrigatÃ³rio' });
+        return res.status(400).json({ error: 'E-mail do pagador ÃƒÂ© obrigatÃƒÂ³rio' });
       }
       if (!payerCpf) {
-        return res.status(400).json({ error: 'CPF do pagador Ã© obrigatÃ³rio' });
+        return res.status(400).json({ error: 'CPF do pagador ÃƒÂ© obrigatÃƒÂ³rio' });
       }
 
       const createOrderTransaction = db.transaction((payload: any) => {
@@ -2875,6 +2996,23 @@ async function startServer() {
         }
       }).catch(err => console.error('Failed to send order_created email:', err));
 
+      const orderNotificationEmail = getOrderNotificationEmail();
+      if (orderNotificationEmail) {
+        sendEmail({
+          to: orderNotificationEmail,
+          templateKey: 'order_created',
+          variables: {
+            name: 'Equipe',
+            order_id: orderId,
+            order_total: `R$ ${subtotal.toFixed(2)}`,
+            order_status: paymentStatus,
+            items: `<ul>${itemsHtml}</ul>`,
+            payment_method: payment_method,
+            account_url: `${appUrl}/admin/pedidos`,
+          },
+        }).catch((err) => console.error('Failed to send order_created team email:', err));
+      }
+
       return res.json({
         success: true,
         mode,
@@ -2900,7 +3038,7 @@ async function startServer() {
     try {
       const user = (req as any).user;
       const paymentId = String(req.params.payment_id || '').trim();
-      if (!paymentId) return res.status(400).json({ error: 'payment_id invÃ¡lido' });
+      if (!paymentId) return res.status(400).json({ error: 'payment_id invÃƒÂ¡lido' });
 
       const paymentClient = createMercadoPagoPaymentClient();
       const payment = await paymentClient.get({ id: paymentId });
@@ -2975,6 +3113,21 @@ async function startServer() {
                     downloads_url: `${appUrl}/conta`,
                   },
                 }).catch(err => console.error('Failed to send order_paid email:', err));
+
+                const orderNotificationEmail = getOrderNotificationEmail();
+                if (orderNotificationEmail) {
+                  sendEmail({
+                    to: orderNotificationEmail,
+                    templateKey: 'order_paid',
+                    variables: {
+                      name: 'Equipe',
+                      order_id: order.id,
+                      order_total: `R$ ${order.total.toFixed(2)}`,
+                      items: `<ul>${itemsHtml}</ul>`,
+                      downloads_url: `${appUrl}/admin/pedidos`,
+                    },
+                  }).catch((err) => console.error('Failed to send order_paid team email:', err));
+                }
               }
             } else if (paymentStatus === 'rejected' || paymentStatus === 'cancelled') {
               db.run('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', paymentStatus, Number(order.id));
@@ -3077,7 +3230,7 @@ async function startServer() {
                 AND f.file_path <> ''
             ) purchased
           ) AS purchased_items
-      `, user.id, profile?.email || '', user.id, user.id, profile?.email || '') as any;
+      `, user.id, profile?.email || '___nomail___', user.id, user.id, profile?.email || '___nomail___') as any;
 
       return res.json({
         user: profile || null,
@@ -3321,7 +3474,7 @@ async function startServer() {
           AND f.file_path IN (${placeholders})
         ORDER BY o.created_at DESC, oi.id DESC
         LIMIT 1
-      `, Number(user.id), normalizedUserEmail, ...DOWNLOAD_ALLOWED_STATUSES, ...filePathCandidates) as any;
+      `, Number(user.id), normalizedUserEmail || '___nomail___', ...DOWNLOAD_ALLOWED_STATUSES, ...filePathCandidates) as any;
 
       if (!ownedDownload) {
         return deny(403, 'Download nao autorizado para este usuario.');
@@ -3478,7 +3631,7 @@ async function startServer() {
           AND f.file_path IS NOT NULL
           AND f.file_path <> ''
         ORDER BY o.created_at DESC, oi.id DESC
-      `, user.id, String(freshUser.email || '').trim().toLowerCase(), ...DOWNLOAD_ALLOWED_STATUSES) as any[];
+      `, user.id, String(freshUser.email || '___nomail___').trim().toLowerCase(), ...DOWNLOAD_ALLOWED_STATUSES) as any[];
 
       return res.json(downloads);
     } catch (error) {
@@ -4072,9 +4225,9 @@ async function startServer() {
           cursorY += estimatedHeight + 6;
         };
 
-        addLine('Digital Bordados - ExportaÃ§Ã£o LGPD', true);
+        addLine('Digital Bordados - ExportaÃƒÂ§ÃƒÂ£o LGPD', true);
         addLine(`Gerado em: ${new Date().toLocaleString('pt-BR')}`);
-        addLine(`UsuÃ¡rio: ${String(payload.user?.name || '')} (${String(payload.user?.email || '')})`);
+        addLine(`UsuÃƒÂ¡rio: ${String(payload.user?.name || '')} (${String(payload.user?.email || '')})`);
         addLine(`Status da conta: ${String(payload.user?.status || '')}`);
         addLine('', false);
 
@@ -4087,30 +4240,30 @@ async function startServer() {
 
         addLine(`Pedidos: ${Array.isArray(payload.orders) ? payload.orders.length : 0}`, true);
         (payload.orders as any[]).forEach((order) => {
-          addLine(`#${order.id} â€¢ ${order.status} â€¢ Total: R$ ${Number(order.total || 0).toFixed(2)} â€¢ ${String(order.created_at || '')}`);
+          addLine(`#${order.id} Ã¢â‚¬Â¢ ${order.status} Ã¢â‚¬Â¢ Total: R$ ${Number(order.total || 0).toFixed(2)} Ã¢â‚¬Â¢ ${String(order.created_at || '')}`);
         });
 
         addLine(`Itens comprados: ${Array.isArray(payload.order_items) ? payload.order_items.length : 0}`, true);
         (payload.order_items as any[]).forEach((item) => {
-          addLine(`#${item.order_id} â€¢ ${item.product_name} â€¢ Qtde: ${item.quantity} â€¢ R$ ${Number(item.price || 0).toFixed(2)}`);
+          addLine(`#${item.order_id} Ã¢â‚¬Â¢ ${item.product_name} Ã¢â‚¬Â¢ Qtde: ${item.quantity} Ã¢â‚¬Â¢ R$ ${Number(item.price || 0).toFixed(2)}`);
         });
 
         addLine(`Favoritos: ${Array.isArray(payload.favorites) ? payload.favorites.length : 0}`, true);
-        (payload.favorites as any[]).forEach((fav) => addLine(`${fav.product_name || fav.product_id} â€¢ ${String(fav.created_at || '')}`));
+        (payload.favorites as any[]).forEach((fav) => addLine(`${fav.product_name || fav.product_id} Ã¢â‚¬Â¢ ${String(fav.created_at || '')}`));
 
         addLine(`Consentimentos: ${Array.isArray(payload.consents) ? payload.consents.length : 0}`, true);
         (payload.consents as any[]).forEach((consent) => {
-          addLine(`${consent.consent_key} â€¢ ${Number(consent.granted) ? 'ativo' : 'revogado'} â€¢ versÃ£o ${consent.policy_version || '-'} â€¢ ${String(consent.updated_at || '')}`);
+          addLine(`${consent.consent_key} Ã¢â‚¬Â¢ ${Number(consent.granted) ? 'ativo' : 'revogado'} Ã¢â‚¬Â¢ versÃƒÂ£o ${consent.policy_version || '-'} Ã¢â‚¬Â¢ ${String(consent.updated_at || '')}`);
         });
 
-        addLine(`Aceites de polÃ­ticas: ${Array.isArray(payload.policy_acceptances) ? payload.policy_acceptances.length : 0}`, true);
+        addLine(`Aceites de polÃƒÂ­ticas: ${Array.isArray(payload.policy_acceptances) ? payload.policy_acceptances.length : 0}`, true);
         (payload.policy_acceptances as any[]).forEach((acceptance) => {
-          addLine(`${acceptance.policy_type} â€¢ v${acceptance.policy_version} â€¢ ${String(acceptance.accepted_at || '')}`);
+          addLine(`${acceptance.policy_type} Ã¢â‚¬Â¢ v${acceptance.policy_version} Ã¢â‚¬Â¢ ${String(acceptance.accepted_at || '')}`);
         });
 
-        addLine(`SolicitaÃ§Ãµes LGPD: ${Array.isArray(payload.lgpd_requests) ? payload.lgpd_requests.length : 0}`, true);
+        addLine(`SolicitaÃƒÂ§ÃƒÂµes LGPD: ${Array.isArray(payload.lgpd_requests) ? payload.lgpd_requests.length : 0}`, true);
         (payload.lgpd_requests as any[]).forEach((requestItem) => {
-          addLine(`#${requestItem.id} â€¢ ${requestItem.request_type} â€¢ ${requestItem.status} â€¢ ${String(requestItem.created_at || '')}`);
+          addLine(`#${requestItem.id} Ã¢â‚¬Â¢ ${requestItem.request_type} Ã¢â‚¬Â¢ ${requestItem.status} Ã¢â‚¬Â¢ ${String(requestItem.created_at || '')}`);
         });
 
         const pdfBytes = doc.output('arraybuffer');
@@ -4694,7 +4847,7 @@ async function startServer() {
       const adminUser = (req as any).user;
       const consentId = Number(req.params.id);
       if (!Number.isFinite(consentId) || consentId <= 0) {
-        return res.status(400).json({ error: 'ID de consentimento inválido' });
+        return res.status(400).json({ error: 'ID de consentimento invÃ¡lido' });
       }
 
       const consent = db.get(
@@ -4707,7 +4860,7 @@ async function startServer() {
       ) as any;
 
       if (!consent) {
-        return res.status(404).json({ error: 'Consentimento não encontrado' });
+        return res.status(404).json({ error: 'Consentimento nÃ£o encontrado' });
       }
 
       const granted = parseBooleanSetting(req.body?.granted, false);
@@ -5012,7 +5165,7 @@ async function startServer() {
     const normalizedName = typeof name === 'string' ? name.trim() : '';
 
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome da tag ÃƒÂ© obrigatÃƒÂ³rio' });
+      return res.status(400).json({ error: 'Nome da tag ÃƒÆ’Ã‚Â© obrigatÃƒÆ’Ã‚Â³rio' });
     }
 
     const safeName = normalizedName.slice(0, 255);
@@ -5067,11 +5220,11 @@ async function startServer() {
 
     const orderTotal = Number(total);
     if (!Number.isFinite(orderTotal) || orderTotal < 0) {
-      return res.status(400).json({ error: 'total invÃ¡lido' });
+      return res.status(400).json({ error: 'total invÃƒÂ¡lido' });
     }
 
     if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'items Ã© obrigatÃ³rio e deve conter ao menos 1 item' });
+      return res.status(400).json({ error: 'items ÃƒÂ© obrigatÃƒÂ³rio e deve conter ao menos 1 item' });
     }
 
     let normalizedItems: Array<{
@@ -5112,12 +5265,12 @@ async function startServer() {
       if (typeof error?.message === 'string' && error.message.startsWith('item_')) {
         return res.status(400).json({ error: error.message });
       }
-      return res.status(400).json({ error: 'items invÃ¡lidos' });
+      return res.status(400).json({ error: 'items invÃƒÂ¡lidos' });
     }
 
     const rawUserId = user_id === null || user_id === undefined || user_id === '' ? null : Number(user_id);
     if (rawUserId !== null && (!Number.isInteger(rawUserId) || rawUserId <= 0)) {
-      return res.status(400).json({ error: 'user_id invÃ¡lido' });
+      return res.status(400).json({ error: 'user_id invÃƒÂ¡lido' });
     }
 
     try {
@@ -5204,7 +5357,7 @@ async function startServer() {
         WHERE o.id = ?
       `, req.params.id) as any;
 
-      if (!order) return res.status(404).json({ error: 'Pedido nÃƒÂ£o encontrado' });
+      if (!order) return res.status(404).json({ error: 'Pedido nÃƒÆ’Ã‚Â£o encontrado' });
 
       const items = db.all(`
         SELECT oi.*, p.name 
@@ -5243,6 +5396,21 @@ async function startServer() {
   // API Routes - ADMIN USERS
   app.get('/api/admin/users', authenticate, isAdmin, (req, res) => {
     try {
+      const page = Math.max(1, Number(req.query.page || 1));
+      const limitRaw = Number(req.query.limit || 20);
+      const limit = Math.min(200, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 20));
+      const offset = (page - 1) * limit;
+      const searchTerm = String(req.query.search || '').trim().toLowerCase();
+      const roleFilter = String(req.query.role || 'all').trim().toLowerCase();
+      const { whereClause, params } = buildUsersBaseQuery({ searchTerm, roleFilter });
+
+      const totalRow = db.get(`
+        SELECT COUNT(*) AS total
+        FROM users u
+        ${whereClause}
+      `, ...params) as any;
+      const total = Number(totalRow?.total || 0);
+
       const users = db.all(`
         SELECT 
           u.id, u.name, u.email, u.role, u.status, u.created_at,
@@ -5252,16 +5420,99 @@ async function startServer() {
           (SELECT SUM(total) FROM orders o WHERE o.user_id = u.id AND o.status = 'paid') as total_spent
         FROM users u
         LEFT JOIN customers c ON c.user_id = u.id
+        ${whereClause}
         ORDER BY u.created_at DESC
-      `);
-      res.json(users);
+        LIMIT ? OFFSET ?
+      `, ...params, limit, offset);
+
+      res.json({
+        data: users,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+      });
     } catch (error) {
       console.error('Admin Fetch Users Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar usuÃƒÂ¡rios' });
+      res.status(500).json({ error: 'Erro ao buscar usuários' });
     }
   });
 
-  app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
+  app.get('/api/admin/users/export', authenticate, isAdmin, (req, res) => {
+    try {
+      const format = String(req.query.format || 'csv').trim().toLowerCase();
+      const searchTerm = String(req.query.search || '').trim().toLowerCase();
+      const roleFilter = String(req.query.role || 'all').trim().toLowerCase();
+      const { whereClause, params } = buildUsersBaseQuery({ searchTerm, roleFilter });
+
+      const users = db.all(`
+        SELECT 
+          u.id, u.name, u.email, u.role, u.status, u.created_at,
+          u.phone, u.cpf, u.first_name, u.last_name, u.date_registered,
+          c.address, c.city, c.state, c.zip, c.country,
+          (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) as order_count,
+          (SELECT SUM(total) FROM orders o WHERE o.user_id = u.id AND o.status = 'paid') as total_spent
+        FROM users u
+        LEFT JOIN customers c ON c.user_id = u.id
+        ${whereClause}
+        ORDER BY u.created_at DESC
+      `, ...params) as any[];
+
+      const headers = [
+        'ID', 'Nome', 'Email', 'Cargo', 'Status', 'DataCadastro',
+        'Pedidos', 'TotalGasto', 'Telefone', 'CPF', 'PrimeiroNome', 'Sobrenome',
+        'DataRegistro', 'Endereco', 'Cidade', 'Estado', 'CEP', 'Pais',
+      ];
+      const lines = users.map((u) => [
+        u.id,
+        u.name,
+        u.email,
+        u.role,
+        u.status,
+        u.created_at,
+        Number(u.order_count || 0),
+        Number(u.total_spent || 0).toFixed(2),
+        u.phone || '',
+        u.cpf || '',
+        u.first_name || '',
+        u.last_name || '',
+        u.date_registered || '',
+        u.address || '',
+        u.city || '',
+        u.state || '',
+        u.zip || '',
+        u.country || '',
+      ]);
+
+      if (format === 'excel' || format === 'xls') {
+        const tableRows = lines
+          .map((cols) => `<tr>${cols.map((col) => `<td>${String(col ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>`).join('')}</tr>`)
+          .join('');
+        const tableHeader = `<tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>`;
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /></head><body><table border="1">${tableHeader}${tableRows}</table></body></html>`;
+        const filename = `clientes_${new Date().toISOString().slice(0, 10)}.xls`;
+        res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.send(html);
+      }
+
+      const csvRows = [
+        headers.map(escapeCsvValue).join(';'),
+        ...lines.map((cols) => cols.map(escapeCsvValue).join(';')),
+      ];
+      const csv = `\uFEFF${csvRows.join('\n')}`;
+      const filename = `clientes_${new Date().toISOString().slice(0, 10)}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(csv);
+    } catch (error) {
+      console.error('Admin Export Users Error:', error);
+      return res.status(500).json({ error: 'Erro ao exportar clientes' });
+    }
+  });
+app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     const {
       name,
       email,
@@ -5286,12 +5537,12 @@ async function startServer() {
     const normalizedStatus = typeof status === 'string' && status.trim() ? status.trim() : 'ativo';
 
     if (!normalizedName || !normalizedEmail || !password) {
-      return res.status(400).json({ error: 'Nome, e-mail e senha sÃƒÂ£o obrigatÃƒÂ³rios' });
+      return res.status(400).json({ error: 'Nome, e-mail e senha sÃƒÆ’Ã‚Â£o obrigatÃƒÆ’Ã‚Â³rios' });
     }
 
     const existingUser = db.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
     if (existingUser) {
-      return res.status(409).json({ error: 'E-mail jÃƒÂ¡ cadastrado' });
+      return res.status(409).json({ error: 'E-mail jÃƒÆ’Ã‚Â¡ cadastrado' });
     }
 
     const hashedPassword = await hashPassword(String(password));
@@ -5367,10 +5618,10 @@ async function startServer() {
       return res.status(201).json(createdUser);
     } catch (error: any) {
       if (error?.message?.includes('Duplicate entry') || error?.code === 'ER_DUP_ENTRY') {
-        return res.status(409).json({ error: 'E-mail jÃƒÂ¡ cadastrado' });
+        return res.status(409).json({ error: 'E-mail jÃƒÆ’Ã‚Â¡ cadastrado' });
       }
       console.error('Admin Create User Error:', error);
-      return res.status(500).json({ error: 'Erro ao cadastrar usuÃƒÂ¡rio' });
+      return res.status(500).json({ error: 'Erro ao cadastrar usuÃƒÆ’Ã‚Â¡rio' });
     }
   });
 
@@ -5400,7 +5651,7 @@ async function startServer() {
     const normalizedStatus = typeof status === 'string' && status.trim() ? status.trim() : 'ativo';
 
     if (!normalizedName || !normalizedEmail || !password) {
-      return res.status(400).json({ error: 'name, email e password sÃ£o obrigatÃ³rios' });
+      return res.status(400).json({ error: 'name, email e password sÃƒÂ£o obrigatÃƒÂ³rios' });
     }
 
     const existingUser = db.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
@@ -5473,14 +5724,14 @@ async function startServer() {
         return res.status(409).json({ error: 'already_exists', id: duplicate ? Number(duplicate.id) : null });
       }
       console.error('Admin Import User Error:', error);
-      return res.status(500).json({ error: 'Erro ao importar usuÃ¡rio' });
+      return res.status(500).json({ error: 'Erro ao importar usuÃƒÂ¡rio' });
     }
   });
 
   const adminUpdateUserHandler = async (req: express.Request, res: express.Response) => {
     const userId = Number(req.params.id);
     if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: 'ID de usuÃ¡rio invÃ¡lido' });
+      return res.status(400).json({ error: 'ID de usuÃƒÂ¡rio invÃƒÂ¡lido' });
     }
 
     const {
@@ -5508,17 +5759,17 @@ async function startServer() {
     const normalizedPassword = typeof password === 'string' ? password.trim() : '';
 
     if (!normalizedName || !normalizedEmail) {
-      return res.status(400).json({ error: 'Nome e e-mail sÃ£o obrigatÃ³rios' });
+      return res.status(400).json({ error: 'Nome e e-mail sÃƒÂ£o obrigatÃƒÂ³rios' });
     }
 
     const existingUser = db.get('SELECT id FROM users WHERE id = ?', userId) as any;
     if (!existingUser) {
-      return res.status(404).json({ error: 'UsuÃ¡rio nÃ£o encontrado' });
+      return res.status(404).json({ error: 'UsuÃƒÂ¡rio nÃƒÂ£o encontrado' });
     }
 
     const duplicateEmail = db.get('SELECT id FROM users WHERE email = ? AND id <> ?', normalizedEmail, userId) as any;
     if (duplicateEmail) {
-      return res.status(409).json({ error: 'E-mail jÃ¡ cadastrado' });
+      return res.status(409).json({ error: 'E-mail jÃƒÂ¡ cadastrado' });
     }
 
     try {
@@ -5636,7 +5887,7 @@ async function startServer() {
       return res.json(updatedUser);
     } catch (error) {
       console.error('Admin Update User Error:', error);
-      return res.status(500).json({ error: 'Erro ao atualizar usuÃ¡rio' });
+      return res.status(500).json({ error: 'Erro ao atualizar usuÃƒÂ¡rio' });
     }
   };
 
@@ -5650,7 +5901,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Admin Update User Role Error:', error);
-      res.status(500).json({ error: 'Erro ao atualizar cargo do usuÃƒÂ¡rio' });
+      res.status(500).json({ error: 'Erro ao atualizar cargo do usuÃƒÆ’Ã‚Â¡rio' });
     }
   });
 
@@ -5658,13 +5909,13 @@ async function startServer() {
     try {
       // Don't allow deleting self
       if (req.params.id === (req as any).user.id.toString()) {
-        return res.status(400).json({ error: 'VocÃƒÂª nÃƒÂ£o pode excluir a si mesmo' });
+        return res.status(400).json({ error: 'VocÃƒÆ’Ã‚Âª nÃƒÆ’Ã‚Â£o pode excluir a si mesmo' });
       }
       db.run('DELETE FROM users WHERE id = ?', req.params.id);
       res.json({ success: true });
     } catch (error) {
       console.error('Admin Delete User Error:', error);
-      res.status(500).json({ error: 'Erro ao excluir usuÃƒÂ¡rio' });
+      res.status(500).json({ error: 'Erro ao excluir usuÃƒÆ’Ã‚Â¡rio' });
     }
   });
   
@@ -5676,7 +5927,7 @@ async function startServer() {
       res.json(settings);
     } catch (error) {
       console.error('Fetch Settings Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar configuraÃƒÂ§ÃƒÂµes' });
+      res.status(500).json({ error: 'Erro ao buscar configuraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Âµes' });
     }
   });
 
@@ -5697,7 +5948,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Update Settings Error:', error);
-      res.status(500).json({ error: 'Erro ao atualizar configuraÃ§Ãµes' });
+      res.status(500).json({ error: 'Erro ao atualizar configuraÃƒÂ§ÃƒÂµes' });
     }
   });
 
@@ -5713,7 +5964,7 @@ async function startServer() {
       ).trim();
 
       if (!accessToken) {
-        return res.status(400).json({ connected: false, error: 'Access Token nÃ£o informado.' });
+        return res.status(400).json({ connected: false, error: 'Access Token nÃƒÂ£o informado.' });
       }
 
       const testResult = await fetchMercadoPagoAccountInfo(accessToken);
@@ -5733,7 +5984,7 @@ async function startServer() {
       console.error('Mercado Pago test-connection error:', error);
       return res.status(500).json({
         connected: false,
-        error: 'Erro ao testar conexÃ£o com Mercado Pago.',
+        error: 'Erro ao testar conexÃƒÂ£o com Mercado Pago.',
       });
     }
   });
@@ -5752,7 +6003,7 @@ async function startServer() {
   app.get('/api/admin/email-templates/:key', authenticate, isAdmin, (req, res) => {
     try {
       const template = db.get('SELECT * FROM email_templates WHERE `key` = ?', req.params.key);
-      if (!template) return res.status(404).json({ error: 'Template nÃ£o encontrado' });
+      if (!template) return res.status(404).json({ error: 'Template nÃƒÂ£o encontrado' });
       res.json(template);
     } catch (error) {
       console.error('Error fetching email template:', error);
@@ -5763,14 +6014,14 @@ async function startServer() {
   app.put('/api/admin/email-templates/:key', authenticate, isAdmin, (req, res) => {
     try {
       const { subject, body } = req.body;
-      if (!subject || !body) return res.status(400).json({ error: 'Subject e body sÃ£o obrigatÃ³rios' });
+      if (!subject || !body) return res.status(400).json({ error: 'Subject e body sÃƒÂ£o obrigatÃƒÂ³rios' });
 
       const changes = db.run(
         'UPDATE email_templates SET subject = ?, body = ? WHERE `key` = ?',
         subject, body, req.params.key
       );
 
-      if (changes.changes === 0) return res.status(404).json({ error: 'Template nÃ£o encontrado' });
+      if (changes.changes === 0) return res.status(404).json({ error: 'Template nÃƒÂ£o encontrado' });
       res.json({ success: true });
     } catch (error) {
       console.error('Error updating email template:', error);
@@ -5813,10 +6064,10 @@ async function startServer() {
   app.post('/api/admin/email/send-test', authenticate, isAdmin, async (req, res) => {
     try {
       const { to, template_key } = req.body;
-      if (!to || !template_key) return res.status(400).json({ error: 'DestinatÃ¡rio e template_key sÃ£o obrigatÃ³rios' });
+      if (!to || !template_key) return res.status(400).json({ error: 'DestinatÃƒÂ¡rio e template_key sÃƒÂ£o obrigatÃƒÂ³rios' });
 
       const testVars = {
-        name: 'UsuÃ¡rio Teste',
+        name: 'UsuÃƒÂ¡rio Teste',
         email: to,
         login_url: 'https://digitalbordados.com.br/login',
         reset_url: 'https://digitalbordados.com.br/redefinir-senha?token=test',
@@ -5854,19 +6105,19 @@ async function startServer() {
         {
           key: 'user_welcome',
           name: 'Boas-vindas (Novo Cadastro)',
-          subject: 'Bem-vindo(a) Ã  {{store_name}}! ðŸŽ‰',
+          subject: 'Bem-vindo(a) ÃƒÂ  {{store_name}}! Ã°Å¸Å½â€°',
           variables: '["name", "email", "login_url"]',
           body: `<div style="font-family: sans-serif; max-w: 600px; margin: 0 auto; padding: 20px;">
   <div style="text-align: center; margin-bottom: 30px;">
     {{#if store_logo}}<img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 60px;">{{else}}<h2>{{store_name}}</h2>{{/if}}
   </div>
   <div style="background-color: #ffffff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-    <h1 style="color: #1e293b; margin-top: 0;">OlÃ¡, {{name}}!</h1>
-    <p style="color: #475569; font-size: 16px; line-height: 1.6;">Que alegria ter vocÃª conosco. Sua conta foi criada com sucesso e vocÃª jÃ¡ pode explorar todas as nossas matrizes de bordado.</p>
+    <h1 style="color: #1e293b; margin-top: 0;">OlÃƒÂ¡, {{name}}!</h1>
+    <p style="color: #475569; font-size: 16px; line-height: 1.6;">Que alegria ter vocÃƒÂª conosco. Sua conta foi criada com sucesso e vocÃƒÂª jÃƒÂ¡ pode explorar todas as nossas matrizes de bordado.</p>
     <div style="text-align: center; margin: 30px 0;">
       <a href="{{login_url}}" style="background-color: #3b82f6; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Acessar Minha Conta</a>
     </div>
-    <p style="color: #475569; font-size: 14px;">Seu e-mail de acesso Ã©: <strong>{{email}}</strong></p>
+    <p style="color: #475569; font-size: 14px;">Seu e-mail de acesso ÃƒÂ©: <strong>{{email}}</strong></p>
   </div>
 </div>`
         }
@@ -5903,7 +6154,7 @@ async function startServer() {
     if (cached) return res.json(cached);
 
     try {
-      // PerÃ­odo Atual (30 dias)
+      // PerÃƒÂ­odo Atual (30 dias)
       const currentStats = db.get(`
         SELECT 
           SUM(total) as totalSales,
@@ -5913,7 +6164,7 @@ async function startServer() {
           AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
       `) as any;
 
-      // PerÃ­odo Anterior (30-60 dias atrÃ¡s) para cÃ¡lculo de tendÃªncia
+      // PerÃƒÂ­odo Anterior (30-60 dias atrÃƒÂ¡s) para cÃƒÂ¡lculo de tendÃƒÂªncia
       const previousStats = db.get(`
         SELECT 
           SUM(total) as totalSales,
@@ -5933,7 +6184,7 @@ async function startServer() {
         AND created_at < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
       `) as any;
 
-      // FunÃ§Ãµes de cÃ¡lculo de tendÃªncia
+      // FunÃƒÂ§ÃƒÂµes de cÃƒÂ¡lculo de tendÃƒÂªncia
       const calcTrend = (curr: number, prev: number) => {
         if (!prev || prev === 0) return curr > 0 ? '+100%' : '0%';
         const diff = ((curr - prev) / prev) * 100;
@@ -6017,7 +6268,7 @@ async function startServer() {
           AND created_at >= DATE_SUB(CURDATE(), ${interval})
       `) as any;
 
-      // GrÃ¡fico de Vendas
+      // GrÃƒÂ¡fico de Vendas
       const salesChart = db.all(`
         SELECT DATE_FORMAT(created_at, '${dateFormat}') as name, SUM(total) as value
         FROM orders 
@@ -6042,7 +6293,7 @@ async function startServer() {
         LIMIT 5
       `);
 
-      // MÃ©todos de Pagamento
+      // MÃƒÂ©todos de Pagamento
       const paymentMethods = db.all(`
         SELECT payment_method as name, COUNT(*) as value
         FROM orders
@@ -6080,7 +6331,7 @@ async function startServer() {
       });
     } catch (error) {
       console.error('Reports Stats Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar dados dos relatÃ³rios' });
+      res.status(500).json({ error: 'Erro ao buscar dados dos relatÃƒÂ³rios' });
     }
   });
 
@@ -6096,7 +6347,7 @@ async function startServer() {
       res.json(settings);
     } catch (error) {
       console.error('Fetch Public Settings Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar configuraÃƒÂ§ÃƒÂµes' });
+      res.status(500).json({ error: 'Erro ao buscar configuraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Âµes' });
     }
   });
 
@@ -6248,7 +6499,7 @@ async function startServer() {
       const newBadgeDays = resolveNewBadgeDays();
       const products = (db.all(query, ...params, itemsPerPage, offset) as any[]).map((product) => ({
         ...product,
-        is_new: (Number(product.is_new) === 1 || isProductWithinNewWindow(product.created_at || product.updated_at, newBadgeDays)) ? 1 : 0,
+        is_new: resolveProductIsNew(product, newBadgeDays),
       }));
       
       res.json({
@@ -6319,7 +6570,7 @@ async function startServer() {
       const newBadgeDays = resolveNewBadgeDays();
       const product = {
         ...productRow,
-        is_new: (Number(productRow.is_new) === 1 || isProductWithinNewWindow(productRow.created_at || productRow.updated_at, newBadgeDays)) ? 1 : 0,
+        is_new: resolveProductIsNew(productRow, newBadgeDays),
       };
 
       // Related products (all shared categories: primary + extra relations)
@@ -6365,7 +6616,7 @@ async function startServer() {
 
       const relatedProducts = relatedRows.map((relatedProduct) => ({
         ...relatedProduct,
-        is_new: (Number(relatedProduct.is_new) === 1 || isProductWithinNewWindow(relatedProduct.created_at || relatedProduct.updated_at, newBadgeDays)) ? 1 : 0,
+        is_new: resolveProductIsNew(relatedProduct, newBadgeDays),
       }));
 
       // Gallery images
@@ -6379,21 +6630,43 @@ async function startServer() {
           )
         ORDER BY id ASC
       `, product.id) as any[];
-      const gallery = Array.from(new Set(galleryRows.map(row => row.url).filter(Boolean)));
+      const gallery = Array.from(
+        new Set(
+          galleryRows
+            .map((row) => normalizePublicMediaUrl(row?.url))
+            .filter(Boolean),
+        ),
+      );
 
-      res.json({ ...product, gallery, relatedProducts });
+      const normalizedProduct = {
+        ...product,
+        image: normalizePublicMediaUrl(product?.image),
+        production_sheet: normalizePublicMediaUrl(product?.production_sheet),
+      };
+      const normalizedRelatedProducts = relatedProducts.map((relatedProduct) => ({
+        ...relatedProduct,
+        image: normalizePublicMediaUrl(relatedProduct?.image),
+      }));
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug('[api/products/:slug] production_sheet raw:', product?.production_sheet);
+        console.debug('[api/products/:slug] production_sheet normalized:', normalizedProduct.production_sheet);
+        console.debug('[api/products/:slug] gallery normalized:', gallery);
+      }
+
+      res.json({ ...normalizedProduct, gallery, relatedProducts: normalizedRelatedProducts });
     } catch (error) {
       console.error('Error fetching product detail:', error);
       res.status(500).json({ error: 'Erro interno ao buscar produto' });
     }
   });
 
-  // â”€â”€â”€ Reviews â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Reviews Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   app.get('/api/products/:slug/reviews', (req, res) => {
     try {
       const { slug } = req.params;
       const product = db.get('SELECT id FROM products WHERE slug = ?', slug) as any;
-      if (!product) return res.status(404).json({ error: 'Produto nÃ£o encontrado' });
+      if (!product) return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
 
       const reviews = db.all(`
         SELECT r.*, u.name as user_name 
@@ -6408,7 +6681,7 @@ async function startServer() {
       res.json({ reviews, avgRating: stats?.avgRating || 0 });
     } catch (error) {
       console.error('Fetch reviews error:', error);
-      res.status(500).json({ error: 'Erro ao buscar avaliaÃ§Ãµes' });
+      res.status(500).json({ error: 'Erro ao buscar avaliaÃƒÂ§ÃƒÂµes' });
     }
   });
 
@@ -6419,11 +6692,11 @@ async function startServer() {
       const user = (req as any).user;
 
       if (!rating || !comment) {
-        return res.status(400).json({ error: 'Nota e comentÃ¡rio sÃ£o obrigatÃ³rios' });
+        return res.status(400).json({ error: 'Nota e comentÃƒÂ¡rio sÃƒÂ£o obrigatÃƒÂ³rios' });
       }
 
       const product = db.get('SELECT id FROM products WHERE slug = ?', slug) as any;
-      if (!product) return res.status(404).json({ error: 'Produto nÃ£o encontrado' });
+      if (!product) return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
 
       db.run(`
         INSERT INTO reviews (user_id, product_id, rating, comment, status) 
@@ -6433,13 +6706,13 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Submit review error:', error);
-      res.status(500).json({ error: 'Erro ao enviar avaliaÃ§Ã£o' });
+      res.status(500).json({ error: 'Erro ao enviar avaliaÃƒÂ§ÃƒÂ£o' });
     }
   });
 
 
 
-  // â”€â”€â”€ PayPal Utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ PayPal Utilities Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
   function getPayPalConfig() {
     const s = loadSettingsMap([
@@ -6484,7 +6757,7 @@ async function startServer() {
     return Math.round((totalBrl / rate) * 100) / 100;
   }
 
-  // â”€â”€â”€ PayPal Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ PayPal Endpoints Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
   // POST /api/paypal/create-order
   app.post('/api/paypal/create-order', authenticate, async (req, res) => {
@@ -6509,7 +6782,7 @@ async function startServer() {
         const lgpdCompliance = ensureUserLgpdCompliance(Number(freshUser.id));
         if (!lgpdCompliance.ok) {
           return res.status(403).json({
-            error: 'Aceite as polÃ­ticas de privacidade e termos para concluir a compra.',
+            error: 'Aceite as polÃƒÂ­ticas de privacidade e termos para concluir a compra.',
             code: lgpdCompliance.code,
             missing: lgpdCompliance.missing,
           });
@@ -6517,7 +6790,7 @@ async function startServer() {
 
         if (lgpd.requireCheckoutConsent && !parseBooleanSetting(checkout_data_processing_accepted, false)) {
           return res.status(403).json({
-            error: 'Ã‰ necessÃ¡rio consentir com o processamento de dados para finalizar a compra.',
+            error: 'Ãƒâ€° necessÃƒÂ¡rio consentir com o processamento de dados para finalizar a compra.',
             code: 'LGPD_CHECKOUT_CONSENT_REQUIRED',
           });
         }
@@ -6535,8 +6808,8 @@ async function startServer() {
       }
 
       const cfg = getPayPalConfig();
-      if (!cfg.enabled) return res.status(400).json({ error: 'PayPal nÃ£o estÃ¡ habilitado' });
-      if (!cfg.clientId || !cfg.clientSecret) return res.status(400).json({ error: 'Credenciais PayPal nÃ£o configuradas' });
+      if (!cfg.enabled) return res.status(400).json({ error: 'PayPal nÃƒÂ£o estÃƒÂ¡ habilitado' });
+      if (!cfg.clientId || !cfg.clientSecret) return res.status(400).json({ error: 'Credenciais PayPal nÃƒÂ£o configuradas' });
 
       // Validate products and calculate total in BRL
       let totalBrl = 0;
@@ -6544,7 +6817,7 @@ async function startServer() {
       for (const item of items) {
         const product = db.get('SELECT id, name, price, sale_price, status FROM products WHERE id = ?', item.product_id) as any;
         if (!product || product.status !== 'active') {
-          return res.status(400).json({ error: `Produto ID ${item.product_id} nÃ£o encontrado ou inativo` });
+          return res.status(400).json({ error: `Produto ID ${item.product_id} nÃƒÂ£o encontrado ou inativo` });
         }
         const price = product.sale_price || product.price;
         totalBrl += price;
@@ -6623,7 +6896,7 @@ async function startServer() {
     try {
       const user = (req as any).user;
       const { paypal_order_id } = req.body || {};
-      if (!paypal_order_id) return res.status(400).json({ error: 'paypal_order_id Ã© obrigatÃ³rio' });
+      if (!paypal_order_id) return res.status(400).json({ error: 'paypal_order_id ÃƒÂ© obrigatÃƒÂ³rio' });
 
       const order = db.get('SELECT * FROM orders WHERE paypal_order_id = ?', paypal_order_id) as any;
       if (!order) return res.status(404).json({ error: 'Pedido nao encontrado' });
@@ -6658,7 +6931,7 @@ async function startServer() {
         db.run("UPDATE orders SET paypal_status = ? WHERE id = ?", captureStatus, order.id);
         db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
           'paypal', order.id, captureId || paypal_order_id, captureStatus, `Captura com status: ${captureStatus}`);
-        return res.status(400).json({ success: false, status: captureStatus, error: 'Pagamento nÃ£o foi completado' });
+        return res.status(400).json({ success: false, status: captureStatus, error: 'Pagamento nÃƒÂ£o foi completado' });
       }
     } catch (error: any) {
       console.error('PayPal capture-order error:', error?.response?.data || error?.message || error);
@@ -6666,7 +6939,7 @@ async function startServer() {
     }
   });
 
-  // POST /api/webhooks/paypal (pÃºblico)
+  // POST /api/webhooks/paypal (pÃƒÂºblico)
   app.post('/api/webhooks/paypal', async (req, res) => {
     try {
       const payload = req.body || {};
@@ -6723,17 +6996,17 @@ async function startServer() {
     try {
       const cfg = getPayPalConfig();
       if (!cfg.clientId || !cfg.clientSecret) {
-        return res.status(400).json({ ok: false, error: 'Credenciais PayPal nÃ£o configuradas no painel' });
+        return res.status(400).json({ ok: false, error: 'Credenciais PayPal nÃƒÂ£o configuradas no painel' });
       }
       const baseUrl = getPayPalBaseUrl(cfg.mode);
       const token = await getPayPalAccessToken(cfg.clientId, cfg.clientSecret, baseUrl);
       if (token) {
-        return res.json({ ok: true, mode: cfg.mode, message: `ConexÃ£o PayPal (${cfg.mode}) estabelecida com sucesso!` });
+        return res.json({ ok: true, mode: cfg.mode, message: `ConexÃƒÂ£o PayPal (${cfg.mode}) estabelecida com sucesso!` });
       }
-      return res.status(400).json({ ok: false, error: 'NÃ£o foi possÃ­vel obter access token' });
+      return res.status(400).json({ ok: false, error: 'NÃƒÂ£o foi possÃƒÂ­vel obter access token' });
     } catch (error: any) {
       console.error('PayPal test error:', error?.response?.data || error?.message);
-      return res.status(400).json({ ok: false, error: error?.response?.data?.error_description || error?.message || 'Falha na conexÃ£o PayPal' });
+      return res.status(400).json({ ok: false, error: error?.response?.data?.error_description || error?.message || 'Falha na conexÃƒÂ£o PayPal' });
     }
   });
 
@@ -6748,7 +7021,7 @@ async function startServer() {
     }
   });
 
-  // GET /api/checkout/paypal/config (pÃºblico - retorna apenas client_id e modo)
+  // GET /api/checkout/paypal/config (pÃƒÂºblico - retorna apenas client_id e modo)
   app.get('/api/checkout/paypal/config', (req, res) => {
     try {
       const cfg = getPayPalConfig();
@@ -6765,7 +7038,10 @@ async function startServer() {
   });
 
   // Vite Integration
-  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  const isProdEnv = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+  const hasDistIndex = fs.existsSync(path.join(process.cwd(), 'dist', 'index.html')) || fs.existsSync(path.join(__dirname, 'index.html'));
+  const isForceProduction = isProdEnv || process.env.VERCEL || hasDistIndex;
+  if (!isForceProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -6815,8 +7091,8 @@ async function startServer() {
               name: order.customer_name || 'Cliente',
               order_id: order.id,
               order_total: `R$ ${order.total.toFixed(2)}`,
-              pix_code: 'O cÃ³digo PIX foi enviado no momento do checkout. Acesse sua conta para ver os detalhes.',
-              expires_at: '24 horas apÃ³s a compra',
+              pix_code: 'O cÃƒÂ³digo PIX foi enviado no momento do checkout. Acesse sua conta para ver os detalhes.',
+              expires_at: '24 horas apÃƒÂ³s a compra',
             }
           }).catch(err => console.error(`[Cron] Failed to send reminder for order #${order.id}:`, err));
         }
@@ -6854,6 +7130,7 @@ export default async (req: any, res: any) => {
   const app = await appPromise;
   return app(req, res);
 };
+
 
 
 

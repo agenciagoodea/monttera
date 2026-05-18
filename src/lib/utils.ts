@@ -11,3 +11,50 @@ export function formatCurrency(value: number) {
     currency: 'BRL',
   }).format(value);
 }
+
+export function normalizePublicMediaUrl(value?: string | null): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  const domain = 'https://digitalbordados.com.br';
+  const noLeadingSlash = raw.replace(/^\/+/, '');
+
+  if (raw.startsWith('/wp-content/uploads/')) {
+    return `${domain}${raw}`;
+  }
+
+  if (raw.startsWith('wp-content/uploads/')) {
+    return `${domain}/${noLeadingSlash}`;
+  }
+
+  return raw;
+}
+
+export function isNewProduct(
+  createdAt?: string | null,
+  configuredDays?: number | string | null,
+  manualOverride?: boolean,
+): boolean {
+  if (manualOverride) return true;
+
+  const days = Number(configuredDays);
+  if (!Number.isFinite(days) || days <= 0) return false;
+
+  const raw = String(createdAt || '').trim();
+  if (!raw) return false;
+
+  const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+  const normalized = hasTimezone ? raw : `${raw.replace(' ', 'T')}Z`;
+  const createdTime = new Date(normalized).getTime();
+  if (Number.isNaN(createdTime)) return false;
+
+  const ageMs = Date.now() - createdTime;
+  if (ageMs < 0) return true;
+
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  return ageDays < days;
+}
