@@ -602,6 +602,39 @@ function getDownloadRoots(): string[] {
   return Array.from(new Set([...configured, ...defaults]));
 }
 
+function getWpUploadsRoots(): string[] {
+  const configuredRoots = [
+    process.env.WOO_UPLOADS_DIR,
+    process.env.WOOCOMMERCE_UPLOADS_DIR,
+    process.env.DOWNLOADS_BASE_DIR,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .map((value) => value.replace(/\\/g, '/'))
+    .map((value) => {
+      const marker = '/wp-content/uploads/';
+      const idx = value.toLowerCase().indexOf(marker);
+      if (idx >= 0) {
+        return value.slice(0, idx + marker.length).replace(/\/+$/, '');
+      }
+      return value.replace(/\/+$/, '');
+    })
+    .map((value) => path.resolve(value));
+
+  const defaultRoots = [
+    path.resolve(process.cwd(), 'wp-content', 'uploads'),
+    path.resolve(process.cwd(), '..', 'wp-content', 'uploads'),
+  ];
+
+  return Array.from(new Set([...configuredRoots, ...defaultRoots])).filter((root) => {
+    try {
+      return fs.existsSync(root) && fs.statSync(root).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+}
+
 function isInsideRoot(absPath: string, absRoot: string) {
   const rel = path.relative(absRoot, absPath);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
@@ -707,6 +740,23 @@ function normalizePublicMediaUrl(value: unknown) {
   const raw = String(value || '').trim();
   if (!raw) return '';
 
+  const toNodeUploadsUrl = (inputPath: string): string => {
+    const clean = inputPath.replace(/^https?:\/\/[^/]+/i, '');
+    const marker = '/wp-content/uploads/';
+    const idx = clean.toLowerCase().indexOf(marker);
+    if (idx < 0) return '';
+    const rel = clean.slice(idx + marker.length).replace(/^\/+/, '');
+    if (!rel || /^woocommerce_uploads\//i.test(rel)) return '';
+    return `/uploads/${rel}`;
+  };
+
+  const mappedFromWp = toNodeUploadsUrl(raw);
+  if (mappedFromWp) return mappedFromWp;
+
+  if (/^digitalbordados\.com\.br\//i.test(raw)) {
+    return `https://${raw.replace(/^\/+/, '')}`;
+  }
+
   if (/^https?:\/\//i.test(raw)) return raw;
 
   const domain = String(process.env.APP_DOMAIN || 'digitalbordados.com.br').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
@@ -715,6 +765,8 @@ function normalizePublicMediaUrl(value: unknown) {
 
   if (raw.startsWith('/wp-content/uploads/')) return `${base}${raw}`;
   if (raw.startsWith('wp-content/uploads/')) return `${base}/${noLeadingSlash}`;
+  if (raw.startsWith('/uploads/')) return raw;
+  if (raw.startsWith('uploads/')) return `/${noLeadingSlash}`;
 
   return raw;
 }
@@ -1477,6 +1529,10 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '15mb' }));
   app.use(cookieParser());
   app.use('/uploads', express.static('public/uploads'));
+  const wpUploadsRoots = getWpUploadsRoots();
+  wpUploadsRoots.forEach((root) => {
+    app.use('/wp-content/uploads', express.static(root));
+  });
 
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
@@ -3324,18 +3380,28 @@ async function startServer() {
         SELECT
           oi.id,
           oi.product_id,
-          COALESCE(oi.product_name, p.name) AS product_name,
-          COALESCE(oi.product_slug, p.slug) AS product_slug,
-          p.image AS product_image,
+          COALESCE(oi.product_name, p_by_id.name, p_by_slug.name, p_by_name.name) AS product_name,
+          COALESCE(oi.product_slug, p_by_id.slug, p_by_slug.slug, p_by_name.slug) AS product_slug,
+          COALESCE(p_by_id.image, p_by_slug.image, p_by_name.image) AS product_image,
           oi.quantity,
           oi.price
         FROM order_items oi
-        LEFT JOIN products p ON p.id = oi.product_id
+        LEFT JOIN products p_by_id ON p_by_id.id = oi.product_id
+        LEFT JOIN products p_by_slug ON oi.product_id IS NULL
+          AND LOWER(TRIM(COALESCE(p_by_slug.slug, ''))) = LOWER(TRIM(COALESCE(oi.product_slug, '')))
+        LEFT JOIN products p_by_name ON oi.product_id IS NULL
+          AND (oi.product_slug IS NULL OR TRIM(oi.product_slug) = '')
+          AND LOWER(TRIM(COALESCE(p_by_name.name, ''))) = LOWER(TRIM(COALESCE(oi.product_name, '')))
         WHERE oi.order_id = ?
         ORDER BY oi.id ASC
       `, orderId) as any[];
 
-      return res.json({ order, items });
+      const normalizedItems = items.map((item) => ({
+        ...item,
+        product_image: normalizePublicMediaUrl(item?.product_image),
+      }));
+
+      return res.json({ order, items: normalizedItems });
     } catch (error) {
       console.error('Customer Order Detail Error:', error);
       return res.status(500).json({ error: 'Erro ao buscar detalhes do pedido' });
@@ -3350,7 +3416,6 @@ async function startServer() {
     const rawFilePath = String(req.query.path || '').trim();
     const mode = String(req.query.mode || '').trim().toLowerCase();
     const decodedFilePath = decodePathComponentSafe(rawFilePath);
-    const normalizedUserEmail = String(user?.email || '').trim().toLowerCase();
     const logContext: {
       userId?: number | null;
       orderId?: number | null;
@@ -3466,15 +3531,12 @@ async function startServer() {
           AND LOWER(TRIM(COALESCE(p_by_name.name, ''))) = LOWER(TRIM(COALESCE(oi.product_name, '')))
         JOIN product_files f
           ON f.product_id = COALESCE(p_by_id.id, p_by_slug.id, p_by_name.id)
-        WHERE (
-          o.user_id = ?
-          OR LOWER(TRIM(COALESCE(o.customer_email, ''))) = LOWER(TRIM(?))
-        )
+        WHERE o.user_id = ?
           AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})
           AND f.file_path IN (${placeholders})
         ORDER BY o.created_at DESC, oi.id DESC
         LIMIT 1
-      `, Number(user.id), normalizedUserEmail || '___nomail___', ...DOWNLOAD_ALLOWED_STATUSES, ...filePathCandidates) as any;
+      `, Number(user.id), ...DOWNLOAD_ALLOWED_STATUSES, ...filePathCandidates) as any;
 
       if (!ownedDownload) {
         return deny(403, 'Download nao autorizado para este usuario.');
@@ -3623,17 +3685,20 @@ async function startServer() {
           AND LOWER(TRIM(COALESCE(p_by_name.name, ''))) = LOWER(TRIM(COALESCE(oi.product_name, '')))
         LEFT JOIN product_files f
           ON f.product_id = COALESCE(p_by_id.id, p_by_slug.id, p_by_name.id)
-        WHERE (
-          o.user_id = ?
-          OR LOWER(TRIM(COALESCE(o.customer_email, ''))) = LOWER(TRIM(?))
-        )
+        WHERE o.user_id = ?
           AND LOWER(COALESCE(o.status, '')) IN (${statusPlaceholders})
           AND f.file_path IS NOT NULL
           AND f.file_path <> ''
         ORDER BY o.created_at DESC, oi.id DESC
-      `, user.id, String(freshUser.email || '___nomail___').trim().toLowerCase(), ...DOWNLOAD_ALLOWED_STATUSES) as any[];
+      `, user.id, ...DOWNLOAD_ALLOWED_STATUSES) as any[];
 
-      return res.json(downloads);
+      const normalizedDownloads = downloads.map((item) => ({
+        ...item,
+        product_image: normalizePublicMediaUrl(item?.product_image),
+        production_sheet: normalizePublicMediaUrl(item?.production_sheet),
+      }));
+
+      return res.json(normalizedDownloads);
     } catch (error) {
       console.error('Customer Downloads Error:', error);
       return res.status(500).json({ error: 'Erro ao buscar matrizes compradas' });

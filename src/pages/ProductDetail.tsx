@@ -25,6 +25,8 @@ export default function ProductDetail() {
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState<string | null>(null);
+  const [galleryImages, setGalleryImages] = useState<string[]>([]);
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'description' | 'reviews'>('description');
   const [isImageZoomed, setIsImageZoomed] = useState(false);
   const [zoomPosition, setZoomPosition] = useState({ x: 50, y: 50 });
@@ -67,7 +69,12 @@ export default function ProductDetail() {
           console.debug('[ProductDetail] gallery normalized:', normalizedProduct.gallery);
         }
         setProduct(normalizedProduct);
-        setActiveImage(normalizedProduct.image || normalizedProduct.gallery?.[0] || null);
+        const initialGallery = Array.from(
+          new Set([normalizedProduct.image, ...(normalizedProduct.gallery || [])].filter((img): img is string => Boolean(img))),
+        );
+        setGalleryImages(initialGallery);
+        setActiveImage(initialGallery[0] || null);
+        setFailedImages({});
         
         // Fetch reviews
         fetchReviews(slug);
@@ -203,9 +210,12 @@ export default function ProductDetail() {
   const isProductFavorite = isFavorite(product.id);
   const currentPrice = product.sale_price || product.price;
   const discount = product.sale_price ? Math.round((1 - product.sale_price / product.price) * 100) : 0;
-  const gallery = Array.from(
-    new Set([product.image, ...(product.gallery || [])].filter((img): img is string => Boolean(img)))
-  );
+  const gallery = galleryImages;
+  const productionSheetHref = (() => {
+    const value = normalizePublicMediaUrl(product.production_sheet || '');
+    if (!value || value === '#' || value.toLowerCase() === 'null' || value.toLowerCase() === 'undefined') return '';
+    return value;
+  })();
 
   const getRelatedStep = () => {
     const track = relatedTrackRef.current;
@@ -265,8 +275,10 @@ export default function ProductDetail() {
                   src={activeImage || product.image} 
                   alt={product.name} 
                   onError={(event) => {
+                    const failedSrc = (event.currentTarget as HTMLImageElement).src;
+                    setFailedImages((prev) => ({ ...prev, [failedSrc]: true }));
                     if (import.meta.env.DEV) {
-                      console.debug('[ProductDetail] image load error:', (event.currentTarget as HTMLImageElement).src);
+                      console.debug('[ProductDetail] image load error:', failedSrc);
                     }
                   }}
                   className="w-full h-full object-contain relative z-10 drop-shadow-2xl" 
@@ -319,23 +331,31 @@ export default function ProductDetail() {
             >
               {gallery.map((img, idx) => (
                 <button
-                  key={idx}
+                  key={`${img}-${idx}`}
                   onClick={() => setActiveImage(img)}
                   className={`aspect-square rounded-2xl overflow-hidden border-2 transition-all ${
                     activeImage === img ? 'border-blue-600 shadow-lg shadow-blue-100 scale-95' : 'border-slate-100 hover:border-slate-300'
                   }`}
                 >
-                  <img
-                    src={img}
-                    alt={`${product.name} - ${idx}`}
-                    loading="lazy"
-                    onError={(event) => {
-                      if (import.meta.env.DEV) {
-                        console.debug('[ProductDetail] gallery image load error:', (event.currentTarget as HTMLImageElement).src);
-                      }
-                    }}
-                    className="w-full h-full object-cover"
-                  />
+                  {failedImages[img] ? (
+                    <div className="w-full h-full bg-slate-100 text-slate-400 flex items-center justify-center text-[10px] font-black uppercase tracking-wider">
+                      Sem imagem
+                    </div>
+                  ) : (
+                    <img
+                      src={img}
+                      alt={`${product.name} - ${idx}`}
+                      loading="lazy"
+                      onError={(event) => {
+                        const failedSrc = (event.currentTarget as HTMLImageElement).src;
+                        setFailedImages((prev) => ({ ...prev, [img]: true, [failedSrc]: true }));
+                        if (import.meta.env.DEV) {
+                          console.debug('[ProductDetail] gallery image load error:', failedSrc);
+                        }
+                      }}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
                 </button>
               ))}
             </motion.div>
@@ -371,9 +391,9 @@ export default function ProductDetail() {
               </span>
             </div>
 
-            {product.production_sheet && (
+            {productionSheetHref && (
               <a
-                href={product.production_sheet}
+                href={productionSheetHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex w-fit items-center gap-2 px-5 py-2.5 bg-white border-2 border-red-500 text-red-500 rounded-xl font-bold text-sm hover:bg-red-50 hover:shadow-sm transition-all"
