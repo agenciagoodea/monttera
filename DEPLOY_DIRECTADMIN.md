@@ -1,380 +1,1290 @@
-# Deploy Digital Bordados — DirectAdmin / Passenger Node.js
+﻿# Guia de Deploy — Digital Bordados no DirectAdmin com Passenger
 
-> **IMPORTANTE:** Esta aplicação NÃO é um site simples onde basta enviar arquivos.
-> Ela depende de build, dependências Node.js e arquivo de inicialização específico.
-> **NUNCA** envie arquivos diretamente para a pasta da aplicação via FTP/Gerenciador de Arquivos.
-
----
-
-## Índice
-
-1. [Entendendo a Arquitetura](#1-entendendo-a-arquitetura)
-2. [Pré-requisitos](#2-pré-requisitos)
-3. [Configuração Única (Primeira vez)](#3-configuração-única-primeira-vez)
-4. [Fluxo de Atualização (Deploy)](#4-fluxo-de-atualização-deploy)
-5. [Script Automatizado de Deploy](#5-script-automatizado-de-deploy)
-6. [Checklist Pós-Deploy](#6-checklist-pós-deploy)
-7. [Diagnóstico de Problemas](#7-diagnóstico-de-problemas)
-8. [O que NUNCA fazer](#8-o-que-nunca-fazer)
+> Sistema: Node.js 20 + Express + React/Vite + MySQL
+> Ambiente: DirectAdmin / Phusion Passenger (hospedagem compartilhada)
+> Última atualização: 2026-05-19
 
 ---
 
-## 1. Entendendo a Arquitetura
+## AVISO IMPORTANTE
 
-```
-digitalbordados/             ← Pasta da aplicação
-├── dist/                    ← GERADA pelo build (NÃO enviar manualmente)
-│   ├── server.cjs           ← Arquivo de startup do Passenger
-│   ├── server.js            ← Backend compilado
-│   ├── package.json         ← { "type": "commonjs" }
-│   └── assets/              ← Frontend compilado (CSS, JS, imagens)
-├── uploads/                 ← Arquivos enviados pelo admin (matrizes ZIP)
-├── wp-content/              ← Arquivos migrados do WooCommerce (se existir)
-├── node_modules/            ← Dependências (instaladas pelo npm)
-├── scripts/                 ← Scripts de build e diagnóstico
-├── src/                     ← Código-fonte (NÃO roda em produção)
-├── server.ts                ← Código-fonte do backend (NÃO roda em produção)
-├── package.json             ← Manifesto do projeto
-├── .env                     ← Variáveis de ambiente (NUNCA sobrescrever)
-└── .npmrc                   ← Configuração do npm
-```
-
-### Fluxo de funcionamento:
-```
-Código-fonte (server.ts + src/) 
-    → npm run build 
-        → dist/server.cjs (Passenger carrega este arquivo)
-        → dist/assets/ (Frontend estático)
-```
-
-**O Passenger SOMENTE executa `dist/server.cjs`.** Se a pasta `dist` for apagada ou corrompida, o site retorna **erro 503**.
+Este sistema usa **MySQL** como banco de dados oficial.
+NAO existe SQLite em producao. O banco fica no servidor MySQL da hospedagem.
+A pasta dist/ é gerada localmente e enviada ao servidor.
+NUNCA rode `npm run build` no servidor compartilhado.
 
 ---
 
-## 2. Pré-requisitos
+## 1. Estrutura correta da aplicacao no servidor
 
-### No Painel DirectAdmin (Node.js App):
-| Configuração | Valor |
-|---|---|
-| Versão Node.js | **20.x** |
-| Modo | `Production` |
-| Raiz do aplicativo | `digitalbordados` (pasta com `package.json`) |
-| Arquivo de inicialização | `dist/server.cjs` |
-| URL do aplicativo | `digitalbordados.com.br` |
-
-### Ferramentas necessárias na máquina local:
-- **Node.js 20.x** (exatamente a mesma versão do servidor)
-- **npm 10+**
-- **Cliente SSH** (Putty, Terminal, ou o SSH do DirectAdmin)
-- **Cliente SFTP/SCP** (WinSCP, FileZilla no modo SFTP, ou `scp`)
+```
+~/digitalbordados/           <- raiz da aplicacao no servidor
+├── dist/                    <- BUILD GERADO LOCALMENTE (obrigatorio)
+│   ├── server.cjs           <- startup do Passenger
+│   ├── assets/              <- frontend compilado (JS, CSS)
+│   └── ...
+├── node_modules/            <- instalado no servidor via npm install
+├── public/
+│   └── uploads/             <- NUNCA APAGAR (imagens dos produtos)
+├── uploads/
+│   └── arquivos/            <- NUNCA APAGAR (arquivos ZIP/DST para download)
+├── scripts/                 <- scripts auxiliares de build
+├── package.json
+├── package-lock.json
+├── .npmrc
+├── index.html
+├── app.js                   <- entrypoint do Passenger
+└── .env                     <- NUNCA APAGAR (credenciais de producao)
+```
 
 ---
 
-## 3. Configuração Única (Primeira vez)
+## 2. O que pode ser enviado ao servidor
 
-### 3.1. Crie o `.env` no servidor (via SSH)
+| Arquivo/Pasta     | Enviar?    | Quando enviar                   |
+|-------------------|------------|---------------------------------|
+| dist/             | SEMPRE     | Em todo deploy                  |
+| package.json      | SE MUDOU   | Quando adicionar dependencias   |
+| package-lock.json | SE MUDOU   | Junto com package.json          |
+| .npmrc            | SE MUDOU   | Mudancas de config npm          |
+| app.js            | SE MUDOU   | Mudancas no entrypoint          |
+| scripts/          | SE MUDOU   | Mudancas nos scripts de build   |
+| index.html        | SE MUDOU   | Mudancas no HTML base           |
+
+---
+
+## 3. O que NUNCA deve ser apagado no servidor
+
+| Arquivo/Pasta       | Motivo                                              |
+|---------------------|-----------------------------------------------------|
+| .env                | Credenciais de producao (MySQL, JWT, MP, PayPal)    |
+| public/uploads/     | Imagens e capas dos produtos (exibidas no site)     |
+| uploads/arquivos/   | Arquivos ZIP/DST para download pelos clientes       |
+| node_modules/       | Dependencias instaladas (recriar e lento)           |
+
+O banco de dados e MySQL — fica no servidor de banco da hospedagem.
+Nao ha arquivo de banco para preservar no sistema de arquivos.
+
+---
+
+## 4. Como fazer backup antes de atualizar
+
+### 4.1 Backup das pastas criticas (via SSH)
+
+`ash
+# No servidor, faca backup de ambas as pastas
+cd ~/digitalbordados
+tar -czf backup_uploads_$(date +%Y%m%d).tar.gz public/uploads/
+tar -czf backup_arquivos_$(date +%Y%m%d).tar.gz uploads/arquivos/
+`"
+
+# Secao 16: expandir preservacao de uploads
+# Guia de Deploy — Digital Bordados no DirectAdmin com Passenger
+
+> Sistema: Node.js 20 + Express + React/Vite + MySQL
+> Ambiente: DirectAdmin / Phusion Passenger (hospedagem compartilhada)
+> Última atualização: 2026-05-19
+
+---
+
+## AVISO IMPORTANTE
+
+Este sistema usa **MySQL** como banco de dados oficial.
+NAO existe SQLite em producao. O banco fica no servidor MySQL da hospedagem.
+A pasta dist/ é gerada localmente e enviada ao servidor.
+NUNCA rode `npm run build` no servidor compartilhado.
+
+---
+
+## 1. Estrutura correta da aplicacao no servidor
+
+```
+~/digitalbordados/           <- raiz da aplicacao no servidor
+├── dist/                    <- BUILD GERADO LOCALMENTE (obrigatorio)
+│   ├── server.cjs           <- startup do Passenger
+│   ├── assets/              <- frontend compilado (JS, CSS)
+│   └── ...
+├── node_modules/            <- instalado no servidor via npm install
+├── public/
+│   └── uploads/             <- NUNCA APAGAR (imagens dos produtos)
+├── uploads/
+│   └── arquivos/            <- NUNCA APAGAR (arquivos ZIP/DST para download)
+├── scripts/                 <- scripts auxiliares de build
+├── package.json
+├── package-lock.json
+├── .npmrc
+├── index.html
+├── app.js                   <- entrypoint do Passenger
+└── .env                     <- NUNCA APAGAR (credenciais de producao)
+```
+
+---
+
+## 2. O que pode ser enviado ao servidor
+
+| Arquivo/Pasta     | Enviar?    | Quando enviar                   |
+|-------------------|------------|---------------------------------|
+| dist/             | SEMPRE     | Em todo deploy                  |
+| package.json      | SE MUDOU   | Quando adicionar dependencias   |
+| package-lock.json | SE MUDOU   | Junto com package.json          |
+| .npmrc            | SE MUDOU   | Mudancas de config npm          |
+| app.js            | SE MUDOU   | Mudancas no entrypoint          |
+| scripts/          | SE MUDOU   | Mudancas nos scripts de build   |
+| index.html        | SE MUDOU   | Mudancas no HTML base           |
+
+---
+
+## 3. O que NUNCA deve ser apagado no servidor
+
+| Arquivo/Pasta       | Motivo                                              |
+|---------------------|-----------------------------------------------------|
+| .env                | Credenciais de producao (MySQL, JWT, MP, PayPal)    |
+| public/uploads/     | Imagens e capas dos produtos (exibidas no site)     |
+| uploads/arquivos/   | Arquivos ZIP/DST para download pelos clientes       |
+| node_modules/       | Dependencias instaladas (recriar e lento)           |
+
+O banco de dados e MySQL — fica no servidor de banco da hospedagem.
+Nao ha arquivo de banco para preservar no sistema de arquivos.
+
+---
+
+## 4. Como fazer backup antes de atualizar
+
+### 4.1 Backup dos uploads (via SSH)
+
+```bash
+# No servidor, crie um backup da pasta de uploads
+cd ~/digitalbordados
+tar -czf backup_uploads_$(date +%Y%m%d).tar.gz public/uploads/
+```
+
+### 4.2 Backup do .env (via SSH ou SFTP)
+
+```bash
+cp .env .env.backup_$(date +%Y%m%d)
+```
+
+### 4.3 Backup do banco MySQL
+
+Acesse o phpMyAdmin pelo painel DirectAdmin e exporte o banco
+`digitalbordados_novo` como SQL antes de qualquer deploy.
+
+---
+
+## 5. Como gerar o build localmente (na sua maquina)
+
+```bash
+# Na sua maquina local
+cd d:\www\digitalbordados\digitalbordados
+
+# Confirme a versao do Node
+node -v
+# DEVE ser v20.x.x
+
+# Instale dependencias (se necessario)
+npm install
+
+# Execute o diagnostico (valida ambiente)
+npm run doctor:strict
+
+# Gere o build completo
+npm run build
+
+# Confirme que dist/server.cjs foi gerado
+npm run doctor:startup:strict
+```
+
+Resultado esperado na pasta dist/:
+- dist/server.cjs      <- startup do Passenger
+- dist/package.json    <- { "type": "commonjs" }
+- dist/assets/         <- frontend compilado
+
+---
+
+## 6. Como gerar o build no servidor
+
+NAO FACA ISSO em hospedagem compartilhada.
+O build consome muita memoria e pode travar o servidor ou ser cancelado.
+Sempre faca o build localmente e envie apenas a pasta dist/.
+
+---
+
+## 7. Como instalar dependencias no servidor
+
+Esse passo so e necessario quando o package.json mudou.
+
+```bash
+# Via SSH no servidor
+cd ~/digitalbordados
+node -v
+# Deve ser v20.x.x
+
+npm install --omit=dev --no-audit --no-fund --prefer-offline
+
+# Se ocorrer erro EAGAIN (falta de recursos):
+npm config set jobs 1
+npm install --omit=dev --no-audit --no-fund --prefer-offline
+```
+
+---
+
+## 8. Como configurar Node.js 20 no DirectAdmin
+
+1. Acesse o painel do DirectAdmin
+2. Procure "Configuracao Node.js" ou "Setup Node.js App"
+3. Selecione a versao Node.js 20.x
+4. Defina o diretorio da aplicacao: ~/digitalbordados
+5. Salve as configuracoes
+
+---
+
+## 9. Qual Startup File usar no Passenger
+
+```
+Startup File: app.js
+```
+
+O arquivo `app.js` na raiz do projeto e o entrypoint do Passenger.
+Ele carrega `dist/server.cjs` internamente.
+
+NAO configure `dist/server.cjs` diretamente como Startup File —
+use sempre o `app.js` da raiz.
+
+---
+
+## 10. Como configurar variaveis de ambiente
+
+### Via painel DirectAdmin (recomendado)
+
+1. Acesse "Configuracao Node.js" no DirectAdmin
+2. Procure a secao de variaveis de ambiente
+3. Adicione cada variavel separadamente
+
+### Via SSH (alternativa)
 
 ```bash
 cd ~/digitalbordados
 nano .env
 ```
 
-Cole as variáveis (adapte com seus dados reais):
+Variaveis obrigatorias:
 
-```env
-# Banco de dados MySQL
-MYSQL_HOST=127.0.0.1
+```
+MYSQL_HOST=<ip-do-servidor-mysql>
 MYSQL_PORT=3306
-MYSQL_DATABASE=nome_do_banco
-MYSQL_USER=usuario_mysql
-MYSQL_PASSWORD=sua_senha_aqui
+MYSQL_DATABASE=digitalbordados_novo
+MYSQL_USER=digitalbordados_novo
+MYSQL_PASSWORD=<sua-senha>
 
-# Autenticação
-JWT_SECRET=uma-chave-secreta-longa-e-aleatoria
-
-# Aplicação
+JWT_SECRET=<chave-secreta-longa>
 NODE_ENV=production
 APP_URL=https://digitalbordados.com.br
-APP_DOMAIN=digitalbordados.com.br
 
-# Mercado Pago
-MERCADOPAGO_PUBLIC_KEY=sua_public_key
-MERCADOPAGO_ACCESS_TOKEN=seu_access_token
+MERCADOPAGO_ACCESS_TOKEN=<seu-token>
 
-# Diretórios de downloads (ajuste conforme servidor)
-DOWNLOADS_BASE_DIR=/home/seuusuario/digitalbordados/uploads
-WOO_UPLOADS_DIR=/home/seuusuario/digitalbordados/wp-content/uploads/woocommerce_uploads
-
-# Segurança
-EMAIL_VERIFICATION_TOKEN_TTL_HOURS=24
-LOGIN_ATTEMPT_WINDOW_MINUTES=15
-LOGIN_ATTEMPT_MAX_FAILS=7
-```
-
-### 3.2. Crie a pasta de uploads (se não existir)
-
-```bash
-mkdir -p ~/digitalbordados/uploads
-chmod 755 ~/digitalbordados/uploads
+PAYPAL_MODE=sandbox
+PAYPAL_SANDBOX_CLIENT_ID=
+PAYPAL_SANDBOX_CLIENT_SECRET=
+PAYPAL_BRL_USD_RATE=5.20
 ```
 
 ---
 
-## 4. Fluxo de Atualização (Deploy)
+## 11. Como reiniciar a aplicacao
 
-### REGRA DE OURO:
-> Faça o **build na sua máquina local** e envie apenas os **artefatos prontos** para o servidor.
-> **NUNCA** rode `npm run build` no servidor compartilhado (consome muita memória/CPU).
+### Pelo painel DirectAdmin
+
+1. Acesse "Configuracao Node.js"
+2. Clique em "Reiniciar" ou "Restart"
+3. Aguarde 10 a 15 segundos
+
+### Via SSH (metodo Passenger)
+
+```bash
+mkdir -p ~/digitalbordados/tmp
+touch ~/digitalbordados/tmp/restart.txt
+```
 
 ---
 
-### Passo 1 — Build local (na sua máquina)
+## 12. Como testar /api/health
 
 ```bash
-# Navegue até a pasta do projeto
+# Via SSH no servidor
+curl -I https://digitalbordados.com.br/api/health
+
+# Resposta esperada:
+# HTTP/1.1 200 OK
+```
+
+Ou acesse diretamente no navegador:
+https://digitalbordados.com.br/api/health
+
+---
+
+## 13. Como identificar erro 503
+
+O erro 503 indica que o Passenger nao conseguiu iniciar a aplicacao.
+
+Causas mais comuns:
+
+1. dist/server.cjs nao existe ou esta corrompido
+2. Versao do Node incorreta (nao e 20.x)
+3. node_modules/ ausente ou incompleto
+4. .env ausente ou com variaveis faltando
+5. Porta fixa hardcoded no codigo (deve usar process.env.PORT)
+6. Erro de sintaxe no codigo compilado
+
+Diagnostico via SSH:
+
+```bash
+cd ~/digitalbordados
+
+# 1. dist/server.cjs existe?
+ls -lh dist/server.cjs
+
+# 2. Node na versao correta?
+node -v
+
+# 3. node_modules instalado?
+ls node_modules/.package-lock.json
+
+# 4. .env existe com variaveis?
+grep MYSQL_HOST .env
+
+# 5. Teste de startup manual
+node dist/server.cjs
+# Se mostrar erro, leia a mensagem
+# Pressione Ctrl+C para parar
+```
+
+---
+
+## 14. Como restaurar a pasta dist
+
+```bash
+# Na sua maquina local
+cd d:\www\digitalbordados\digitalbordados
+npm run build
+
+# Enviar via SCP
+scp -r dist/ usuario@digitalbordados.com.br:~/digitalbordados/dist/
+
+# Reiniciar no servidor
+touch ~/digitalbordados/tmp/restart.txt
+```
+
+---
+
+## 15. Como preservar a conexao com o banco MySQL
+
+O banco de dados MySQL nao e um arquivo local — fica no servidor de banco.
+O que deve ser preservado e o arquivo `.env` com as credenciais de conexao.
+
+- NUNCA sobrescreva o .env do servidor
+- NUNCA exclua o .env do servidor
+- Faca backup do .env antes de qualquer manutencao
+
+Para testar a conexao MySQL:
+
+```bash
+# Via SSH no servidor
+mysql -u digitalbordados_novo -p -h <MYSQL_HOST> digitalbordados_novo -e "SELECT 1"
+```
+
+---
+
+## 16. Como preservar public/uploads
+
+A pasta public/uploads/ contem os arquivos de produto que os clientes baixam.
+Ela NAO deve ser apagada em nenhuma hipotese.
+
+```bash
+# Backup via SSH
+tar -czf backup_uploads.tar.gz ~/digitalbordados/public/uploads/
+
+# Verificar conteudo
+ls -lh ~/digitalbordados/public/uploads/ | head -20
+```
+
+---
+
+## 17. Como atualizar somente codigo com seguranca
+
+Este e o deploy padrao — apenas a logica mudou, sem adicionar dependencias.
+
+```bash
+# 1. Na sua maquina local: build
+npm run doctor:strict
+npm run build
+
+# 2. Envie apenas dist/
+scp -r dist/ usuario@digitalbordados.com.br:~/digitalbordados/dist/
+
+# 3. Reinicie
+# Pelo painel DirectAdmin ou via SSH:
+touch ~/digitalbordados/tmp/restart.txt
+
+# 4. Teste
+curl -I https://digitalbordados.com.br/api/health
+```
+
+---
+
+## 18. Como atualizar somente conteudo pelo painel
+
+Para mudancas simples de texto, imagens ou configuracoes:
+- Use o painel admin em https://digitalbordados.com.br/admin
+- Nao e necessario fazer deploy para atualizacoes de conteudo
+
+---
+
+## 19. Como evitar sobrescrever arquivos criticos
+
+Regras para envio seguro:
+
+- NUNCA envie para a pasta raiz sem saber o que esta substituindo
+- SEMPRE envie especificamente a pasta dist/
+- NUNCA envie node_modules/
+- NUNCA sobrescreva .env
+- NUNCA apague public/uploads/
+- NUNCA apague uploads/arquivos/
+- Use SFTP e navegue ate a pasta correta antes de enviar
+
+---
+
+## 20. Quando considerar VPS
+
+Considere migrar para VPS quando:
+
+- O site receber mais de 500 visitas simultaneas
+- O build no servidor for necessario com frequencia
+- Precisar de PM2, cron jobs ou servicos em background
+- A hospedagem compartilhada comecar a gerar erros 503 frequentes
+- Precisar de mais controle sobre Node.js, versoes e configuracoes
+
+---
+
+## Resumo Rapido — Cola para Deploy
+
+```
+=== NA SUA MAQUINA LOCAL ===
+
+npm run doctor:strict
+npm run build
+npm run doctor:startup:strict
+
+=== ENVIO DOS ARQUIVOS ===
+
+scp -r dist/ usuario@digitalbordados.com.br:~/digitalbordados/dist/
+
+# Se package.json mudou:
+scp package.json package-lock.json usuario@digitalbordados.com.br:~/digitalbordados/
+
+=== NO SERVIDOR (SSH) ===
+
+cd ~/digitalbordados
+
+# Se package.json mudou:
+npm install --omit=dev
+
+# Reiniciar:
+touch tmp/restart.txt
+
+=== VERIFICACAO ===
+
+curl -I https://digitalbordados.com.br/api/health
+```
+
+---
+
+## Pasta a enviar, Startup File e reinicio
+
+- Pasta a enviar:     dist/ (sempre), package.json (se mudar)
+- Preservar SEMPRE:   public/uploads/ e uploads/arquivos/ (NUNCA apagar)
+- Startup File:       app.js  (na raiz do projeto)
+- Erro 503:           causado por dist/ ausente, Node errado ou .env faltando
+- Reiniciar Passenger: touch tmp/restart.txt  ou pelo painel DirectAdmin
+- Proximo deploy:     build local -> scp dist/ -> reiniciar -> testar /api/health
+
+ = # Guia de Deploy — Digital Bordados no DirectAdmin com Passenger
+
+> Sistema: Node.js 20 + Express + React/Vite + MySQL
+> Ambiente: DirectAdmin / Phusion Passenger (hospedagem compartilhada)
+> Última atualização: 2026-05-19
+
+---
+
+## AVISO IMPORTANTE
+
+Este sistema usa **MySQL** como banco de dados oficial.
+NAO existe SQLite em producao. O banco fica no servidor MySQL da hospedagem.
+A pasta dist/ é gerada localmente e enviada ao servidor.
+NUNCA rode `npm run build` no servidor compartilhado.
+
+---
+
+## 1. Estrutura correta da aplicacao no servidor
+
+```
+~/digitalbordados/           <- raiz da aplicacao no servidor
+├── dist/                    <- BUILD GERADO LOCALMENTE (obrigatorio)
+│   ├── server.cjs           <- startup do Passenger
+│   ├── assets/              <- frontend compilado (JS, CSS)
+│   └── ...
+├── node_modules/            <- instalado no servidor via npm install
+├── public/
+│   └── uploads/             <- NUNCA APAGAR (imagens dos produtos)
+├── uploads/
+│   └── arquivos/            <- NUNCA APAGAR (arquivos ZIP/DST para download)
+├── scripts/                 <- scripts auxiliares de build
+├── package.json
+├── package-lock.json
+├── .npmrc
+├── index.html
+├── app.js                   <- entrypoint do Passenger
+└── .env                     <- NUNCA APAGAR (credenciais de producao)
+```
+
+---
+
+## 2. O que pode ser enviado ao servidor
+
+| Arquivo/Pasta     | Enviar?    | Quando enviar                   |
+|-------------------|------------|---------------------------------|
+| dist/             | SEMPRE     | Em todo deploy                  |
+| package.json      | SE MUDOU   | Quando adicionar dependencias   |
+| package-lock.json | SE MUDOU   | Junto com package.json          |
+| .npmrc            | SE MUDOU   | Mudancas de config npm          |
+| app.js            | SE MUDOU   | Mudancas no entrypoint          |
+| scripts/          | SE MUDOU   | Mudancas nos scripts de build   |
+| index.html        | SE MUDOU   | Mudancas no HTML base           |
+
+---
+
+## 3. O que NUNCA deve ser apagado no servidor
+
+| Arquivo/Pasta       | Motivo                                              |
+|---------------------|-----------------------------------------------------|
+| .env                | Credenciais de producao (MySQL, JWT, MP, PayPal)    |
+| public/uploads/     | Imagens e capas dos produtos (exibidas no site)     |
+| uploads/arquivos/   | Arquivos ZIP/DST para download pelos clientes       |
+| node_modules/       | Dependencias instaladas (recriar e lento)           |
+
+O banco de dados e MySQL — fica no servidor de banco da hospedagem.
+Nao ha arquivo de banco para preservar no sistema de arquivos.
+
+---
+
+## 4. Como fazer backup antes de atualizar
+
+### 4.1 Backup dos uploads (via SSH)
+
+```bash
+# No servidor, crie um backup da pasta de uploads
+cd ~/digitalbordados
+tar -czf backup_uploads_$(date +%Y%m%d).tar.gz public/uploads/
+```
+
+### 4.2 Backup do .env (via SSH ou SFTP)
+
+```bash
+cp .env .env.backup_$(date +%Y%m%d)
+```
+
+### 4.3 Backup do banco MySQL
+
+Acesse o phpMyAdmin pelo painel DirectAdmin e exporte o banco
+`digitalbordados_novo` como SQL antes de qualquer deploy.
+
+---
+
+## 5. Como gerar o build localmente (na sua maquina)
+
+```bash
+# Na sua maquina local
 cd d:\www\digitalbordados\digitalbordados
 
-# Verifique a versão do Node
+# Confirme a versao do Node
 node -v
-# Deve mostrar v20.x.x
+# DEVE ser v20.x.x
 
-# Limpe e reinstale dependências (se necessário)
-rm -rf node_modules dist
-npm install --include=dev
+# Instale dependencias (se necessario)
+npm install
 
-# Execute o diagnóstico
+# Execute o diagnostico (valida ambiente)
 npm run doctor:strict
 
 # Gere o build completo
 npm run build
 
-# Verifique se o build foi gerado
+# Confirme que dist/server.cjs foi gerado
 npm run doctor:startup:strict
 ```
 
-**Resultado esperado:** Pasta `dist/` com os arquivos:
-- `dist/server.cjs` ← startup do Passenger
-- `dist/server.js` ← backend compilado
-- `dist/package.json` ← `{ "type": "commonjs" }`
-- `dist/assets/` ← frontend (HTML, CSS, JS)
+Resultado esperado na pasta dist/:
+- dist/server.cjs      <- startup do Passenger
+- dist/package.json    <- { "type": "commonjs" }
+- dist/assets/         <- frontend compilado
 
-### Passo 2 — Prepare os arquivos para envio
+---
 
-Você precisa enviar **APENAS** estes itens para o servidor:
+## 6. Como gerar o build no servidor
 
-| Arquivo/Pasta | Obrigatório | Quando enviar |
-|---|---|---|
-| `dist/` (pasta inteira) | ✅ SIM | Sempre |
-| `package.json` | ✅ SIM | Quando mudar dependências |
-| `package-lock.json` | ✅ SIM | Quando mudar dependências |
-| `.npmrc` | ✅ SIM | Quando mudar configurações npm |
-| `scripts/` | ✅ SIM | Quando mudar scripts de build |
-| `index.html` | ✅ SIM | Quando mudar o HTML base |
+NAO FACA ISSO em hospedagem compartilhada.
+O build consome muita memoria e pode travar o servidor ou ser cancelado.
+Sempre faca o build localmente e envie apenas a pasta dist/.
 
-| Arquivo/Pasta | ❌ NÃO enviar | Motivo |
-|---|---|---|
-| `node_modules/` | ❌ NUNCA | Instalar no servidor via `npm install` |
-| `.env` | ❌ NUNCA | Já existe no servidor com dados reais |
-| `src/` | ⚠️ Opcional | Só código-fonte, não roda em produção |
-| `server.ts` | ⚠️ Opcional | Já compilado em dist/server.js |
-| `*.zip` | ❌ NUNCA | Arquivos enormes desnecessários |
-| `database.sqlite` | ❌ NUNCA | Banco de desenvolvimento local |
-| `*.log` | ❌ NUNCA | Logs de desenvolvimento |
+---
 
-### Passo 3 — Envie os arquivos via SFTP/SCP
+## 7. Como instalar dependencias no servidor
 
-**Opção A: Via SCP (recomendado)**
-```bash
-# A partir da sua máquina local, envie a pasta dist completa
-scp -r dist/ seuusuario@digitalbordados.com.br:~/digitalbordados/dist/
-
-# Se houve mudança no package.json
-scp package.json package-lock.json seuusuario@digitalbordados.com.br:~/digitalbordados/
-scp .npmrc seuusuario@digitalbordados.com.br:~/digitalbordados/
-scp index.html seuusuario@digitalbordados.com.br:~/digitalbordados/
-
-# Se houve mudança nos scripts
-scp -r scripts/ seuusuario@digitalbordados.com.br:~/digitalbordados/scripts/
-```
-
-**Opção B: Via WinSCP/FileZilla (SFTP)**
-1. Conecte via SFTP (nunca FTP simples)
-2. Navegue até `~/digitalbordados/`
-3. **Delete a pasta `dist/` antiga** no servidor
-4. **Envie a pasta `dist/` nova** do seu computador
-5. Se mudou `package.json`, envie também
-
-### Passo 4 — Instale dependências no servidor (via SSH)
-
-⚠️ Este passo só é necessário quando o `package.json` mudou.
+Esse passo so e necessario quando o package.json mudou.
 
 ```bash
-# Acesse o servidor via SSH
-ssh seuusuario@digitalbordados.com.br
-
-# Navegue até a pasta
+# Via SSH no servidor
 cd ~/digitalbordados
-
-# Verifique a versão do Node
 node -v
-# DEVE ser v20.x.x
+# Deve ser v20.x.x
 
-# Instale dependências de produção
 npm install --omit=dev --no-audit --no-fund --prefer-offline
 
-# Se der erro EAGAIN:
+# Se ocorrer erro EAGAIN (falta de recursos):
 npm config set jobs 1
 npm install --omit=dev --no-audit --no-fund --prefer-offline
 ```
 
-### Passo 5 — Reinicie a aplicação
+---
 
-**Pelo Painel DirectAdmin:**
-1. Acesse **Configuração Node.js**
-2. Clique em **Reiniciar**
-3. Aguarde 10-15 segundos
+## 8. Como configurar Node.js 20 no DirectAdmin
 
-**Ou via SSH (se disponível):**
+1. Acesse o painel do DirectAdmin
+2. Procure "Configuracao Node.js" ou "Setup Node.js App"
+3. Selecione a versao Node.js 20.x
+4. Defina o diretorio da aplicacao: ~/digitalbordados
+5. Salve as configuracoes
+
+---
+
+## 9. Qual Startup File usar no Passenger
+
+```
+Startup File: app.js
+```
+
+O arquivo `app.js` na raiz do projeto e o entrypoint do Passenger.
+Ele carrega `dist/server.cjs` internamente.
+
+NAO configure `dist/server.cjs` diretamente como Startup File —
+use sempre o `app.js` da raiz.
+
+---
+
+## 10. Como configurar variaveis de ambiente
+
+### Via painel DirectAdmin (recomendado)
+
+1. Acesse "Configuracao Node.js" no DirectAdmin
+2. Procure a secao de variaveis de ambiente
+3. Adicione cada variavel separadamente
+
+### Via SSH (alternativa)
+
 ```bash
-# Alguns ambientes suportam:
+cd ~/digitalbordados
+nano .env
+```
+
+Variaveis obrigatorias:
+
+```
+MYSQL_HOST=<ip-do-servidor-mysql>
+MYSQL_PORT=3306
+MYSQL_DATABASE=digitalbordados_novo
+MYSQL_USER=digitalbordados_novo
+MYSQL_PASSWORD=<sua-senha>
+
+JWT_SECRET=<chave-secreta-longa>
+NODE_ENV=production
+APP_URL=https://digitalbordados.com.br
+
+MERCADOPAGO_ACCESS_TOKEN=<seu-token>
+
+PAYPAL_MODE=sandbox
+PAYPAL_SANDBOX_CLIENT_ID=
+PAYPAL_SANDBOX_CLIENT_SECRET=
+PAYPAL_BRL_USD_RATE=5.20
+```
+
+---
+
+## 11. Como reiniciar a aplicacao
+
+### Pelo painel DirectAdmin
+
+1. Acesse "Configuracao Node.js"
+2. Clique em "Reiniciar" ou "Restart"
+3. Aguarde 10 a 15 segundos
+
+### Via SSH (metodo Passenger)
+
+```bash
+mkdir -p ~/digitalbordados/tmp
 touch ~/digitalbordados/tmp/restart.txt
 ```
 
-### Passo 6 — Verifique se está funcionando
+---
+
+## 12. Como testar /api/health
 
 ```bash
-# Via SSH:
+# Via SSH no servidor
 curl -I https://digitalbordados.com.br/api/health
 
-# Esperado:
+# Resposta esperada:
 # HTTP/1.1 200 OK
 ```
 
-Ou acesse diretamente no navegador: `https://digitalbordados.com.br`
+Ou acesse diretamente no navegador:
+https://digitalbordados.com.br/api/health
 
 ---
 
-## 5. Script Automatizado de Deploy
+## 13. Como identificar erro 503
 
-Para facilitar, use este comando na sua máquina local:
+O erro 503 indica que o Passenger nao conseguiu iniciar a aplicacao.
+
+Causas mais comuns:
+
+1. dist/server.cjs nao existe ou esta corrompido
+2. Versao do Node incorreta (nao e 20.x)
+3. node_modules/ ausente ou incompleto
+4. .env ausente ou com variaveis faltando
+5. Porta fixa hardcoded no codigo (deve usar process.env.PORT)
+6. Erro de sintaxe no codigo compilado
+
+Diagnostico via SSH:
 
 ```bash
-npm run deploy:directadmin
-```
-
-Isso executa automaticamente:
-1. `npm run doctor:strict` — Valida ambiente
-2. `npm run build` — Gera o build
-3. `npm run doctor:startup:strict` — Confirma que dist/ está pronto
-
-Após o comando passar com sucesso, siga os Passos 3-6 acima para enviar e reiniciar.
-
----
-
-## 6. Checklist Pós-Deploy
-
-Após cada deploy, verifique:
-
-- [ ] Site carrega normalmente: `https://digitalbordados.com.br`
-- [ ] API responde: `https://digitalbordados.com.br/api/health`
-- [ ] Login funciona
-- [ ] Página de produtos carrega
-- [ ] Carrinho funciona
-- [ ] Área "Minha Conta > Matrizes Compradas" lista os arquivos
-- [ ] Download de matriz funciona
-- [ ] Painel admin carrega: `https://digitalbordados.com.br/admin`
-
----
-
-## 7. Diagnóstico de Problemas
-
-### Erro 503 — Site fora do ar
-
-**Causa mais comum:** Pasta `dist/` ausente ou corrompida.
-
-```bash
-# Via SSH, verifique:
 cd ~/digitalbordados
 
 # 1. dist/server.cjs existe?
-ls -la dist/server.cjs
-# Se não existir → refaça o build local e envie novamente
+ls -lh dist/server.cjs
 
-# 2. Node está na versão correta?
+# 2. Node na versao correta?
+node -v
+
+# 3. node_modules instalado?
+ls node_modules/.package-lock.json
+
+# 4. .env existe com variaveis?
+grep MYSQL_HOST .env
+
+# 5. Teste de startup manual
+node dist/server.cjs
+# Se mostrar erro, leia a mensagem
+# Pressione Ctrl+C para parar
+```
+
+---
+
+## 14. Como restaurar a pasta dist
+
+```bash
+# Na sua maquina local
+cd d:\www\digitalbordados\digitalbordados
+npm run build
+
+# Enviar via SCP
+scp -r dist/ usuario@digitalbordados.com.br:~/digitalbordados/dist/
+
+# Reiniciar no servidor
+touch ~/digitalbordados/tmp/restart.txt
+```
+
+---
+
+## 15. Como preservar a conexao com o banco MySQL
+
+O banco de dados MySQL nao e um arquivo local — fica no servidor de banco.
+O que deve ser preservado e o arquivo `.env` com as credenciais de conexao.
+
+- NUNCA sobrescreva o .env do servidor
+- NUNCA exclua o .env do servidor
+- Faca backup do .env antes de qualquer manutencao
+
+Para testar a conexao MySQL:
+
+```bash
+# Via SSH no servidor
+mysql -u digitalbordados_novo -p -h <MYSQL_HOST> digitalbordados_novo -e "SELECT 1"
+```
+
+---
+
+## 16. Como preservar public/uploads
+
+A pasta public/uploads/ contem os arquivos de produto que os clientes baixam.
+Ela NAO deve ser apagada em nenhuma hipotese.
+
+```bash
+# Backup via SSH
+tar -czf backup_uploads.tar.gz ~/digitalbordados/public/uploads/
+
+# Verificar conteudo
+ls -lh ~/digitalbordados/public/uploads/ | head -20
+```
+
+---
+
+## 17. Como atualizar somente codigo com seguranca
+
+Este e o deploy padrao — apenas a logica mudou, sem adicionar dependencias.
+
+```bash
+# 1. Na sua maquina local: build
+npm run doctor:strict
+npm run build
+
+# 2. Envie apenas dist/
+scp -r dist/ usuario@digitalbordados.com.br:~/digitalbordados/dist/
+
+# 3. Reinicie
+# Pelo painel DirectAdmin ou via SSH:
+touch ~/digitalbordados/tmp/restart.txt
+
+# 4. Teste
+curl -I https://digitalbordados.com.br/api/health
+```
+
+---
+
+## 18. Como atualizar somente conteudo pelo painel
+
+Para mudancas simples de texto, imagens ou configuracoes:
+- Use o painel admin em https://digitalbordados.com.br/admin
+- Nao e necessario fazer deploy para atualizacoes de conteudo
+
+---
+
+## 19. Como evitar sobrescrever arquivos criticos
+
+Regras para envio seguro:
+
+- NUNCA envie para a pasta raiz sem saber o que esta substituindo
+- SEMPRE envie especificamente a pasta dist/
+- NUNCA envie node_modules/
+- NUNCA sobrescreva .env
+- NUNCA apague public/uploads/
+- NUNCA apague uploads/arquivos/
+- Use SFTP e navegue ate a pasta correta antes de enviar
+
+---
+
+## 20. Quando considerar VPS
+
+Considere migrar para VPS quando:
+
+- O site receber mais de 500 visitas simultaneas
+- O build no servidor for necessario com frequencia
+- Precisar de PM2, cron jobs ou servicos em background
+- A hospedagem compartilhada comecar a gerar erros 503 frequentes
+- Precisar de mais controle sobre Node.js, versoes e configuracoes
+
+---
+
+## Resumo Rapido — Cola para Deploy
+
+```
+=== NA SUA MAQUINA LOCAL ===
+
+npm run doctor:strict
+npm run build
+npm run doctor:startup:strict
+
+=== ENVIO DOS ARQUIVOS ===
+
+scp -r dist/ usuario@digitalbordados.com.br:~/digitalbordados/dist/
+
+# Se package.json mudou:
+scp package.json package-lock.json usuario@digitalbordados.com.br:~/digitalbordados/
+
+=== NO SERVIDOR (SSH) ===
+
+cd ~/digitalbordados
+
+# Se package.json mudou:
+npm install --omit=dev
+
+# Reiniciar:
+touch tmp/restart.txt
+
+=== VERIFICACAO ===
+
+curl -I https://digitalbordados.com.br/api/health
+```
+
+---
+
+## Pasta a enviar, Startup File e reinicio
+
+- Pasta a enviar:     dist/ (sempre), package.json (se mudar)
+- Preservar SEMPRE:   public/uploads/ e uploads/arquivos/ (NUNCA apagar)
+- Startup File:       app.js  (na raiz do projeto)
+- Erro 503:           causado por dist/ ausente, Node errado ou .env faltando
+- Reiniciar Passenger: touch tmp/restart.txt  ou pelo painel DirectAdmin
+- Proximo deploy:     build local -> scp dist/ -> reiniciar -> testar /api/health
+
+ -replace '(## 16\. Como preservar public/uploads\r?\n\r?\nA pasta public/uploads/ contem os arquivos de produto que os clientes baixam\.\r?\nEla NAO deve ser apagada em nenhuma hipotese\.\r?\n\r?\n`ash\r?\n# Backup via SSH\r?\ntar -czf backup_uploads\.tar\.gz ~/digitalbordados/public/uploads/\r?\n\r?\n# Verificar conteudo\r?\nls -lh ~/digitalbordados/public/uploads/ \| head -20\r?\n`)', 
+
+
+### 4.2 Backup do .env (via SSH ou SFTP)
+
+```bash
+cp .env .env.backup_$(date +%Y%m%d)
+```
+
+### 4.3 Backup do banco MySQL
+
+Acesse o phpMyAdmin pelo painel DirectAdmin e exporte o banco
+`digitalbordados_novo` como SQL antes de qualquer deploy.
+
+---
+
+## 5. Como gerar o build localmente (na sua maquina)
+
+```bash
+# Na sua maquina local
+cd d:\www\digitalbordados\digitalbordados
+
+# Confirme a versao do Node
+node -v
+# DEVE ser v20.x.x
+
+# Instale dependencias (se necessario)
+npm install
+
+# Execute o diagnostico (valida ambiente)
+npm run doctor:strict
+
+# Gere o build completo
+npm run build
+
+# Confirme que dist/server.cjs foi gerado
+npm run doctor:startup:strict
+```
+
+Resultado esperado na pasta dist/:
+- dist/server.cjs      <- startup do Passenger
+- dist/package.json    <- { "type": "commonjs" }
+- dist/assets/         <- frontend compilado
+
+---
+
+## 6. Como gerar o build no servidor
+
+NAO FACA ISSO em hospedagem compartilhada.
+O build consome muita memoria e pode travar o servidor ou ser cancelado.
+Sempre faca o build localmente e envie apenas a pasta dist/.
+
+---
+
+## 7. Como instalar dependencias no servidor
+
+Esse passo so e necessario quando o package.json mudou.
+
+```bash
+# Via SSH no servidor
+cd ~/digitalbordados
 node -v
 # Deve ser v20.x.x
 
-# 3. Dependências instaladas?
-ls node_modules/.package-lock.json
-# Se não existir → npm install --omit=dev
+npm install --omit=dev --no-audit --no-fund --prefer-offline
 
-# 4. .env existe e tem as variáveis?
-cat .env | head -5
-# Deve mostrar MYSQL_HOST, JWT_SECRET, etc.
-
-# 5. Teste manual de startup
-node dist/server.cjs
-# Se mostrar erro, leia a mensagem e corrija
-# Ctrl+C para parar
-```
-
-### Erro de banco de dados
-
-```bash
-# Teste a conexão MySQL
-mysql -u seuusuario -p -h 127.0.0.1 nome_do_banco -e "SELECT 1"
-```
-
-### Downloads não funcionam
-
-```bash
-# Verifique se a pasta de uploads existe
-ls -la ~/digitalbordados/uploads/
-
-# Verifique permissões
-chmod -R 755 ~/digitalbordados/uploads/
-
-# Verifique se os arquivos ZIP estão lá
-find ~/digitalbordados/uploads/ -name "*.zip" | head -10
+# Se ocorrer erro EAGAIN (falta de recursos):
+npm config set jobs 1
+npm install --omit=dev --no-audit --no-fund --prefer-offline
 ```
 
 ---
 
-## 8. O que NUNCA fazer
+## 8. Como configurar Node.js 20 no DirectAdmin
 
-| ❌ NUNCA faça isso | ✅ Faça isso em vez |
-|---|---|
-| Enviar arquivos por FTP sobre a pasta do app | Use SFTP para enviar apenas `dist/` |
-| Deletar `dist/` sem ter o novo pronto | Primeiro faça o build local, depois substitua |
-| Rodar `npm run build` no servidor compartilhado | Sempre faça o build na sua máquina local |
-| Sobrescrever o `.env` do servidor | Edite o `.env` do servidor via SSH/nano |
-| Enviar `node_modules/` do seu PC | Sempre rode `npm install` no servidor |
-| Enviar `database.sqlite` | O banco é MySQL em produção |
-| Alterar a versão do Node sem testar | Sempre teste com Node 20.x |
-| Editar arquivos diretamente no servidor | Edite local → build → deploy |
+1. Acesse o painel do DirectAdmin
+2. Procure "Configuracao Node.js" ou "Setup Node.js App"
+3. Selecione a versao Node.js 20.x
+4. Defina o diretorio da aplicacao: ~/digitalbordados
+5. Salve as configuracoes
 
 ---
 
-## Resumo Rápido (Cola Rápida)
+## 9. Qual Startup File usar no Passenger
+
+```
+Startup File: app.js
+```
+
+O arquivo `app.js` na raiz do projeto e o entrypoint do Passenger.
+Ele carrega `dist/server.cjs` internamente.
+
+NAO configure `dist/server.cjs` diretamente como Startup File —
+use sempre o `app.js` da raiz.
+
+---
+
+## 10. Como configurar variaveis de ambiente
+
+### Via painel DirectAdmin (recomendado)
+
+1. Acesse "Configuracao Node.js" no DirectAdmin
+2. Procure a secao de variaveis de ambiente
+3. Adicione cada variavel separadamente
+
+### Via SSH (alternativa)
 
 ```bash
-# === NA SUA MÁQUINA LOCAL ===
-cd d:\www\digitalbordados\digitalbordados
-npm run deploy:directadmin
-# Se passou sem erros, continue ↓
-
-# === ENVIO DOS ARQUIVOS ===
-scp -r dist/ usuario@servidor:~/digitalbordados/dist/
-# Se mudou package.json:
-scp package.json package-lock.json usuario@servidor:~/digitalbordados/
-
-# === NO SERVIDOR (SSH) ===
 cd ~/digitalbordados
-# Se mudou package.json:
-npm install --omit=dev
-# Reinicie pelo painel DirectAdmin ou:
-touch tmp/restart.txt
+nano .env
+```
 
-# === VERIFICAÇÃO ===
+Variaveis obrigatorias:
+
+```
+MYSQL_HOST=<ip-do-servidor-mysql>
+MYSQL_PORT=3306
+MYSQL_DATABASE=digitalbordados_novo
+MYSQL_USER=digitalbordados_novo
+MYSQL_PASSWORD=<sua-senha>
+
+JWT_SECRET=<chave-secreta-longa>
+NODE_ENV=production
+APP_URL=https://digitalbordados.com.br
+
+MERCADOPAGO_ACCESS_TOKEN=<seu-token>
+
+PAYPAL_MODE=sandbox
+PAYPAL_SANDBOX_CLIENT_ID=
+PAYPAL_SANDBOX_CLIENT_SECRET=
+PAYPAL_BRL_USD_RATE=5.20
+```
+
+---
+
+## 11. Como reiniciar a aplicacao
+
+### Pelo painel DirectAdmin
+
+1. Acesse "Configuracao Node.js"
+2. Clique em "Reiniciar" ou "Restart"
+3. Aguarde 10 a 15 segundos
+
+### Via SSH (metodo Passenger)
+
+```bash
+mkdir -p ~/digitalbordados/tmp
+touch ~/digitalbordados/tmp/restart.txt
+```
+
+---
+
+## 12. Como testar /api/health
+
+```bash
+# Via SSH no servidor
+curl -I https://digitalbordados.com.br/api/health
+
+# Resposta esperada:
+# HTTP/1.1 200 OK
+```
+
+Ou acesse diretamente no navegador:
+https://digitalbordados.com.br/api/health
+
+---
+
+## 13. Como identificar erro 503
+
+O erro 503 indica que o Passenger nao conseguiu iniciar a aplicacao.
+
+Causas mais comuns:
+
+1. dist/server.cjs nao existe ou esta corrompido
+2. Versao do Node incorreta (nao e 20.x)
+3. node_modules/ ausente ou incompleto
+4. .env ausente ou com variaveis faltando
+5. Porta fixa hardcoded no codigo (deve usar process.env.PORT)
+6. Erro de sintaxe no codigo compilado
+
+Diagnostico via SSH:
+
+```bash
+cd ~/digitalbordados
+
+# 1. dist/server.cjs existe?
+ls -lh dist/server.cjs
+
+# 2. Node na versao correta?
+node -v
+
+# 3. node_modules instalado?
+ls node_modules/.package-lock.json
+
+# 4. .env existe com variaveis?
+grep MYSQL_HOST .env
+
+# 5. Teste de startup manual
+node dist/server.cjs
+# Se mostrar erro, leia a mensagem
+# Pressione Ctrl+C para parar
+```
+
+---
+
+## 14. Como restaurar a pasta dist
+
+```bash
+# Na sua maquina local
+cd d:\www\digitalbordados\digitalbordados
+npm run build
+
+# Enviar via SCP
+scp -r dist/ usuario@digitalbordados.com.br:~/digitalbordados/dist/
+
+# Reiniciar no servidor
+touch ~/digitalbordados/tmp/restart.txt
+```
+
+---
+
+## 15. Como preservar a conexao com o banco MySQL
+
+O banco de dados MySQL nao e um arquivo local — fica no servidor de banco.
+O que deve ser preservado e o arquivo `.env` com as credenciais de conexao.
+
+- NUNCA sobrescreva o .env do servidor
+- NUNCA exclua o .env do servidor
+- Faca backup do .env antes de qualquer manutencao
+
+Para testar a conexao MySQL:
+
+```bash
+# Via SSH no servidor
+mysql -u digitalbordados_novo -p -h <MYSQL_HOST> digitalbordados_novo -e "SELECT 1"
+```
+
+---
+
+## 16. Como preservar public/uploads
+
+A pasta public/uploads/ contem os arquivos de produto que os clientes baixam.
+Ela NAO deve ser apagada em nenhuma hipotese.
+
+```bash
+# Backup via SSH
+tar -czf backup_uploads.tar.gz ~/digitalbordados/public/uploads/
+
+# Verificar conteudo
+ls -lh ~/digitalbordados/public/uploads/ | head -20
+```
+
+---
+
+## 17. Como atualizar somente codigo com seguranca
+
+Este e o deploy padrao — apenas a logica mudou, sem adicionar dependencias.
+
+```bash
+# 1. Na sua maquina local: build
+npm run doctor:strict
+npm run build
+
+# 2. Envie apenas dist/
+scp -r dist/ usuario@digitalbordados.com.br:~/digitalbordados/dist/
+
+# 3. Reinicie
+# Pelo painel DirectAdmin ou via SSH:
+touch ~/digitalbordados/tmp/restart.txt
+
+# 4. Teste
 curl -I https://digitalbordados.com.br/api/health
 ```
+
+---
+
+## 18. Como atualizar somente conteudo pelo painel
+
+Para mudancas simples de texto, imagens ou configuracoes:
+- Use o painel admin em https://digitalbordados.com.br/admin
+- Nao e necessario fazer deploy para atualizacoes de conteudo
+
+---
+
+## 19. Como evitar sobrescrever arquivos criticos
+
+Regras para envio seguro:
+
+- NUNCA envie para a pasta raiz sem saber o que esta substituindo
+- SEMPRE envie especificamente a pasta dist/
+- NUNCA envie node_modules/
+- NUNCA sobrescreva .env
+- NUNCA apague public/uploads/
+- NUNCA apague uploads/arquivos/
+- Use SFTP e navegue ate a pasta correta antes de enviar
+
+---
+
+## 20. Quando considerar VPS
+
+Considere migrar para VPS quando:
+
+- O site receber mais de 500 visitas simultaneas
+- O build no servidor for necessario com frequencia
+- Precisar de PM2, cron jobs ou servicos em background
+- A hospedagem compartilhada comecar a gerar erros 503 frequentes
+- Precisar de mais controle sobre Node.js, versoes e configuracoes
+
+---
+
+## Resumo Rapido — Cola para Deploy
+
+```
+=== NA SUA MAQUINA LOCAL ===
+
+npm run doctor:strict
+npm run build
+npm run doctor:startup:strict
+
+=== ENVIO DOS ARQUIVOS ===
+
+scp -r dist/ usuario@digitalbordados.com.br:~/digitalbordados/dist/
+
+# Se package.json mudou:
+scp package.json package-lock.json usuario@digitalbordados.com.br:~/digitalbordados/
+
+=== NO SERVIDOR (SSH) ===
+
+cd ~/digitalbordados
+
+# Se package.json mudou:
+npm install --omit=dev
+
+# Reiniciar:
+touch tmp/restart.txt
+
+=== VERIFICACAO ===
+
+curl -I https://digitalbordados.com.br/api/health
+```
+
+---
+
+## Pasta a enviar, Startup File e reinicio
+
+- Pasta a enviar:     dist/ (sempre), package.json (se mudar)
+- Preservar SEMPRE:   public/uploads/ e uploads/arquivos/ (NUNCA apagar)
+- Startup File:       app.js  (na raiz do projeto)
+- Erro 503:           causado por dist/ ausente, Node errado ou .env faltando
+- Reiniciar Passenger: touch tmp/restart.txt  ou pelo painel DirectAdmin
+- Proximo deploy:     build local -> scp dist/ -> reiniciar -> testar /api/health
+
+
