@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, FileText, ShoppingCart, Zap, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send, Search, X } from 'lucide-react';
 import { Product, ProductGalleryImage } from '../types';
 import { formatCurrency, getPublicAssetUrl, normalizePublicMediaUrl } from '../lib/utils';
+import { applySeo, buildAbsoluteUrl } from '../lib/seo';
 import { useCart } from '../contexts/CartContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useAppData } from '../contexts/AppDataContext';
@@ -204,6 +205,55 @@ export default function ProductDetail() {
       setActiveImage(next);
     }
   }, [activeImageIndex, galleryImages]);
+
+  useEffect(() => {
+    if (!product) return;
+    const siteName = String(settings.site_name || 'Digital Bordados').trim();
+    const productTitle = String(product.seo_title || `${product.name} | ${siteName}`).trim();
+    const productDescription = String(
+      product.seo_description ||
+        product.short_description ||
+        product.description ||
+        `Compre ${product.name} na ${siteName}.`,
+    )
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 320);
+
+    const imageForSeo = displayedImage || product.image || '/uploads/seo-default-share.jpg';
+    const canonical = `/produto/${product.slug}`;
+
+    const offerUrl = buildAbsoluteUrl(canonical);
+    const schemaProduct: Record<string, unknown> = {
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      name: product.name,
+      image: [buildAbsoluteUrl(imageForSeo)],
+      description: productDescription,
+      sku: product.sku || String(product.id),
+      brand: product.brand ? { '@type': 'Brand', name: product.brand } : undefined,
+      offers: {
+        '@type': 'Offer',
+        url: offerUrl,
+        priceCurrency: 'BRL',
+        price: Number(product.sale_price || product.price || 0),
+        availability: 'https://schema.org/InStock',
+        itemCondition: 'https://schema.org/NewCondition',
+      },
+    };
+
+    applySeo({
+      title: productTitle,
+      description: productDescription,
+      canonical,
+      image: imageForSeo,
+      siteName,
+      robots: 'index,follow',
+      keywords: String(product.seo_keywords || product.tags || settings.seo_keywords || ''),
+      jsonLd: schemaProduct,
+    });
+  }, [product, displayedImage, settings]);
 
   if (loading) {
     return (

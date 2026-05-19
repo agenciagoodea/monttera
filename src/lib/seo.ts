@@ -1,0 +1,92 @@
+type SeoInput = {
+  title?: string;
+  description?: string;
+  canonical?: string;
+  image?: string;
+  robots?: string;
+  keywords?: string;
+  siteName?: string;
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
+};
+
+const DEFAULT_SITE_URL = 'https://digitalbordados.com.br';
+
+function upsertMetaByName(name: string, content: string) {
+  let node = document.querySelector(`meta[name="${name}"]`) as HTMLMetaElement | null;
+  if (!node) {
+    node = document.createElement('meta');
+    node.setAttribute('name', name);
+    document.head.appendChild(node);
+  }
+  node.setAttribute('content', content);
+}
+
+function upsertMetaByProperty(property: string, content: string) {
+  let node = document.querySelector(`meta[property="${property}"]`) as HTMLMetaElement | null;
+  if (!node) {
+    node = document.createElement('meta');
+    node.setAttribute('property', property);
+    document.head.appendChild(node);
+  }
+  node.setAttribute('content', content);
+}
+
+function upsertCanonical(url: string) {
+  let node = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+  if (!node) {
+    node = document.createElement('link');
+    node.setAttribute('rel', 'canonical');
+    document.head.appendChild(node);
+  }
+  node.setAttribute('href', url);
+}
+
+function upsertJsonLd(payload: Record<string, unknown> | Record<string, unknown>[]) {
+  let node = document.querySelector('script[data-seo-jsonld="true"]') as HTMLScriptElement | null;
+  if (!node) {
+    node = document.createElement('script');
+    node.type = 'application/ld+json';
+    node.setAttribute('data-seo-jsonld', 'true');
+    document.head.appendChild(node);
+  }
+  node.textContent = JSON.stringify(payload);
+}
+
+export function buildAbsoluteUrl(pathOrUrl?: string | null): string {
+  const raw = String(pathOrUrl || '').trim();
+  if (!raw) return DEFAULT_SITE_URL;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('/')) return `${DEFAULT_SITE_URL}${raw}`;
+  return `${DEFAULT_SITE_URL}/${raw}`;
+}
+
+export function applySeo(input: SeoInput) {
+  const siteName = String(input.siteName || 'Digital Bordados').trim();
+  const title = String(input.title || siteName).trim();
+  const description = String(input.description || 'Matrizes de bordado digitais com qualidade profissional.').trim();
+  const canonical = buildAbsoluteUrl(input.canonical || window.location.pathname + window.location.search);
+  const image = buildAbsoluteUrl(input.image || '/uploads/seo-default-share.jpg');
+  const robots = String(input.robots || 'index,follow').trim();
+  const keywords = String(input.keywords || '').trim();
+
+  document.title = title;
+  upsertMetaByName('description', description);
+  upsertMetaByName('robots', robots);
+  if (keywords) upsertMetaByName('keywords', keywords);
+
+  upsertMetaByProperty('og:type', 'website');
+  upsertMetaByProperty('og:site_name', siteName);
+  upsertMetaByProperty('og:title', title);
+  upsertMetaByProperty('og:description', description);
+  upsertMetaByProperty('og:url', canonical);
+  upsertMetaByProperty('og:image', image);
+
+  upsertMetaByName('twitter:card', 'summary_large_image');
+  upsertMetaByName('twitter:title', title);
+  upsertMetaByName('twitter:description', description);
+  upsertMetaByName('twitter:image', image);
+
+  upsertCanonical(canonical);
+  if (input.jsonLd) upsertJsonLd(input.jsonLd);
+}
+

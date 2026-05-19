@@ -41,6 +41,8 @@ import { CartProvider } from './contexts/CartContext';
 import { FavoritesProvider } from './contexts/FavoritesContext';
 import { AppDataProvider } from './contexts/AppDataContext';
 import { useAuth } from './contexts/AuthContext';
+import { useAppData } from './contexts/AppDataContext';
+import { applySeo } from './lib/seo';
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-white/50 backdrop-blur-sm fixed inset-0 z-50">
@@ -58,6 +60,47 @@ function RequireRegisteredUser({ children }: { children: ReactElement }) {
     return <Navigate to={`/cadastro?redirect=${redirect}`} replace />;
   }
   return children;
+}
+
+function RouteSeoDefaults() {
+  const location = useLocation();
+  const { settings } = useAppData();
+
+  useEffect(() => {
+    const siteName = String(settings.site_name || 'Digital Bordados').trim();
+    const baseDescription = String(
+      settings.site_description || 'Matrizes de bordado digitais para produção profissional.',
+    ).trim();
+
+    const path = location.pathname;
+    const seoByRoute: Array<{ match: RegExp; title: string; description: string; robots?: string }> = [
+      { match: /^\/$/, title: `${siteName} | Início`, description: baseDescription },
+      { match: /^\/loja/, title: `Loja | ${siteName}`, description: 'Explore nossa vitrine de matrizes de bordado digitais.' },
+      { match: /^\/orcamento/, title: `Orçamento | ${siteName}`, description: 'Solicite orçamento para desenvolvimento profissional de matrizes de bordado.' },
+      { match: /^\/contato/, title: `Contato | ${siteName}`, description: `Fale com a equipe da ${siteName}.` },
+      { match: /^\/produto\//, title: `${siteName} | Produto`, description: baseDescription },
+      { match: /^\/favoritos/, title: `Favoritos | ${siteName}`, description: 'Lista de produtos favoritados.' },
+      { match: /^\/carrinho/, title: `Carrinho | ${siteName}`, description: 'Confira os itens adicionados ao carrinho.' },
+      { match: /^\/login/, title: `Entrar | ${siteName}`, description: 'Acesse sua conta para comprar e baixar matrizes.', robots: 'noindex,nofollow' },
+      { match: /^\/cadastro/, title: `Cadastro | ${siteName}`, description: 'Crie sua conta para comprar matrizes de bordado.', robots: 'noindex,nofollow' },
+      { match: /^\/minha-conta/, title: `Minha Conta | ${siteName}`, description: 'Área do cliente.', robots: 'noindex,nofollow' },
+      { match: /^\/admin/, title: `Admin | ${siteName}`, description: 'Painel administrativo', robots: 'noindex,nofollow' },
+    ];
+
+    const selected = seoByRoute.find((entry) => entry.match.test(path));
+
+    applySeo({
+      title: selected?.title || `${siteName} | Página`,
+      description: selected?.description || baseDescription,
+      robots: selected?.robots || 'index,follow',
+      canonical: `${path}${location.search || ''}`,
+      siteName,
+      image: String(settings.logo_url || '/uploads/seo-default-share.jpg'),
+      keywords: String(settings.seo_keywords || ''),
+    });
+  }, [location.pathname, location.search, settings]);
+
+  return null;
 }
 
 export default function App() {
@@ -93,6 +136,7 @@ export default function App() {
           {/* Public Routes */}
           <Route path="/*" element={
             <div className="min-h-screen bg-white font-sans text-gray-900 scroll-smooth flex flex-col">
+              <RouteSeoDefaults />
               <Header />
               <div className="flex-1">
                 <Suspense fallback={<PageLoader />}>

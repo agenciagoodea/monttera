@@ -26,6 +26,13 @@ export interface Product {
   colors?: string;
   is_new: boolean | number;
   is_featured: boolean | number;
+  seo_title?: string | null;
+  seo_description?: string | null;
+  seo_keywords?: string | null;
+  sku?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  tags?: string | null;
   status: string;
   created_at?: string;
   updated_at?: string;

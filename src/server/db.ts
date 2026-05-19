@@ -741,6 +741,16 @@ export function initDb() {
   ensureColumn('products', 'production_sheet', 'TEXT NULL');
   ensureColumn('products', 'stitch_count', 'INT NULL');
   ensureColumn('products', 'colors', 'VARCHAR(255) NULL');
+  ensureColumn('products', 'seo_keywords', 'TEXT NULL');
+  ensureColumn('products', 'canonical_url', 'TEXT NULL');
+  ensureColumn('products', 'og_image', 'TEXT NULL');
+  ensureColumn('products', 'noindex', 'TINYINT(1) DEFAULT 0');
+  ensureColumn('products', 'sku', 'VARCHAR(120) NULL');
+  ensureColumn('products', 'brand', 'VARCHAR(120) NULL');
+  ensureColumn('products', 'model', 'VARCHAR(120) NULL');
+  ensureColumn('products', 'availability', "VARCHAR(60) DEFAULT 'in_stock'");
+  ensureColumn('products', 'condition_type', "VARCHAR(60) DEFAULT 'new'");
+  ensureColumn('products', 'search_terms', 'TEXT NULL');
   ensureColumn('product_images', 'file_type', "VARCHAR(50) NULL DEFAULT 'gallery'");
   ensureColumn('settings', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
   ensureColumn('users', 'email_verified_at', 'DATETIME NULL');
