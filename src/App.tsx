@@ -1,5 +1,6 @@
 import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import CookieConsentBanner from './components/CookieConsentBanner';
@@ -47,7 +48,7 @@ const PageLoader = () => (
   </div>
 );
 
-function RequireRegisteredUser({ children }: { children: JSX.Element }) {
+function RequireRegisteredUser({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   const location = useLocation();
 

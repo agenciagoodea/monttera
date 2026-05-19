@@ -16,7 +16,7 @@ import {
   Palette
 } from 'lucide-react';
 import HtmlRichEditor from '../../components/admin/HtmlRichEditor';
-import { normalizePublicMediaUrl } from '../../lib/utils';
+import { getPublicAssetUrl, normalizePublicMediaUrl } from '../../lib/utils';
 
 interface Category {
   id: number;
@@ -78,6 +78,13 @@ export default function AdminProductForm() {
   const [downloadableFiles, setDownloadableFiles] = useState<DownloadableFile[]>([]);
   const [previews, setPreviews] = useState<{main: string, gallery: string[]}>({ main: '', gallery: [] });
   const [existingGalleryUrls, setExistingGalleryUrls] = useState<string[]>([]);
+  const productionSheetFileName = productionSheetFile?.name || (() => {
+    const raw = (productionSheetUrl || '').trim();
+    if (!raw) return '';
+    const withoutQuery = raw.split('?')[0].split('#')[0];
+    const parts = withoutQuery.split('/');
+    return parts[parts.length - 1] || '';
+  })();
 
   useEffect(() => {
     async function fetchData() {
@@ -158,9 +165,11 @@ export default function AdminProductForm() {
             file_type: file.file_type || 'downloadable',
           }))
         );
-        const normalizedMainImage = normalizePublicMediaUrl(prod.image || '');
+        const normalizedMainImage = getPublicAssetUrl(prod.image || '');
         const normalizedGallery = Array.isArray(prod.images)
-          ? prod.images.map((img: any) => normalizePublicMediaUrl(img?.url || '')).filter(Boolean)
+          ? prod.images
+              .map((img: any) => getPublicAssetUrl(img?.full_url || img?.url || ''))
+              .filter(Boolean)
           : [];
         if (normalizedMainImage) setPreviews(p => ({ ...p, main: normalizedMainImage }));
         setExistingGalleryUrls(normalizedGallery);
@@ -962,30 +971,9 @@ export default function AdminProductForm() {
             </div>
 
             <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">URL do PDF</label>
-                <input
-                  type="text"
-                  value={productionSheetUrl}
-                  onChange={(e) => setProductionSheetUrl(e.target.value)}
-                  className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold"
-                  placeholder="https://.../folha-producao.pdf ou /uploads/arquivo.pdf"
-                />
-                {normalizePublicMediaUrl(productionSheetUrl) && !productionSheetFile && (
-                  <a
-                    href={normalizePublicMediaUrl(productionSheetUrl)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-red-700 text-[10px] font-black uppercase tracking-widest hover:bg-red-100"
-                  >
-                    Abrir PDF
-                  </a>
-                )}
-              </div>
-
               <div className="relative w-full py-6 border-2 border-dashed border-slate-100 rounded-3xl bg-slate-50/50 flex flex-col items-center justify-center gap-2 group hover:border-blue-200 transition-all cursor-pointer">
                 <Upload className="w-6 h-6 text-slate-300 group-hover:text-blue-500" />
-                <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest group-hover:text-blue-600">Ou envie um PDF</span>
+                <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest group-hover:text-blue-600">Enviar Folha (PDF)</span>
                 <input
                   type="file"
                   accept="application/pdf"
@@ -994,12 +982,15 @@ export default function AdminProductForm() {
                 />
               </div>
 
-              {productionSheetFile && (
-                <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="text-[10px] font-bold text-slate-600 truncate max-w-[180px]">{productionSheetFile.name}</span>
+              {productionSheetFileName && (
+                <div className="flex items-center justify-between p-3 bg-blue-50 rounded-xl border border-blue-100">
+                  <span className="text-[10px] font-bold text-blue-700 truncate max-w-[180px]">{productionSheetFileName}</span>
                   <button
                     type="button"
-                    onClick={() => setProductionSheetFile(null)}
+                    onClick={() => {
+                      setProductionSheetFile(null);
+                      setProductionSheetUrl('');
+                    }}
                     className="text-red-400 hover:text-red-600"
                   >
                     <X className="w-4 h-4" />

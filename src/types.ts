@@ -29,8 +29,18 @@ export interface Product {
   status: string;
   created_at?: string;
   updated_at?: string;
-  gallery?: string[];
+  gallery?: ProductGalleryImage[];
   relatedProducts?: Product[];
+}
+
+export interface ProductGalleryImage {
+  id: number;
+  product_id: number;
+  url: string;
+  full_url: string;
+  is_featured?: number | boolean;
+  created_at?: string | null;
+  file_type?: string | null;
 }
 
 export interface CartItem {

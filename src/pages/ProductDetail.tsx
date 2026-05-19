@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, FileText, ShoppingCart, Zap, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send, Search } from 'lucide-react';
-import { Product } from '../types';
-import { formatCurrency, normalizePublicMediaUrl } from '../lib/utils';
+import { ChevronLeft, ChevronRight, FileText, ShoppingCart, Zap, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send, Search, X } from 'lucide-react';
+import { Product, ProductGalleryImage } from '../types';
+import { formatCurrency, getPublicAssetUrl, normalizePublicMediaUrl } from '../lib/utils';
 import { useCart } from '../contexts/CartContext';
 import { useFavorites } from '../contexts/FavoritesContext';
 import { useAppData } from '../contexts/AppDataContext';
+import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface Review {
@@ -20,17 +21,18 @@ export default function ProductDetail() {
   const navigate = useNavigate();
   const { slug } = useParams();
   const { settings } = useAppData();
+  const { user } = useAuth();
   const { addToCart, items } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeImage, setActiveImage] = useState<string | null>(null);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [galleryImages, setGalleryImages] = useState<string[]>([]);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'description' | 'reviews'>('description');
-  const [isImageZoomed, setIsImageZoomed] = useState(false);
-  const [zoomPosition, setZoomPosition] = useState({ x: 50, y: 50 });
-  const imageZoomContainerRef = useRef<HTMLDivElement | null>(null);
+  const [isImageHovered, setIsImageHovered] = useState(false);
   const relatedTrackRef = useRef<HTMLDivElement | null>(null);
   const relatedAutoplaySpeed = 4200;
   const [relatedPaused, setRelatedPaused] = useState(false);
@@ -56,9 +58,21 @@ export default function ProductDetail() {
         const data = await res.json();
         const normalizedProduct = {
           ...data,
-          image: normalizePublicMediaUrl(data?.image),
-          production_sheet: normalizePublicMediaUrl(data?.production_sheet),
-          gallery: Array.isArray(data?.gallery) ? data.gallery.map((img: string) => normalizePublicMediaUrl(img)).filter(Boolean) : [],
+          image: getPublicAssetUrl(data?.image),
+          production_sheet: getPublicAssetUrl(data?.production_sheet),
+          gallery: Array.isArray(data?.gallery)
+            ? data.gallery
+                .map((img: any) => ({
+                  id: Number(img?.id || 0),
+                  product_id: Number(img?.product_id || 0),
+                  url: String(img?.url || '').trim(),
+                  full_url: getPublicAssetUrl(String(img?.full_url || img?.url || '')),
+                  is_featured: img?.is_featured ?? 0,
+                  created_at: img?.created_at ?? null,
+                  file_type: img?.file_type ?? null,
+                }))
+                .filter((img: ProductGalleryImage) => Boolean(img.full_url))
+            : [],
           relatedProducts: Array.isArray(data?.relatedProducts)
             ? data.relatedProducts.map((item: any) => ({ ...item, image: normalizePublicMediaUrl(item?.image) }))
             : [],
@@ -70,10 +84,18 @@ export default function ProductDetail() {
         }
         setProduct(normalizedProduct);
         const initialGallery = Array.from(
-          new Set([normalizedProduct.image, ...(normalizedProduct.gallery || [])].filter((img): img is string => Boolean(img))),
+          new Set(
+            [
+              normalizedProduct.image,
+              ...((normalizedProduct.gallery || []).map((img: ProductGalleryImage) => img.url)),
+            ]
+              .filter(Boolean)
+              .map((path: string) => getPublicAssetUrl(path)),
+          ),
         );
         setGalleryImages(initialGallery);
         setActiveImage(initialGallery[0] || null);
+        setActiveImageIndex(0);
         setFailedImages({});
         
         // Fetch reviews
@@ -140,18 +162,6 @@ export default function ProductDetail() {
 
   const relatedProducts = product?.relatedProducts || [];
 
-  const handleImageMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
-    const container = imageZoomContainerRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * 100;
-    const y = ((event.clientY - rect.top) / rect.height) * 100;
-    setZoomPosition({
-      x: Math.max(0, Math.min(100, x)),
-      y: Math.max(0, Math.min(100, y)),
-    });
-  };
-
   useEffect(() => {
     if (relatedPaused || relatedProducts.length <= 1) return;
     const timer = window.setInterval(() => {
@@ -168,6 +178,32 @@ export default function ProductDetail() {
     }, relatedAutoplaySpeed);
     return () => window.clearInterval(timer);
   }, [relatedAutoplaySpeed, relatedPaused, relatedProducts.length]);
+
+  useEffect(() => {
+    if (!isLightboxOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsLightboxOpen(false);
+      }
+      if (!galleryImages.length) return;
+      if (event.key === 'ArrowRight') {
+        setActiveImageIndex((prev) => (prev + 1) % galleryImages.length);
+      }
+      if (event.key === 'ArrowLeft') {
+        setActiveImageIndex((prev) => (prev - 1 + galleryImages.length) % galleryImages.length);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isLightboxOpen, galleryImages.length]);
+
+  useEffect(() => {
+    if (!galleryImages.length) return;
+    const next = galleryImages[activeImageIndex] || galleryImages[0];
+    if (next && next !== activeImage) {
+      setActiveImage(next);
+    }
+  }, [activeImageIndex, galleryImages]);
 
   if (loading) {
     return (
@@ -208,9 +244,37 @@ export default function ProductDetail() {
 
   const isInCart = items.some((item) => item.product_id === product.id);
   const isProductFavorite = isFavorite(product.id);
+  const isAdminUser = user?.type === 'user';
   const currentPrice = product.sale_price || product.price;
   const discount = product.sale_price ? Math.round((1 - product.sale_price / product.price) * 100) : 0;
   const gallery = galleryImages;
+  const displayedImage = activeImage || gallery[activeImageIndex] || product.image;
+  const openLightbox = (index: number) => {
+    setActiveImageIndex(index >= 0 ? index : 0);
+    setIsLightboxOpen(true);
+  };
+  const closeLightbox = () => setIsLightboxOpen(false);
+  const goNextImage = () => {
+    if (!gallery.length) return;
+    setActiveImageIndex((prev) => (prev + 1) % gallery.length);
+  };
+  const goPrevImage = () => {
+    if (!gallery.length) return;
+    setActiveImageIndex((prev) => (prev - 1 + gallery.length) % gallery.length);
+  };
+  const goNextMainImage = () => {
+    if (!gallery.length) return;
+    const nextIndex = (activeImageIndex + 1) % gallery.length;
+    setActiveImageIndex(nextIndex);
+    setActiveImage(gallery[nextIndex]);
+  };
+  const goPrevMainImage = () => {
+    if (!gallery.length) return;
+    const prevIndex = (activeImageIndex - 1 + gallery.length) % gallery.length;
+    setActiveImageIndex(prevIndex);
+    setActiveImage(gallery[prevIndex]);
+  };
+
   const productionSheetHref = (() => {
     const value = normalizePublicMediaUrl(product.production_sheet || '');
     if (!value || value === '#' || value.toLowerCase() === 'null' || value.toLowerCase() === 'undefined') return '';
@@ -251,10 +315,8 @@ export default function ProductDetail() {
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             className="relative bg-white border border-slate-100 rounded-[40px] overflow-hidden group shadow-xl shadow-slate-200/50"
-            ref={imageZoomContainerRef}
-            onMouseEnter={() => setIsImageZoomed(true)}
-            onMouseLeave={() => setIsImageZoomed(false)}
-            onMouseMove={handleImageMouseMove}
+            onMouseEnter={() => setIsImageHovered(true)}
+            onMouseLeave={() => setIsImageHovered(false)}
           >
             <div className="aspect-square relative flex items-center justify-center p-8 bg-slate-50/50">
               <div className="absolute inset-0 opacity-[0.03] pointer-events-none grid grid-cols-4 grid-rows-4 rotate-12 scale-150 select-none">
@@ -267,12 +329,12 @@ export default function ProductDetail() {
               
               <AnimatePresence mode="wait">
                 <motion.img 
-                  key={activeImage}
+                  key={displayedImage}
                   initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
+                  animate={{ opacity: 1, scale: isImageHovered ? 1.08 : 1 }}
                   exit={{ opacity: 0, scale: 1.05 }}
-                  transition={{ duration: 0.3 }}
-                  src={activeImage || product.image} 
+                  transition={{ duration: 0.35, ease: 'easeOut' }}
+                  src={displayedImage} 
                   alt={product.name} 
                   onError={(event) => {
                     const failedSrc = (event.currentTarget as HTMLImageElement).src;
@@ -281,9 +343,30 @@ export default function ProductDetail() {
                       console.debug('[ProductDetail] image load error:', failedSrc);
                     }
                   }}
-                  className="w-full h-full object-contain relative z-10 drop-shadow-2xl" 
+                  className="w-full h-full object-contain relative z-10 drop-shadow-2xl will-change-transform" 
                 />
               </AnimatePresence>
+
+              {gallery.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={goPrevMainImage}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-black/30 text-white hover:bg-black/45 transition-colors"
+                    aria-label="Imagem anterior"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goNextMainImage}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-black/30 text-white hover:bg-black/45 transition-colors"
+                    aria-label="Próxima imagem"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </>
+              )}
 
               {discount > 0 && (
                 <div className="absolute top-8 left-8 z-20 bg-emerald-500 text-white px-4 py-1.5 rounded-full text-sm font-black shadow-lg">
@@ -291,30 +374,19 @@ export default function ProductDetail() {
                 </div>
               )}
 
-              <div
+              <button
+                type="button"
                 className="absolute top-6 right-6 z-20 flex h-11 w-11 items-center justify-center rounded-full border-2 border-white text-white shadow-xl"
                 style={{
                   backgroundColor: settings.primary_color || '#3b82f6',
                   boxShadow: '0 12px 24px rgba(15, 23, 42, 0.28)',
                 }}
+                onClick={() => openLightbox(Math.max(0, gallery.indexOf(displayedImage)))}
               >
                 <Search className="h-5 w-5" />
-              </div>
+              </button>
             </div>
 
-            {isImageZoomed && (
-              <div
-                className="pointer-events-none absolute inset-0 z-30 hidden lg:block"
-                style={{
-                  backgroundColor: '#ffffff',
-                  backgroundImage: `url(${activeImage || product.image})`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: `${zoomPosition.x}% ${zoomPosition.y}%`,
-                  backgroundSize: '200%',
-                }}
-              />
-            )}
-            
             <div className="p-4 bg-white border-t border-slate-50 flex items-center justify-center gap-2">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Categoria:</span>
               <Link to={`/?category=${product.category_slug}`} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest">
@@ -332,9 +404,12 @@ export default function ProductDetail() {
               {gallery.map((img, idx) => (
                 <button
                   key={`${img}-${idx}`}
-                  onClick={() => setActiveImage(img)}
+                  onClick={() => {
+                    setActiveImage(img);
+                    setActiveImageIndex(idx);
+                  }}
                   className={`aspect-square rounded-2xl overflow-hidden border-2 transition-all ${
-                    activeImage === img ? 'border-blue-600 shadow-lg shadow-blue-100 scale-95' : 'border-slate-100 hover:border-slate-300'
+                    displayedImage === img ? 'border-blue-600 shadow-lg shadow-blue-100 scale-95' : 'border-slate-100 hover:border-slate-300'
                   }`}
                 >
                   {failedImages[img] ? (
@@ -368,6 +443,17 @@ export default function ProductDetail() {
           animate={{ opacity: 1, x: 0 }}
           className="flex flex-col"
         >
+          {isAdminUser && (
+            <div className="flex justify-end mb-3">
+              <Link
+                to={`/admin/produtos/editar/${product.id}`}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-xs font-black uppercase tracking-wide hover:bg-blue-100 transition-colors"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                Editar Produto
+              </Link>
+            </div>
+          )}
           <div className="flex items-center gap-2 mb-2">
             <div className="flex text-amber-400">
               {[1, 2, 3, 4, 5].map((s) => (
@@ -505,6 +591,38 @@ export default function ProductDetail() {
           </button>
         </motion.div>
       </div>
+
+      {isLightboxOpen && gallery.length > 0 && (
+        <div className="fixed inset-0 z-[80] bg-black/90 flex items-center justify-center p-4" onClick={closeLightbox}>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); closeLightbox(); }}
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); goPrevImage(); }}
+            className="absolute left-4 md:left-8 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20"
+          >
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+          <img
+            src={gallery[activeImageIndex]}
+            alt={`${product.name} - preview`}
+            className="max-h-[90vh] max-w-[90vw] object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); goNextImage(); }}
+            className="absolute right-4 md:right-8 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20"
+          >
+            <ChevronRight className="w-6 h-6" />
+          </button>
+        </div>
+      )}
 
 
       {/* Tabs Section */}

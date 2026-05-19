@@ -22,6 +22,59 @@ const isProduction = process.env.NODE_ENV === 'production';
 const EMAIL_VERIFICATION_TOKEN_TTL_HOURS = Number(process.env.EMAIL_VERIFICATION_TOKEN_TTL_HOURS || '24');
 const LOGIN_ATTEMPT_WINDOW_MINUTES = Number(process.env.LOGIN_ATTEMPT_WINDOW_MINUTES || '15');
 const LOGIN_ATTEMPT_MAX_FAILS = Number(process.env.LOGIN_ATTEMPT_MAX_FAILS || '7');
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function createBasicRateLimit(options: {
+  windowMs: number;
+  max: number;
+  message: string;
+}) {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const ip = getClientIp(req);
+    const key = `${req.path}:${ip}`;
+    const now = Date.now();
+    const current = hits.get(key);
+
+    if (!current || now > current.resetAt) {
+      hits.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+
+    if (current.count >= options.max) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      return res.status(429).json({ error: options.message });
+    }
+
+    current.count += 1;
+    hits.set(key, current);
+    return next();
+  };
+}
+
+const registerRateLimit = createBasicRateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: 'Muitas tentativas de cadastro. Aguarde alguns minutos e tente novamente.',
+});
+
+const loginRateLimit = createBasicRateLimit({
+  windowMs: LOGIN_ATTEMPT_WINDOW_MINUTES * 60 * 1000,
+  max: Math.max(15, LOGIN_ATTEMPT_MAX_FAILS * 3),
+  message: 'Muitas tentativas de login. Aguarde alguns minutos e tente novamente.',
+});
+
+const forgotPasswordRateLimit = createBasicRateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: 'Muitas solicitacoes de recuperacao. Aguarde alguns minutos e tente novamente.',
+});
+
+function isValidEmail(email: string) {
+  return EMAIL_REGEX.test(String(email || '').trim().toLowerCase());
+}
 
 function getAuthCookieOptions(req: express.Request): express.CookieOptions {
   const secure = isProduction || req.secure || req.headers['x-forwarded-proto'] === 'https';
@@ -233,18 +286,93 @@ async function fetchMercadoPagoAccountInfo(accessToken: string) {
 }
 
 // ConfiguraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o do Multer para Uploads
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);
+const ZIP_EXTENSIONS = new Set(['.zip', '.rar', '.7z']);
+const EMBROIDERY_EXTENSIONS = new Set(['.pes', '.jef', '.dst', '.exp', '.xxx', '.vp3', '.hus']);
+const PDF_EXTENSIONS = new Set(['.pdf']);
+
+function isAllowedUpload(fieldName: string, extension: string, mimeType: string): boolean {
+  const ext = extension.toLowerCase();
+  const mime = String(mimeType || '').toLowerCase();
+
+  if (fieldName === 'image' || fieldName === 'gallery' || fieldName === 'avatar' || fieldName === 'logo') {
+    return IMAGE_EXTENSIONS.has(ext) && mime.startsWith('image/');
+  }
+
+  if (fieldName === 'production_sheet') {
+    return PDF_EXTENSIONS.has(ext) && mime === 'application/pdf';
+  }
+
+  if (fieldName === 'production_files') {
+    const allowedExt = ZIP_EXTENSIONS.has(ext) || EMBROIDERY_EXTENSIONS.has(ext);
+    const allowedMime =
+      mime === 'application/zip' ||
+      mime === 'application/x-zip-compressed' ||
+      mime === 'application/octet-stream' ||
+      mime === 'application/x-rar-compressed' ||
+      mime === 'application/vnd.rar' ||
+      mime === 'application/x-7z-compressed';
+    return allowedExt && allowedMime;
+  }
+
+  if (fieldName === 'reference_image') {
+    if (IMAGE_EXTENSIONS.has(ext) && mime.startsWith('image/')) return true;
+    if (PDF_EXTENSIONS.has(ext) && mime === 'application/pdf') return true;
+    if (ZIP_EXTENSIONS.has(ext)) return true;
+    return false;
+  }
+
+  return false;
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = './public/uploads';
+    const isProductionFile = file.fieldname === 'production_files';
+    const dir = isProductionFile ? './uploads/arquivos' : './public/uploads';
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
+    const ext = path.extname(file.originalname || '').toLowerCase() || '';
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${uniqueSuffix}${ext}`);
   }
 });
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 30 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const allowed = isAllowedUpload(file.fieldname, ext, file.mimetype || '');
+    if (!allowed) {
+      return cb(new Error(`Tipo de arquivo nao permitido para o campo ${file.fieldname}.`));
+    }
+    return cb(null, true);
+  },
+});
+
+function buildProductMediaName(slug: string, productId: number, ext: string, suffix?: string) {
+  const safeSlug = slugify(slug || 'produto', { lower: true, strict: true, trim: true }) || 'produto';
+  const safeExt = String(ext || '').toLowerCase();
+  const safeSuffix = suffix ? `-${suffix}` : '';
+  return `${safeSlug}-${productId}${safeSuffix}${safeExt}`;
+}
+
+function moveUploadedFileToFinalPath(
+  file: Express.Multer.File | undefined,
+  absoluteDestDir: string,
+  finalFileName: string,
+): { absolutePath: string; fileName: string } | null {
+  if (!file || !file.path || !finalFileName) return null;
+  if (!fs.existsSync(absoluteDestDir)) fs.mkdirSync(absoluteDestDir, { recursive: true });
+  const source = path.resolve(file.path);
+  const target = path.resolve(path.join(absoluteDestDir, finalFileName));
+  if (source === target) return { absolutePath: target, fileName: finalFileName };
+  fs.renameSync(source, target);
+  return { absolutePath: target, fileName: finalFileName };
+}
 
 function createUniqueProductSlug(baseName: string, ignoreProductId?: number) {
   const baseSlugRaw = slugify(baseName || 'produto', { lower: true, strict: true, trim: true }) || 'produto';
@@ -446,6 +574,8 @@ function resolveEmailVerificationRequired() {
 const DOWNLOAD_ALLOWED_STATUSES = [
   'paid',
   'completed',
+  'concluido',
+  'concluído',
   'success',
   'pago',
   'wc-completed',
@@ -740,19 +870,6 @@ function normalizePublicMediaUrl(value: unknown) {
   const raw = String(value || '').trim();
   if (!raw) return '';
 
-  const toNodeUploadsUrl = (inputPath: string): string => {
-    const clean = inputPath.replace(/^https?:\/\/[^/]+/i, '');
-    const marker = '/wp-content/uploads/';
-    const idx = clean.toLowerCase().indexOf(marker);
-    if (idx < 0) return '';
-    const rel = clean.slice(idx + marker.length).replace(/^\/+/, '');
-    if (!rel || /^woocommerce_uploads\//i.test(rel)) return '';
-    return `/uploads/${rel}`;
-  };
-
-  const mappedFromWp = toNodeUploadsUrl(raw);
-  if (mappedFromWp) return mappedFromWp;
-
   if (/^digitalbordados\.com\.br\//i.test(raw)) {
     return `https://${raw.replace(/^\/+/, '')}`;
   }
@@ -765,10 +882,111 @@ function normalizePublicMediaUrl(value: unknown) {
 
   if (raw.startsWith('/wp-content/uploads/')) return `${base}${raw}`;
   if (raw.startsWith('wp-content/uploads/')) return `${base}/${noLeadingSlash}`;
-  if (raw.startsWith('/uploads/')) return raw;
-  if (raw.startsWith('uploads/')) return `/${noLeadingSlash}`;
+  if (raw.startsWith('/uploads/')) return `${base}${raw}`;
+  if (raw.startsWith('uploads/')) return `${base}/${noLeadingSlash}`;
+  if (raw.startsWith('/')) return `${base}${raw}`;
 
-  return raw;
+  return `${base}/${noLeadingSlash}`;
+}
+
+const PUBLIC_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);
+const PUBLIC_PDF_EXTENSIONS = new Set(['.pdf']);
+
+function getPublicUploadsRoots(): string[] {
+  const configured = [
+    process.env.DOWNLOADS_BASE_DIR,
+    process.env.PUBLIC_UPLOADS_DIR,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .map((value) => path.resolve(value));
+
+  const defaults = [
+    path.resolve(process.cwd(), 'public', 'uploads'),
+    path.resolve(process.cwd(), 'uploads'),
+  ];
+
+  return Array.from(new Set([...configured, ...defaults])).filter((root) => {
+    try {
+      return fs.existsSync(root) && fs.statSync(root).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+}
+
+function publicUrlFileExists(mediaUrl: string): boolean {
+  const normalized = normalizePublicMediaUrl(mediaUrl);
+  if (!normalized || !normalized.startsWith('/uploads/')) return false;
+  const rel = normalized.replace(/^\/uploads\//, '').replace(/^\/+/, '');
+  if (!rel) return false;
+
+  for (const root of getPublicUploadsRoots()) {
+    const candidate = path.resolve(root, rel);
+    try {
+      if (isInsideRoot(candidate, root) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return false;
+}
+
+function findSlugMediaFallbacks(slug: string, kind: 'image' | 'pdf', productId?: number): string[] {
+  const baseSlug = String(slug || '').trim().toLowerCase();
+  if (!baseSlug) return [];
+
+  const tokens = baseSlug
+    .split('-')
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3);
+
+  if (!tokens.length) return [];
+
+  const allowedExt = kind === 'pdf' ? PUBLIC_PDF_EXTENSIONS : PUBLIC_IMAGE_EXTENSIONS;
+  const ranked: Array<{ file: string; score: number }> = [];
+
+  for (const root of getPublicUploadsRoots()) {
+    let files: string[] = [];
+    try {
+      files = fs.readdirSync(root);
+    } catch {
+      continue;
+    }
+
+    for (const file of files) {
+      const ext = path.extname(file).toLowerCase();
+      if (!allowedExt.has(ext)) continue;
+
+      const lower = file.toLowerCase();
+      if (Number.isFinite(Number(productId)) && Number(productId) > 0) {
+        const pid = Number(productId);
+        if (!lower.includes(`-${pid}`)) continue;
+      }
+      let score = 0;
+      for (const token of tokens) {
+        if (lower.includes(token)) score += 1;
+      }
+      if (score === 0) continue;
+
+      ranked.push({ file, score });
+    }
+  }
+
+  ranked.sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
+  return Array.from(new Set(ranked.map((item) => `/uploads/${item.file}`)));
+}
+
+function resolvePublicMediaWithFallback(mediaUrl: unknown, slug: string, kind: 'image' | 'pdf', productId?: number): string {
+  const normalized = normalizePublicMediaUrl(mediaUrl);
+  if (normalized && (!normalized.startsWith('/uploads/') || publicUrlFileExists(normalized))) {
+    return normalized;
+  }
+  const fallbacks = findSlugMediaFallbacks(slug, kind, productId);
+  return fallbacks[0] || normalized || '';
 }
 
 function sha256(value: string) {
@@ -1528,6 +1746,16 @@ async function startServer() {
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ extended: true, limit: '15mb' }));
   app.use(cookieParser());
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (isProduction) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    next();
+  });
   app.use('/uploads', express.static('public/uploads'));
   const wpUploadsRoots = getWpUploadsRoots();
   wpUploadsRoots.forEach((root) => {
@@ -1535,6 +1763,12 @@ async function startServer() {
   });
 
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({ error: `Falha no upload: ${err.message}` });
+    }
+    if (err instanceof Error && /Tipo de arquivo nao permitido/i.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
     if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError) {
       return res.status(400).json({ error: 'JSON invÃƒÂ¡lido no corpo da requisiÃƒÂ§ÃƒÂ£o' });
     }
@@ -1571,7 +1805,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/register', async (req, res) => {
+  app.post('/api/auth/register', registerRateLimit, async (req, res) => {
     const {
       firstName,
       lastName,
@@ -1604,8 +1838,17 @@ async function startServer() {
       const normalizedEmail = String(email).trim().toLowerCase();
       const trimmedFirstName = String(firstName).trim();
       const trimmedLastName = String(lastName).trim();
+      const rawPassword = String(password || '');
       const name = `${trimmedFirstName} ${trimmedLastName}`.trim();
-      const hashedPassword = await hashPassword(String(password));
+
+      if (!isValidEmail(normalizedEmail)) {
+        return res.status(400).json({ error: 'E-mail invalido' });
+      }
+      if (rawPassword.length < 8) {
+        return res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres' });
+      }
+
+      const hashedPassword = await hashPassword(rawPassword);
       const verificationRequired = resolveEmailVerificationRequired();
       const emailVerifiedAt = verificationRequired ? null : new Date().toISOString().slice(0, 19).replace('T', ' ');
 
@@ -1737,7 +1980,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/login', async (req, res) => {
+  app.post('/api/auth/login', loginRateLimit, async (req, res) => {
     try {
       const { email, password } = req.body || {};
       const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -2013,12 +2256,16 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/forgot-password', async (req, res) => {
+  app.post('/api/auth/forgot-password', forgotPasswordRateLimit, async (req, res) => {
     try {
       const { email } = req.body || {};
-      if (!email) return res.status(400).json({ error: 'E-mail obrigatÃƒÂ³rio' });
+      if (!email) return res.status(400).json({ error: 'E-mail obrigatorio' });
+      const normalizedEmail = String(email).trim().toLowerCase();
+      if (!isValidEmail(normalizedEmail)) {
+        return res.status(400).json({ error: 'E-mail invalido' });
+      }
 
-      const user = db.get('SELECT * FROM users WHERE email = ?', email) as any;
+      const user = db.get('SELECT * FROM users WHERE email = ?', normalizedEmail) as any;
       if (!user) {
         // Return success even if user not found for security reasons
         return res.json({ success: true });
@@ -2058,6 +2305,9 @@ async function startServer() {
     try {
       const { token, new_password } = req.body || {};
       if (!token || !new_password) return res.status(400).json({ error: 'Token e nova senha sÃƒÂ£o obrigatÃƒÂ³rios' });
+      if (String(new_password).length < 8) {
+        return res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres' });
+      }
 
       const resetRequest = db.get(
         'SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0 AND expires_at > CURRENT_TIMESTAMP',
@@ -2190,9 +2440,6 @@ async function startServer() {
     }
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const mainImage = files['image']?.[0]?.filename ? `/uploads/${files['image'][0].filename}` : null;
-    const productionSheetFile = files['production_sheet']?.[0]?.filename ? `/uploads/${files['production_sheet'][0].filename}` : null;
-    const productionSheetValue = productionSheetFile || (typeof production_sheet === 'string' ? production_sheet.trim() : '') || null;
     const finalPrice = Number(price);
     if (!Number.isFinite(finalPrice)) {
       return res.status(400).json({ error: 'PreÃƒÆ’Ã‚Â§o invÃƒÆ’Ã‚Â¡lido' });
@@ -2224,9 +2471,34 @@ async function startServer() {
           image, production_sheet, category_id, stitch_count, colors, is_featured, is_new,
           seo_title, seo_description
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, normalizedName, uniqueSlug, description || null, short_description || null, finalPrice, finalSalePrice, mainImage, productionSheetValue, normalizedCategoryId, normalizedStitchCount, colors || null, is_featured === 'true' || is_featured === '1' ? 1 : 0, is_new === 'true' || is_new === '1' ? 1 : 0, seo_title || null, seo_description || null);
+      `, normalizedName, uniqueSlug, description || null, short_description || null, finalPrice, finalSalePrice, null, null, normalizedCategoryId, normalizedStitchCount, colors || null, is_featured === 'true' || is_featured === '1' ? 1 : 0, is_new === 'true' || is_new === '1' ? 1 : 0, seo_title || null, seo_description || null);
 
       const productId = result.lastInsertRowid;
+      const productIdNumber = Number(productId);
+
+      const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+      const privateUploadsDir = path.resolve(process.cwd(), 'uploads', 'arquivos');
+      const normalizedSlug = uniqueSlug;
+
+      let mainImagePath: string | null = null;
+      if (files['image']?.[0]) {
+        const file = files['image'][0];
+        const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.jpg';
+        const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext);
+        moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
+        mainImagePath = `/uploads/${finalName}`;
+      }
+
+      let productionSheetValue: string | null = (typeof production_sheet === 'string' ? production_sheet.trim() : '') || null;
+      if (files['production_sheet']?.[0]) {
+        const file = files['production_sheet'][0];
+        const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.pdf';
+        const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext);
+        moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
+        productionSheetValue = `/uploads/${finalName}`;
+      }
+
+      db.run('UPDATE products SET image = ?, production_sheet = ? WHERE id = ?', mainImagePath, productionSheetValue, productIdNumber);
 
       const parsedCategoryIds = parseIdArray(category_ids);
       const finalCategoryIds = parsedCategoryIds.length > 0
@@ -2238,8 +2510,11 @@ async function startServer() {
 
       // Galeria
       if (files['gallery']) {
-        files['gallery'].forEach(f => {
-          db.run('INSERT IGNORE INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${f.filename}`, 'gallery');
+        files['gallery'].forEach((f, index) => {
+          const ext = path.extname(f.originalname || f.filename || '').toLowerCase() || '.jpg';
+          const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext, `g${index + 1}`);
+          moveUploadedFileToFinalPath(f, publicUploadsDir, finalName);
+          db.run('INSERT IGNORE INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${finalName}`, 'gallery');
         });
       }
 
@@ -2268,8 +2543,12 @@ async function startServer() {
 
       // Arquivos de ProduÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o
       if (files['production_files']) {
-        files['production_files'].forEach(f => {
-          db.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, f.originalname, `/uploads/${f.filename}`, 'production');
+        files['production_files'].forEach((f, index) => {
+          const ext = path.extname(f.originalname || f.filename || '').toLowerCase() || '.zip';
+          const suffix = index === 0 ? undefined : `a${index + 1}`;
+          const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext, suffix);
+          moveUploadedFileToFinalPath(f, privateUploadsDir, finalName);
+          db.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, finalName, `/uploads/arquivos/${finalName}`, 'production');
         });
       }
 
@@ -2384,10 +2663,6 @@ async function startServer() {
       return [];
     };
 
-    const newImagePath = files['image']?.[0]?.filename
-      ? `/uploads/${files['image'][0].filename}`
-      : existingProduct.image;
-
     const nextName = name ?? existingProduct.name;
     const nextSlug = slug
       ? slugify(slug, { lower: true })
@@ -2415,11 +2690,30 @@ async function startServer() {
       return res.status(400).json({ error: 'Quantidade de pontos invÃƒÂ¡lida' });
     }
 
-    const productionSheetFile = files['production_sheet']?.[0]?.filename
-      ? `/uploads/${files['production_sheet'][0].filename}`
+    const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+    const privateUploadsDir = path.resolve(process.cwd(), 'uploads', 'arquivos');
+
+    const imageUpload = files['image']?.[0];
+    const nextImagePath = imageUpload
+      ? (() => {
+          const ext = path.extname(imageUpload.originalname || imageUpload.filename || '').toLowerCase() || '.jpg';
+          const finalName = buildProductMediaName(nextSlug, productId, ext);
+          moveUploadedFileToFinalPath(imageUpload, publicUploadsDir, finalName);
+          return `/uploads/${finalName}`;
+        })()
+      : existingProduct.image;
+
+    const productionSheetUpload = files['production_sheet']?.[0];
+    const generatedProductionSheetPath = productionSheetUpload
+      ? (() => {
+          const ext = path.extname(productionSheetUpload.originalname || productionSheetUpload.filename || '').toLowerCase() || '.pdf';
+          const finalName = buildProductMediaName(nextSlug, productId, ext);
+          moveUploadedFileToFinalPath(productionSheetUpload, publicUploadsDir, finalName);
+          return `/uploads/${finalName}`;
+        })()
       : null;
-    const nextProductionSheet = productionSheetFile
-      ? productionSheetFile
+    const nextProductionSheet = generatedProductionSheetPath
+      ? generatedProductionSheetPath
       : (production_sheet !== undefined
         ? ((typeof production_sheet === 'string' ? production_sheet.trim() : '') || null)
         : existingProduct.production_sheet);
@@ -2441,10 +2735,11 @@ async function startServer() {
           production_sheet = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, newImagePath, nextProductionSheet, productId);
+      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextProductionSheet, productId);
 
-      if (files['image']?.[0] && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.startsWith('/uploads/')) {
-        const oldImageFsPath = path.join(process.cwd(), 'public', existingProduct.image.replace('/uploads/', 'uploads/'));
+      if (files['image']?.[0] && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.includes('/uploads/')) {
+        const oldImageRelative = existingProduct.image.replace(/^https?:\/\/[^/]+/i, '');
+        const oldImageFsPath = path.join(process.cwd(), 'public', oldImageRelative.replace('/uploads/', 'uploads/'));
         try {
           if (fs.existsSync(oldImageFsPath)) {
             fs.unlinkSync(oldImageFsPath);
@@ -2454,8 +2749,9 @@ async function startServer() {
         }
       }
 
-      if (productionSheetFile && existingProduct.production_sheet && typeof existingProduct.production_sheet === 'string' && existingProduct.production_sheet.startsWith('/uploads/')) {
-        const oldSheetFsPath = path.join(process.cwd(), 'public', existingProduct.production_sheet.replace('/uploads/', 'uploads/'));
+      if (generatedProductionSheetPath && existingProduct.production_sheet && typeof existingProduct.production_sheet === 'string' && existingProduct.production_sheet.includes('/uploads/')) {
+        const oldSheetRelative = existingProduct.production_sheet.replace(/^https?:\/\/[^/]+/i, '');
+        const oldSheetFsPath = path.join(process.cwd(), 'public', oldSheetRelative.replace('/uploads/', 'uploads/'));
         try {
           if (fs.existsSync(oldSheetFsPath)) {
             fs.unlinkSync(oldSheetFsPath);
@@ -2515,8 +2811,11 @@ async function startServer() {
         }
 
         if (hasNewGalleryFiles) {
-          files['gallery'].forEach((file) => {
-            db.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${file.filename}`, 'gallery');
+          files['gallery'].forEach((file, index) => {
+            const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.jpg';
+            const finalName = buildProductMediaName(nextSlug, productId, ext, `g${index + 1}`);
+            moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
+            db.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${finalName}`, 'gallery');
           });
         }
       }
@@ -2528,8 +2827,12 @@ async function startServer() {
         db.run('DELETE FROM product_files WHERE product_id = ?', productId);
 
         if (hasNewProductionFiles) {
-          files['production_files'].forEach((file) => {
-            db.run('INSERT INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, file.originalname, `/uploads/${file.filename}`, 'production');
+          files['production_files'].forEach((file, index) => {
+            const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.zip';
+            const suffix = index === 0 ? undefined : `a${index + 1}`;
+            const finalName = buildProductMediaName(nextSlug, productId, ext, suffix);
+            moveUploadedFileToFinalPath(file, privateUploadsDir, finalName);
+            db.run('INSERT INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, finalName, `/uploads/arquivos/${finalName}`, 'production');
           });
         }
 
@@ -2589,9 +2892,19 @@ async function startServer() {
     const product = db.get('SELECT * FROM products WHERE id = ?', req.params.id) as any;
     if (!product) return res.status(404).json({ error: 'Produto nÃƒÆ’Ã‚Â£o encontrado' });
 
-    const images = (db.all('SELECT * FROM product_images WHERE product_id = ?', req.params.id) as any[]).map((image) => ({
-      ...image,
-      url: normalizePublicMediaUrl(image?.url),
+    const images = (db.all(`
+      SELECT id, product_id, url, is_featured, created_at, file_type
+      FROM product_images
+      WHERE product_id = ?
+      ORDER BY id ASC
+    `, req.params.id) as any[]).map((image) => ({
+      id: image.id,
+      product_id: image.product_id,
+      url: String(image?.url || '').trim(),
+      full_url: normalizePublicMediaUrl(image?.url),
+      is_featured: image?.is_featured ?? 0,
+      created_at: image?.created_at ?? null,
+      file_type: image?.file_type ?? null,
     }));
     const files = db.all('SELECT * FROM product_files WHERE product_id = ?', req.params.id);
     const categoryRelations = db.all('SELECT category_id FROM product_category_relations WHERE product_id = ?', req.params.id) as any[];
@@ -3398,7 +3711,7 @@ async function startServer() {
 
       const normalizedItems = items.map((item) => ({
         ...item,
-        product_image: normalizePublicMediaUrl(item?.product_image),
+        product_image: resolvePublicMediaWithFallback(item?.product_image, String(item?.product_slug || ''), 'image', Number(item?.product_id || 0)),
       }));
 
       return res.json({ order, items: normalizedItems });
@@ -5215,7 +5528,10 @@ async function startServer() {
   });
 
   // ROTA DE DESENVOLVIMENTO: Simular pagamento aprovado
-  app.post('/api/dev/approve-order/:id', authenticate, (req, res) => {
+  app.post('/api/dev/approve-order/:id', authenticate, isAdmin, (req, res) => {
+    if (isProduction) {
+      return res.status(404).json({ error: 'Rota indisponivel neste ambiente' });
+    }
     const orderId = req.params.id;
     try {
       db.run("UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?", orderId);
@@ -6686,7 +7002,8 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       // Gallery images
       const galleryRows = db.all(`
-        SELECT url FROM product_images
+        SELECT id, product_id, url, is_featured, created_at, file_type
+        FROM product_images
         WHERE product_id = ?
           AND (
             file_type = 'gallery'
@@ -6695,18 +7012,23 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           )
         ORDER BY id ASC
       `, product.id) as any[];
-      const gallery = Array.from(
-        new Set(
-          galleryRows
-            .map((row) => normalizePublicMediaUrl(row?.url))
-            .filter(Boolean),
-        ),
-      );
+      const gallery = galleryRows.map((row) => ({
+        id: row.id,
+        product_id: row.product_id,
+        url: String(row?.url || '').trim(),
+        full_url: normalizePublicMediaUrl(row?.url),
+        is_featured: row?.is_featured ?? 0,
+        created_at: row?.created_at ?? null,
+        file_type: row?.file_type ?? null,
+      }));
+
+      const resolvedMainImage = resolvePublicMediaWithFallback(product?.image, product?.slug || '', 'image', Number(product?.id || 0));
+      const resolvedProductionSheet = resolvePublicMediaWithFallback(product?.production_sheet, product?.slug || '', 'pdf', Number(product?.id || 0));
 
       const normalizedProduct = {
         ...product,
-        image: normalizePublicMediaUrl(product?.image),
-        production_sheet: normalizePublicMediaUrl(product?.production_sheet),
+        image: resolvedMainImage,
+        production_sheet: resolvedProductionSheet,
       };
       const normalizedRelatedProducts = relatedProducts.map((relatedProduct) => ({
         ...relatedProduct,
@@ -6716,7 +7038,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       if (process.env.NODE_ENV !== 'production') {
         console.debug('[api/products/:slug] production_sheet raw:', product?.production_sheet);
         console.debug('[api/products/:slug] production_sheet normalized:', normalizedProduct.production_sheet);
-        console.debug('[api/products/:slug] gallery normalized:', gallery);
+        console.debug('[api/products/:slug] gallery rows:', gallery);
       }
 
       res.json({ ...normalizedProduct, gallery, relatedProducts: normalizedRelatedProducts });
@@ -7174,18 +7496,6 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     });
   }
   
-
-  // ===== Static Files Servicing (Production) =====
-  const distPath = path.join(process.cwd(), 'dist');
-  if (fs.existsSync(distPath)) {
-    console.log('Serving static files from:', distPath);
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      if (req.path.startsWith('/api/')) return res.status(404).json({error: 'Not found'});
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-  // ===============================================
 
   return app;
 }

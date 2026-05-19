@@ -35,9 +35,12 @@ export default function BudgetPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
-  const [projectType, setProjectType] = useState('logo');
-  const [budgetRange, setBudgetRange] = useState('ate-100');
-  const [deadline, setDeadline] = useState('normal');
+  const [projectType, setProjectType] = useState('');
+  const [projectTypeOther, setProjectTypeOther] = useState('');
+  const [matrixSize, setMatrixSize] = useState('');
+  const [matrixSizeOther, setMatrixSizeOther] = useState('');
+  const [fabricType, setFabricType] = useState('');
+  const [fabricTypeOther, setFabricTypeOther] = useState('');
   const [details, setDetails] = useState('');
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -71,7 +74,10 @@ export default function BudgetPage() {
     setMessage(null);
 
     try {
-      const extra = `Tipo de projeto: ${projectType}\nFaixa de orcamento: ${budgetRange}\nPrazo: ${deadline}\nDetalhes: ${details}`;
+      const resolvedProjectType = projectType === 'outro' ? `Outro: ${projectTypeOther}` : projectType;
+      const resolvedMatrixSize = matrixSize === 'outro' ? `Outro: ${matrixSizeOther}` : matrixSize;
+      const resolvedFabricType = fabricType === 'outro' ? `Outro: ${fabricTypeOther}` : fabricType;
+      const extra = `Tipo de projeto: ${resolvedProjectType}\nTamanho da matriz: ${resolvedMatrixSize}\nBordar em: ${resolvedFabricType}\nDetalhes: ${details}`;
       const form = new FormData();
       form.append('name', name.trim());
       form.append('email', email.trim());
@@ -87,9 +93,12 @@ export default function BudgetPage() {
       setName('');
       setEmail('');
       setWhatsapp('');
-      setProjectType('logo');
-      setBudgetRange('ate-100');
-      setDeadline('normal');
+      setProjectType('');
+      setProjectTypeOther('');
+      setMatrixSize('');
+      setMatrixSizeOther('');
+      setFabricType('');
+      setFabricTypeOther('');
       setDetails('');
       setReferenceImage(null);
     } catch (error: any) {
@@ -113,10 +122,11 @@ export default function BudgetPage() {
           <Sparkles className="h-3.5 w-3.5" /> Orcamento sob medida
         </p>
         <h1 className="mt-4 text-3xl md:text-5xl font-black tracking-[-0.03em] max-w-4xl">
-          Solicite seu projeto de matriz com proposta profissional
+          Desenvolvimento profissional de matrizes de bordado
         </h1>
         <p className="mt-4 max-w-3xl text-sm md:text-base text-blue-100/95 font-semibold">
-          Envie os detalhes do que voce precisa. A equipe analisa o material, prazo e complexidade para te retornar com o melhor custo-beneficio.
+          <span className="block">Transforme sua arte em uma matriz otimizada e pronta para producao.</span>
+          <span className="block">Analise detalhada de cada projeto para garantir acabamento superior e eficiencia na maquina.</span>
         </p>
       </section>
 
@@ -142,11 +152,11 @@ export default function BudgetPage() {
 
           <div className="rounded-[1.75rem] border border-slate-100 bg-white p-6 shadow-sm">
             <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Diferenciais</h3>
-            <div className="mt-4 space-y-3 text-xs font-semibold text-slate-600">
-              <p className="inline-flex items-center gap-2"><Zap className="w-4 h-4" style={{ color: primary }} /> Atendimento agil</p>
-              <p className="inline-flex items-center gap-2"><Target className="w-4 h-4" style={{ color: primary }} /> Proposta objetiva</p>
-              <p className="inline-flex items-center gap-2"><Clock3 className="w-4 h-4" style={{ color: primary }} /> Prazo transparente</p>
-              <p className="inline-flex items-center gap-2"><FileText className="w-4 h-4" style={{ color: primary }} /> Escopo validado</p>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-xs font-semibold text-slate-600">
+              <p className="inline-flex items-center gap-2 min-w-0"><Zap className="w-4 h-4 shrink-0" style={{ color: primary }} /> <span className="truncate">Atendimento agil</span></p>
+              <p className="inline-flex items-center gap-2 min-w-0"><Target className="w-4 h-4 shrink-0" style={{ color: primary }} /> <span className="truncate">Proposta objetiva</span></p>
+              <p className="inline-flex items-center gap-2 min-w-0"><Clock3 className="w-4 h-4 shrink-0" style={{ color: primary }} /> <span className="truncate">Prazo transparente</span></p>
+              <p className="inline-flex items-center gap-2 min-w-0"><FileText className="w-4 h-4 shrink-0" style={{ color: primary }} /> <span className="truncate">Escopo validado</span></p>
             </div>
           </div>
         </aside>
@@ -161,41 +171,106 @@ export default function BudgetPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <select value={projectType} onChange={(e) => setProjectType(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2" style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}>
-                <option value="logo">Logo/Marca</option>
-                <option value="frase">Frase/Tipografia</option>
-                <option value="desenho">Desenho/Ilustracao</option>
-                <option value="composicao">Composicao completa</option>
+              <select value={projectType} required onChange={(e) => setProjectType(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2" style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}>
+                <option value="" disabled>Tipo de projeto</option>
+                <option value="logo-marca">Logo/Marca</option>
+                <option value="escrita">Escrita</option>
+                <option value="frase">Frase</option>
+                <option value="simbolo">Simbolo</option>
+                <option value="brasao">Brasao</option>
+                <option value="desenho">Desenho</option>
+                <option value="outro">Outro</option>
               </select>
-              <select value={budgetRange} onChange={(e) => setBudgetRange(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2" style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}>
-                <option value="ate-100">Faixa: ate R$ 100</option>
-                <option value="100-250">Faixa: R$ 100 a R$ 250</option>
-                <option value="250-500">Faixa: R$ 250 a R$ 500</option>
-                <option value="acima-500">Faixa: acima de R$ 500</option>
+              <select value={matrixSize} required onChange={(e) => setMatrixSize(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2" style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}>
+                <option value="" disabled>Tamanho da matriz</option>
+                <option value="10cm">10cm</option>
+                <option value="12cm">12cm</option>
+                <option value="14cm">14cm</option>
+                <option value="16cm">16cm</option>
+                <option value="18cm">18cm</option>
+                <option value="20cm">20cm</option>
+                <option value="25cm">25cm</option>
+                <option value="30cm">30cm</option>
+                <option value="outro">Outro</option>
               </select>
-              <select value={deadline} onChange={(e) => setDeadline(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2" style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}>
-                <option value="normal">Prazo normal</option>
-                <option value="urgente">Urgente (prioridade)</option>
+              <select value={fabricType} required onChange={(e) => setFabricType(e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2" style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}>
+                <option value="" disabled>Bordar em</option>
+                <option value="brim">Brim</option>
+                <option value="malha-pv">Malha PV</option>
+                <option value="malha-piquet">Malha Piquet</option>
+                <option value="tecido-social">Tecido Social</option>
+                <option value="couro">Couro</option>
+                <option value="outro">Outro</option>
               </select>
             </div>
+            {(projectType === 'outro' || matrixSize === 'outro' || fabricType === 'outro') && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  {projectType === 'outro' && (
+                    <input
+                      value={projectTypeOther}
+                      onChange={(e) => setProjectTypeOther(e.target.value)}
+                      placeholder="Descreva o tipo de projeto"
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2"
+                      style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}
+                    />
+                  )}
+                </div>
+                <div>
+                  {matrixSize === 'outro' && (
+                    <input
+                      value={matrixSizeOther}
+                      onChange={(e) => setMatrixSizeOther(e.target.value)}
+                      placeholder="Informe o tamanho desejado"
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2"
+                      style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}
+                    />
+                  )}
+                </div>
+                <div>
+                  {fabricType === 'outro' && (
+                    <input
+                      value={fabricTypeOther}
+                      onChange={(e) => setFabricTypeOther(e.target.value)}
+                      placeholder="Informe o tecido"
+                      required
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2"
+                      style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
 
             <textarea
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               rows={5}
-              placeholder="Descreva o projeto, tamanho, aplicacao e qualquer observacao tecnica."
+              placeholder="Informe outras informacoes importantes para a producao."
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2"
               style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}
             />
 
             <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-4 items-end">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => setReferenceImage(e.target.files?.[0] || null)}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:px-3 file:py-1.5 file:text-xs file:font-black file:text-white"
-                style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28), ['--tw-file-bg' as any]: primary }}
-              />
+              <label className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 cursor-pointer flex items-center gap-3">
+                <span
+                  className="inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-black text-white"
+                  style={{ backgroundColor: primary }}
+                >
+                  Anexar referencia
+                </span>
+                <span className="min-w-0 truncate font-semibold text-slate-600">
+                  {referenceImage?.name || 'Nenhum arquivo selecionado'}
+                </span>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf,.zip,.rar,.7z,application/zip,application/x-rar-compressed,application/x-7z-compressed"
+                  onChange={(e) => setReferenceImage(e.target.files?.[0] || null)}
+                  className="hidden"
+                />
+              </label>
               <button
                 type="submit"
                 disabled={loading}
@@ -222,4 +297,3 @@ export default function BudgetPage() {
     </main>
   );
 }
-

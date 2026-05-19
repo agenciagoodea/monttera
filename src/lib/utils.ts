@@ -12,22 +12,9 @@ export function formatCurrency(value: number) {
   }).format(value);
 }
 
-export function normalizePublicMediaUrl(value?: string | null): string {
+export function getPublicAssetUrl(value?: string | null): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
-
-  const toNodeUploadsUrl = (inputPath: string): string => {
-    const clean = inputPath.replace(/^https?:\/\/[^/]+/i, '');
-    const marker = '/wp-content/uploads/';
-    const idx = clean.toLowerCase().indexOf(marker);
-    if (idx < 0) return '';
-    const rel = clean.slice(idx + marker.length).replace(/^\/+/, '');
-    if (!rel || /^woocommerce_uploads\//i.test(rel)) return '';
-    return `/uploads/${rel}`;
-  };
-
-  const mappedFromWp = toNodeUploadsUrl(raw);
-  if (mappedFromWp) return mappedFromWp;
 
   if (/^digitalbordados\.com\.br\//i.test(raw)) {
     return `https://${raw.replace(/^\/+/, '')}`;
@@ -49,14 +36,22 @@ export function normalizePublicMediaUrl(value?: string | null): string {
   }
 
   if (raw.startsWith('/uploads/')) {
-    return raw;
+    return `${domain}${raw}`;
   }
 
   if (raw.startsWith('uploads/')) {
-    return `/${noLeadingSlash}`;
+    return `${domain}/${noLeadingSlash}`;
   }
 
-  return raw;
+  if (raw.startsWith('/')) {
+    return `${domain}${raw}`;
+  }
+
+  return `${domain}/${noLeadingSlash}`;
+}
+
+export function normalizePublicMediaUrl(value?: string | null): string {
+  return getPublicAssetUrl(value);
 }
 
 export function isNewProduct(
