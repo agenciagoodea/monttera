@@ -8497,12 +8497,57 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       path.resolve(__dirname, 'dist'),
       path.resolve(__dirname, '..', 'dist'),
     ];
-    const distPath = distCandidates.find((candidate) => fs.existsSync(path.join(candidate, 'index.html')))
-      || path.resolve(process.cwd(), 'dist');
+    const distPath = distCandidates.find((candidate) => fs.existsSync(path.join(candidate, 'index.html')));
+    if (!distPath) {
+      throw new Error(
+        `Production build not found. Tried: ${distCandidates.join(', ')}`,
+      );
+    }
     console.log('Resolved dist path:', distPath);
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    const assetsPath = path.join(distPath, 'assets');
+    const indexFilePath = path.join(distPath, 'index.html');
+
+    if (!fs.existsSync(assetsPath)) {
+      throw new Error(`Assets directory not found: ${assetsPath}`);
+    }
+
+    app.use(
+      '/assets',
+      express.static(assetsPath, {
+        fallthrough: false,
+        immutable: true,
+        maxAge: '365d',
+      }),
+    );
+    app.use('/assets', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (!err) return next();
+      const status = Number(err?.status || err?.statusCode || 500);
+      if (status === 404) {
+        return res.status(404).type('text/plain').send('Asset not found');
+      }
+      console.error('Asset delivery error:', req.originalUrl, err);
+      return res.status(500).type('text/plain').send('Asset delivery error');
+    });
+
+    app.use(
+      express.static(distPath, {
+        fallthrough: true,
+      }),
+    );
+
+    app.get('*', (req, res, next) => {
+      if (req.method !== 'GET') return next();
+      if (req.path.startsWith('/api/')) return next();
+      if (req.path.startsWith('/assets/')) return next();
+
+      const accept = String(req.headers.accept || '');
+      if (!accept.includes('text/html')) return next();
+
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.sendFile(indexFilePath, (error) => {
+        if (!error) return;
+        next(error);
+      });
     });
   }
 
