@@ -8491,7 +8491,15 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     app.use(vite.middlewares);
   } else {
     console.log('Serving production build.');
-    const distPath = path.join(process.cwd(), 'dist');
+    const distCandidates = [
+      path.resolve(process.cwd(), 'dist'),
+      path.resolve(__dirname),
+      path.resolve(__dirname, 'dist'),
+      path.resolve(__dirname, '..', 'dist'),
+    ];
+    const distPath = distCandidates.find((candidate) => fs.existsSync(path.join(candidate, 'index.html')))
+      || path.resolve(process.cwd(), 'dist');
+    console.log('Resolved dist path:', distPath);
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
