@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useCart } from '../contexts/CartContext';
 import { Trash2, ShoppingBag, ChevronLeft, Copy, CreditCard } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -63,7 +63,12 @@ export default function CartPage() {
   const [checkoutMethod, setCheckoutMethod] = useState<CheckoutMethod>('pix');
   const [loadingCheckout, setLoadingCheckout] = useState(false);
   const [checkoutResult, setCheckoutResult] = useState<CheckoutResponse | null>(null);
-  const [paypalConfig, setPaypalConfig] = useState<{ enabled: boolean; brl_usd_rate: number } | null>(null);
+  const [paypalConfig, setPaypalConfig] = useState<{
+    enabled: boolean;
+    currency: 'BRL' | 'USD' | 'EUR';
+    brl_usd_rate: number;
+    brl_eur_rate: number;
+  } | null>(null);
 
   const [publicKey, setPublicKey] = useState('');
   const [payer, setPayer] = useState({
@@ -98,6 +103,7 @@ export default function CartPage() {
   });
 
   const cardFormRef = useRef<any>(null);
+  const [securityImageSrc, setSecurityImageSrc] = useState('/uploads/seguranca');
 
   const canSubmitPayer = useMemo(() => {
     return payerErrors.length === 0;
@@ -198,9 +204,16 @@ export default function CartPage() {
       try {
         const res = await fetch('/api/checkout/paypal/config');
         const data = await res.json();
-        setPaypalConfig({ enabled: data?.enabled === true, brl_usd_rate: parseFloat(data?.brl_usd_rate || '5.20') });
+        setPaypalConfig({
+          enabled: data?.enabled === true,
+          currency: (['BRL', 'USD', 'EUR'].includes(String(data?.currency || '').toUpperCase())
+            ? String(data.currency).toUpperCase()
+            : 'USD') as 'BRL' | 'USD' | 'EUR',
+          brl_usd_rate: parseFloat(data?.brl_usd_rate || '5.20'),
+          brl_eur_rate: parseFloat(data?.brl_eur_rate || '6.00'),
+        });
       } catch {
-        setPaypalConfig({ enabled: false, brl_usd_rate: 5.20 });
+        setPaypalConfig({ enabled: false, currency: 'USD', brl_usd_rate: 5.2, brl_eur_rate: 6.0 });
       }
     }
     loadPayPalConfig();
@@ -426,11 +439,31 @@ export default function CartPage() {
 
   return (
     <div className="max-w-[1440px] mx-auto px-6 md:px-10 py-10 w-full">
-      <div className="flex items-center gap-4 mb-10">
-        <Link to="/" className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-blue-600 transition-colors">
-          <ChevronLeft className="w-5 h-5" />
-        </Link>
-        <h1 className="text-3xl font-black text-slate-800 uppercase tracking-tight">Meu Carrinho</h1>
+      <div className="mb-10 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex items-center gap-4">
+          <Link to="/" className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-blue-600 transition-colors">
+            <ChevronLeft className="w-5 h-5" />
+          </Link>
+          <h1 className="text-3xl font-black text-slate-800 uppercase tracking-tight">Meu Carrinho</h1>
+        </div>
+        <div className="w-full xl:w-auto xl:max-w-[960px] flex flex-col md:flex-row md:items-center gap-3">
+          <div className="bg-[#eaf4fc] border border-blue-100 rounded-2xl p-4 text-[12px] text-blue-900 leading-relaxed shadow-sm flex-1">
+            <p className="font-bold mb-1 text-blue-950">Neste pacote cont?m arquivos: PES - JEF - DST - EXP - XXX</p>
+            <p>
+              Após a finalização da sua compra, caso você não seja redirecionado automaticamente para download, acesse o Painel do Cliente no menu superior do site clicando na opção <strong>"Matrizes Compradas"</strong> para visualizar e baixar seus arquivos.
+            </p>
+          </div>
+          <div className="w-full xl:w-[390px] rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <img
+              src={securityImageSrc}
+              alt="Selo de seguran?a da compra"
+              onError={() => {
+                if (securityImageSrc.endsWith('/seguranca')) setSecurityImageSrc('/uploads/seguranca.jpeg');
+              }}
+              className="w-full h-auto object-contain"
+            />
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -465,19 +498,13 @@ export default function CartPage() {
           <div className="flex">
             <Link
               to="/"
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[11px] font-black uppercase tracking-wider text-slate-700 hover:border-blue-300 hover:text-blue-600 transition-colors"
+              className="inline-flex items-center gap-2 rounded-xl border border-blue-600 bg-blue-600 px-4 py-2.5 text-[11px] font-black uppercase tracking-wider text-white hover:bg-blue-700 hover:border-blue-700 transition-colors"
             >
               <ChevronLeft className="w-4 h-4" />
               Adicionar mais produtos
             </Link>
           </div>
 
-          <div className="bg-[#eaf4fc] border border-blue-100 rounded-[2rem] p-6 text-[13px] text-blue-900 leading-relaxed shadow-sm">
-            <p className="font-bold mb-2 text-blue-950">Neste pacote contém arquivos: PES - JEF - DST - EXP - XXX</p>
-            <p>
-              Após a finalização da sua compra, caso você não seja redirecionado automaticamente para download, acesse o Painel do Cliente no menu superior do site clicando na opção <strong>"Matrizes Compradas"</strong> para visualizar e baixar seus arquivos. Certifique-se de utilizar o usuário e a senha cadastrados no momento da compra. Caso não se lembre dos seus dados de acesso, utilize a opção "Esqueci minha senha" para redefini-los.
-            </p>
-          </div>
           
 
         </div>
@@ -623,7 +650,7 @@ export default function CartPage() {
               </button>
               {paypalConfig?.enabled && (
                 <button type="button" onClick={() => setCheckoutMethod('paypal')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'paypal' ? 'bg-[#0070ba] text-white' : 'bg-slate-100 text-slate-600'}`}>
-                  PayPal 🌐
+                  PayPal
                 </button>
               )}
             </div>
@@ -663,8 +690,8 @@ export default function CartPage() {
                   </label>
                 )}
                 <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 text-sm text-blue-800 font-medium">
-                  🌐 <strong>Pagamento internacional em dólar (USD).</strong><br />
-                  O valor será convertido pela cotação configurada pela loja.
+                  <strong>Recebimento PayPal em {paypalConfig?.currency || 'USD'}.</strong><br />
+                  O valor é convertido automaticamente conforme a moeda padrão configurada.
                 </div>
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-1 text-xs font-semibold text-slate-600">
                   <div className="flex justify-between">
@@ -673,11 +700,28 @@ export default function CartPage() {
                   </div>
                   <div className="flex justify-between">
                     <span>Cotação:</span>
-                    <span>1 USD = R$ {(paypalConfig?.brl_usd_rate ?? 5.20).toFixed(2)}</span>
+                    <span>
+                      1 {paypalConfig?.currency || 'USD'} = R$ {(
+                        paypalConfig?.currency === 'EUR'
+                          ? (paypalConfig?.brl_eur_rate ?? 6.0)
+                          : paypalConfig?.currency === 'BRL'
+                            ? 1
+                            : (paypalConfig?.brl_usd_rate ?? 5.2)
+                      ).toFixed(2)}
+                    </span>
                   </div>
                   <div className="flex justify-between border-t border-slate-200 pt-1 mt-1">
-                    <span>Estimado em USD:</span>
-                    <span className="text-blue-700 font-black">$ {(totalPrice / (paypalConfig?.brl_usd_rate ?? 5.20)).toFixed(2)}</span>
+                    <span>Estimado em {paypalConfig?.currency || 'USD'}:</span>
+                    <span className="text-blue-700 font-black">
+                      {(paypalConfig?.currency === 'BRL' ? 'R$' : paypalConfig?.currency === 'EUR' ? '€' : '$')}{' '}
+                      {(
+                        paypalConfig?.currency === 'EUR'
+                          ? totalPrice / (paypalConfig?.brl_eur_rate ?? 6.0)
+                          : paypalConfig?.currency === 'BRL'
+                            ? totalPrice
+                            : totalPrice / (paypalConfig?.brl_usd_rate ?? 5.2)
+                      ).toFixed(2)}
+                    </span>
                   </div>
                 </div>
                 <button
@@ -685,7 +729,7 @@ export default function CartPage() {
                   disabled={loadingCheckout || (requireCheckoutConsent && !checkoutConsent)}
                   className="w-full bg-[#0070ba] hover:bg-[#005ea6] text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 transition-colors"
                 >
-                  {loadingCheckout ? 'Redirecionando...' : '🅿 Pagar com PayPal →'}
+                  {loadingCheckout ? 'Redirecionando...' : 'Pagar com PayPal →'}
                 </button>
               </div>
             ) : (

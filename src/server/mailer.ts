@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import Handlebars from 'handlebars';
-import db from './db';
+import dbAsync from './dbAsync';
 
 interface SendEmailParams {
   to: string;
@@ -8,10 +8,10 @@ interface SendEmailParams {
   variables?: Record<string, any>;
 }
 
-function loadSettingsMap(keys?: string[]) {
+async function loadSettingsMap(keys?: string[]) {
   const rows = keys && keys.length > 0
-    ? db.all(`SELECT \`key\`, value FROM settings WHERE \`key\` IN (${keys.map(() => '?').join(',')})`, ...keys)
-    : db.all('SELECT `key`, value FROM settings');
+    ? await dbAsync.all(`SELECT \`key\`, value FROM settings WHERE \`key\` IN (${keys.map(() => '?').join(',')})`, ...keys)
+    : await dbAsync.all('SELECT `key`, value FROM settings');
 
   return (rows as any[]).reduce<Record<string, string>>((acc, row) => {
     acc[row.key] = row.value;
@@ -22,7 +22,7 @@ function loadSettingsMap(keys?: string[]) {
 export async function sendEmail({ to, templateKey, variables = {} }: SendEmailParams) {
   try {
     // 1. Load settings
-    const settings = loadSettingsMap([
+    const settings = await loadSettingsMap([
       'smtp_host',
       'smtp_port',
       'smtp_secure',
@@ -54,7 +54,7 @@ export async function sendEmail({ to, templateKey, variables = {} }: SendEmailPa
     }
 
     // 2. Fetch template
-    const template = db.get('SELECT * FROM email_templates WHERE `key` = ? AND active = 1', templateKey) as any;
+    const template = await dbAsync.get('SELECT * FROM email_templates WHERE `key` = ? AND active = 1', templateKey) as any;
     if (!template) {
       console.error(`[Mailer] Template '${templateKey}' not found or inactive`);
       return { success: false, error: 'Template não encontrado ou inativo' };
@@ -97,7 +97,7 @@ export async function sendEmail({ to, templateKey, variables = {} }: SendEmailPa
     });
 
     // 6. Log success
-    db.run(
+    await dbAsync.run(
       'INSERT INTO email_logs (to_email, subject, template_key, status) VALUES (?, ?, ?, ?)',
       to, subject, templateKey, 'sent'
     );
@@ -107,7 +107,7 @@ export async function sendEmail({ to, templateKey, variables = {} }: SendEmailPa
   } catch (error: any) {
     console.error('[Mailer] Error sending email:', error);
     // Log error
-    db.run(
+    await dbAsync.run(
       'INSERT INTO email_logs (to_email, subject, template_key, status, error) VALUES (?, ?, ?, ?, ?)',
       to, '', templateKey, 'failed', error.message || String(error)
     );

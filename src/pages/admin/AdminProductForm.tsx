@@ -54,9 +54,14 @@ export default function AdminProductForm() {
   const [quickCategoryName, setQuickCategoryName] = useState('');
   const [quickCategoryParentId, setQuickCategoryParentId] = useState('');
   const [quickCategoryBusy, setQuickCategoryBusy] = useState(false);
+  const [syncingMercadoPago, setSyncingMercadoPago] = useState(false);
+  const [syncLogs, setSyncLogs] = useState<any[]>([]);
+  const [loadingSyncLogs, setLoadingSyncLogs] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState('');
   
   const [formData, setFormData] = useState({
     name: '',
+    slug: '',
     short_description: '',
     description: '',
     price: '',
@@ -68,6 +73,9 @@ export default function AdminProductForm() {
     is_new: true,
     seo_title: '',
     seo_description: '',
+    seo_keywords: '',
+    canonical_url: '',
+    noindex: false,
   });
 
   const [mainImage, setMainImage] = useState<File | null>(null);
@@ -123,6 +131,7 @@ export default function AdminProductForm() {
         const prod = await prodRes.json();
         setFormData(() => ({
           name: prod.name,
+          slug: prod.slug || '',
           short_description: prod.short_description || '',
           description: prod.description || '',
           price: prod.price.toString(),
@@ -134,6 +143,9 @@ export default function AdminProductForm() {
           is_new: !!prod.is_new,
           seo_title: prod.seo_title || '',
           seo_description: prod.seo_description || '',
+          seo_keywords: prod.seo_keywords || '',
+          canonical_url: prod.canonical_url || '',
+          noindex: !!prod.noindex,
         }));
         const existingCategoryIds = Array.isArray(prod.category_ids) && prod.category_ids.length > 0
           ? prod.category_ids
@@ -184,6 +196,26 @@ export default function AdminProductForm() {
     fetchData();
   }, [id]);
 
+  useEffect(() => {
+    if (!id) return;
+    loadMercadoPagoSyncLogs();
+  }, [id]);
+
+  const loadMercadoPagoSyncLogs = async () => {
+    if (!id) return;
+    setLoadingSyncLogs(true);
+    try {
+      const res = await fetch('/api/admin/products/' + id + '/sync-mercadopago/logs', { credentials: 'include' });
+      const payload = await res.json().catch(() => []);
+      if (!res.ok) throw new Error(payload?.error || 'Erro ao carregar logs de sincronização.');
+      setSyncLogs(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      setSyncFeedback((error && error.message) ? error.message : 'Erro ao carregar logs de sincronização.');
+    } finally {
+      setLoadingSyncLogs(false);
+    }
+  };
+
   const handleMainImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
       const file = e.target.files[0];
@@ -215,6 +247,25 @@ export default function AdminProductForm() {
   };
 
   const selectedTags = availableTags.filter((tag) => selectedTagIds.includes(tag.id));
+  const stripHtml = (value: string) => String(value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const seoKeyword = String(formData.seo_keywords || '').split(',')[0]?.trim().toLowerCase() || '';
+  const seoTitlePreview = String(formData.seo_title || formData.name || '').trim();
+  const seoDescriptionPreview = String(formData.seo_description || stripHtml(formData.short_description || formData.description || '')).trim();
+  const plainDescription = stripHtml(formData.description || '');
+  const wordCount = plainDescription ? plainDescription.split(/\s+/).length : 0;
+  const keywordMatches = seoKeyword ? (plainDescription.toLowerCase().match(new RegExp(`\\b${seoKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')) || []).length : 0;
+  const keywordDensity = wordCount > 0 ? (keywordMatches / wordCount) * 100 : 0;
+  const hasHeading = /<h[1-3][^>]*>.*?<\/h[1-3]>/i.test(formData.description || '');
+  const hasImageAlt = /<img[^>]+alt\s*=\s*['"][^'"]+['"][^>]*>/i.test(formData.description || '');
+  const seoScore = [
+    seoTitlePreview.length >= 35 && seoTitlePreview.length <= 65 ? 20 : 0,
+    seoDescriptionPreview.length >= 120 && seoDescriptionPreview.length <= 160 ? 20 : 0,
+    formData.slug.trim().length >= 3 ? 15 : 0,
+    seoKeyword ? 15 : 0,
+    keywordDensity >= 0.5 && keywordDensity <= 3 ? 15 : 0,
+    hasHeading ? 10 : 0,
+    hasImageAlt ? 5 : 0,
+  ].reduce((a, b) => a + b, 0);
 
   const allCategoriesHierarchical = useMemo(() => {
     const byId = new Map(categories.map((category) => [category.id, category]));
@@ -456,9 +507,39 @@ export default function AdminProductForm() {
     }
   };
 
+  const handleSyncMercadoPago = async () => {
+    if (!id) {
+      alert('Salve o produto antes de sincronizar com Mercado Pago.');
+      return;
+    }
+    setSyncingMercadoPago(true);
+    setSyncFeedback('');
+    try {
+      const res = await fetch(`/api/admin/products/${id}/sync-mercadopago`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const payload = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        const errorMessage = payload?.error || 'Erro ao sincronizar produto com Mercado Pago.';
+        setSyncFeedback(errorMessage);
+        alert(errorMessage);
+        return;
+      }
+      const successMessage = payload?.message || 'Produto sincronizado com Mercado Pago.';
+      setSyncFeedback(successMessage);
+      alert(successMessage);
+      loadMercadoPagoSyncLogs();
+    } catch (error) {
+      alert('Erro de conexão ao sincronizar com Mercado Pago.');
+    } finally {
+      setSyncingMercadoPago(false);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto pb-20">
-      <div className="flex items-center justify-between mb-10">
+      <div className="flex items-center justify-between gap-3 mb-10">
         <div className="flex items-center gap-6">
           <button 
             onClick={() => navigate('/admin/produtos')}
@@ -473,20 +554,70 @@ export default function AdminProductForm() {
             <p className="text-slate-500 font-medium">Preencha todos os campos para cadastrar a matriz.</p>
           </div>
         </div>
-        <button 
-          onClick={handleSubmit}
-          disabled={loading}
-          className="bg-blue-600 text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-500/20 hover:bg-blue-700 hover:-translate-y-1 active:translate-y-0 transition-all flex items-center gap-3 disabled:opacity-50"
-        >
-          {loading ? 'Salvando...' : (
-            <>
-              <Save className="w-5 h-5" />
-              Salvar Matriz
-            </>
+        <div className="flex items-center gap-2">
+          {id && (
+            <button
+              type="button"
+              onClick={handleSyncMercadoPago}
+              disabled={syncingMercadoPago}
+              className="bg-slate-800 text-white px-5 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg hover:bg-slate-900 transition-all disabled:opacity-50"
+            >
+              {syncingMercadoPago ? 'Sincronizando...' : 'Sincronizar Produto Mercado Pago'}
+            </button>
           )}
-        </button>
+          <button 
+            onClick={handleSubmit}
+            disabled={loading}
+            className="bg-blue-600 text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-500/20 hover:bg-blue-700 hover:-translate-y-1 active:translate-y-0 transition-all flex items-center gap-3 disabled:opacity-50"
+          >
+            {loading ? 'Salvando...' : (
+              <>
+                <Save className="w-5 h-5" />
+                Salvar Matriz
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
+
+      {id && (
+        <div className="mb-8 bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Logs de Sincronização Mercado Pago</h3>
+            <button
+              type="button"
+              onClick={loadMercadoPagoSyncLogs}
+              disabled={loadingSyncLogs}
+              className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+            >
+              {loadingSyncLogs ? 'Atualizando...' : 'Atualizar'}
+            </button>
+          </div>
+          {syncFeedback && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 text-blue-800 text-xs font-semibold px-4 py-3">
+              {syncFeedback}
+            </div>
+          )}
+          {loadingSyncLogs ? (
+            <div className="text-xs font-semibold text-slate-400">Carregando logs...</div>
+          ) : syncLogs.length === 0 ? (
+            <div className="text-xs font-semibold text-slate-400">Nenhum log de sincronização encontrado.</div>
+          ) : (
+            <div className="space-y-2 max-h-[260px] overflow-auto pr-1">
+              {syncLogs.map((log) => (
+                <div key={log.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-black text-slate-700 uppercase">{String(log.status || '-')}</span>
+                    <span className="font-semibold text-slate-400">{new Date(log.created_at).toLocaleString('pt-BR')}</span>
+                  </div>
+                  <p className="mt-1 font-semibold text-slate-700">{log.message || '-'}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-8">
@@ -509,6 +640,17 @@ export default function AdminProductForm() {
                   onChange={e => setFormData((prev) => ({ ...prev, name: e.target.value }))}
                   className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
                   placeholder="Ex: Matriz de Bordado Borboleta 3D"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Slug amigável</label>
+                <input
+                  type="text"
+                  value={formData.slug}
+                  onChange={e => setFormData((prev) => ({ ...prev, slug: e.target.value }))}
+                  className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                  placeholder="ex: matriz-borboleta-3d"
                 />
               </div>
 
@@ -905,6 +1047,65 @@ export default function AdminProductForm() {
                       placeholder="5 cores"
                     />
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Palavras-chave SEO</label>
+                  <input
+                    type="text"
+                    value={formData.seo_keywords}
+                    onChange={e => setFormData((prev) => ({ ...prev, seo_keywords: e.target.value }))}
+                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
+                    placeholder="ex: policia militar, veterinaria, enfermagem"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Canonical URL</label>
+                  <input
+                    type="text"
+                    value={formData.canonical_url}
+                    onChange={e => setFormData((prev) => ({ ...prev, canonical_url: e.target.value }))}
+                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
+                    placeholder="https://www.seudominio.com/produto/matriz-exemplo"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Indexação</label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!formData.noindex}
+                    onClick={() => setFormData((prev) => ({ ...prev, noindex: !prev.noindex }))}
+                    className={`w-full px-4 py-4 rounded-2xl border text-xs font-black uppercase tracking-widest transition-colors ${
+                      formData.noindex
+                        ? 'bg-rose-50 border-rose-200 text-rose-700'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                    }`}
+                  >
+                    {formData.noindex ? 'Noindex / Nofollow' : 'Index / Follow'}
+                  </button>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Analise SEO</p>
+                    <span className={`text-xs font-black ${seoScore >= 80 ? 'text-emerald-600' : seoScore >= 55 ? 'text-amber-600' : 'text-rose-600'}`}>{seoScore}/100</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                    <div className={`h-full ${seoScore >= 80 ? 'bg-emerald-500' : seoScore >= 55 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${Math.max(0, Math.min(100, seoScore))}%` }} />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] font-semibold text-slate-600">
+                    <span>Titulo: {seoTitlePreview.length} caracteres</span>
+                    <span>Descricao: {seoDescriptionPreview.length} caracteres</span>
+                    <span>Densidade keyword: {keywordDensity.toFixed(2)}%</span>
+                    <span>Legibilidade: {wordCount < 80 ? 'baixa' : wordCount > 450 ? 'alta' : 'ok'}</span>
+                    <span>Heading no conteudo: {hasHeading ? 'ok' : 'falta'}</span>
+                    <span>Imagem com ALT: {hasImageAlt ? 'ok' : 'falta'}</span>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Preview Google</p>
+                  <p className="text-[10px] text-emerald-700 font-semibold truncate">{formData.canonical_url || `https://www.seudominio.com/produto/${formData.slug || 'slug-do-produto'}`}</p>
+                  <p className="text-base leading-tight text-blue-700 font-semibold">{seoTitlePreview || 'Titulo do produto para resultado de busca'}</p>
+                  <p className="text-xs text-slate-600 line-clamp-3">{seoDescriptionPreview || 'Descricao do produto otimizada para mecanismos de busca.'}</p>
                 </div>
               </div>
             </div>

@@ -68,6 +68,7 @@ function RouteSeoDefaults() {
 
   useEffect(() => {
     const siteName = String(settings.site_name || 'Digital Bordados').trim();
+    const appUrl = String(settings.app_url || window.location.origin).replace(/\/+$/, '');
     const baseDescription = String(
       settings.site_description || 'Matrizes de bordado digitais para produção profissional.',
     ).trim();
@@ -89,14 +90,32 @@ function RouteSeoDefaults() {
 
     const selected = seoByRoute.find((entry) => entry.match.test(path));
 
+    const shouldRenderOrganizationSchema = String(settings.seo_enable_organization_schema || 'true').toLowerCase() === 'true';
+    const organizationName = String(settings.seo_organization_name || siteName).trim();
+    const organizationLogo = String(settings.seo_organization_logo || settings.logo_url || settings.seo_og_image || '/uploads/seo-default-share.jpg').trim();
+    const organizationSchema = shouldRenderOrganizationSchema
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'Organization',
+          name: organizationName,
+          url: appUrl,
+          logo: organizationLogo.startsWith('http')
+            ? organizationLogo
+            : `${appUrl}${organizationLogo.startsWith('/') ? '' : '/'}${organizationLogo}`,
+          sameAs: [settings.seo_facebook_url, settings.seo_instagram_url, settings.seo_twitter_url].filter(Boolean),
+        }
+      : undefined;
+
     applySeo({
       title: selected?.title || `${siteName} | Página`,
       description: selected?.description || baseDescription,
       robots: selected?.robots || 'index,follow',
       canonical: `${path}${location.search || ''}`,
       siteName,
-      image: String(settings.logo_url || '/uploads/seo-default-share.jpg'),
+      image: String(settings.seo_og_image || settings.logo_url || '/uploads/seo-default-share.jpg'),
+      twitterCard: String(settings.seo_twitter_card || 'summary_large_image'),
       keywords: String(settings.seo_keywords || ''),
+      jsonLd: organizationSchema,
     });
   }, [location.pathname, location.search, settings]);
 

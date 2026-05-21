@@ -14,6 +14,44 @@ const dbConfig = {
 };
 
 const connection = new MySql(dbConfig);
+let disposed = false;
+
+function disposeConnection() {
+  if (disposed) return;
+  disposed = true;
+  try {
+    connection.dispose();
+  } catch (error) {
+    console.error('[db] failed to dispose sync-mysql2 connection:', error);
+  }
+}
+
+function registerShutdownHandlers() {
+  const handleSignal = (signal: NodeJS.Signals) => {
+    try {
+      disposeConnection();
+    } finally {
+      process.exit(signal === 'SIGINT' ? 130 : 143);
+    }
+  };
+
+  process.once('SIGINT', () => handleSignal('SIGINT'));
+  process.once('SIGTERM', () => handleSignal('SIGTERM'));
+  process.once('beforeExit', () => disposeConnection());
+  process.once('exit', () => disposeConnection());
+  process.once('uncaughtException', (error) => {
+    console.error('[db] uncaughtException:', error);
+    disposeConnection();
+    process.exit(1);
+  });
+  process.once('unhandledRejection', (reason) => {
+    console.error('[db] unhandledRejection:', reason);
+    disposeConnection();
+    process.exit(1);
+  });
+}
+
+registerShutdownHandlers();
 
 function query(sql: string, ...params: any[]) {
   return connection.query(sql, params);
@@ -378,6 +416,27 @@ export function initDb() {
       expires_at DATETIME NOT NULL,
       used TINYINT(1) DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS order_customer_details (
+      order_id INT PRIMARY KEY,
+      first_name VARCHAR(120) NULL,
+      last_name VARCHAR(120) NULL,
+      cpf VARCHAR(30) NULL,
+      email VARCHAR(255) NULL,
+      phone VARCHAR(40) NULL,
+      city VARCHAR(120) NULL,
+      state VARCHAR(80) NULL,
+      postal_code VARCHAR(30) NULL,
+      address_line VARCHAR(255) NULL,
+      number VARCHAR(40) NULL,
+      neighborhood VARCHAR(120) NULL,
+      complement VARCHAR(120) NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_order_customer_details_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
@@ -833,6 +892,52 @@ export function initDb() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS mercadopago_product_sync_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      product_id INT NOT NULL,
+      product_name VARCHAR(255) NULL,
+      sku VARCHAR(255) NULL,
+      status VARCHAR(50) DEFAULT 'pending',
+      message TEXT NULL,
+      payload_json LONGTEXT NULL,
+      synced_by INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_mp_sync_product (product_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS matrix_request_email_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      matrix_request_id INT NULL,
+      recipient_type VARCHAR(30) DEFAULT 'customer',
+      to_email VARCHAR(255) NULL,
+      template_key VARCHAR(100) NULL,
+      status VARCHAR(30) DEFAULT 'pending',
+      error TEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_matrix_request_email_logs_status (status, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS system_backups (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      backup_key VARCHAR(191) NOT NULL UNIQUE,
+      mode VARCHAR(30) DEFAULT 'full',
+      status VARCHAR(30) DEFAULT 'completed',
+      archive_path TEXT NULL,
+      snapshot_path TEXT NULL,
+      size_bytes BIGINT DEFAULT 0,
+      integrity_ok TINYINT(1) DEFAULT 1,
+      notes TEXT NULL,
+      created_by INT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
 
 export default {
@@ -841,5 +946,6 @@ export default {
   get,
   run,
   transaction,
+  dispose: disposeConnection,
 };
 

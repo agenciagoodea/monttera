@@ -6,6 +6,8 @@ type SeoInput = {
   robots?: string;
   keywords?: string;
   siteName?: string;
+  twitterCard?: string;
+  ogType?: string;
   jsonLd?: Record<string, unknown> | Record<string, unknown>[];
 };
 
@@ -68,20 +70,22 @@ export function applySeo(input: SeoInput) {
   const image = buildAbsoluteUrl(input.image || '/uploads/seo-default-share.jpg');
   const robots = String(input.robots || 'index,follow').trim();
   const keywords = String(input.keywords || '').trim();
+  const twitterCard = String(input.twitterCard || 'summary_large_image').trim();
+  const ogType = String(input.ogType || 'website').trim();
 
   document.title = title;
   upsertMetaByName('description', description);
   upsertMetaByName('robots', robots);
   if (keywords) upsertMetaByName('keywords', keywords);
 
-  upsertMetaByProperty('og:type', 'website');
+  upsertMetaByProperty('og:type', ogType);
   upsertMetaByProperty('og:site_name', siteName);
   upsertMetaByProperty('og:title', title);
   upsertMetaByProperty('og:description', description);
   upsertMetaByProperty('og:url', canonical);
   upsertMetaByProperty('og:image', image);
 
-  upsertMetaByName('twitter:card', 'summary_large_image');
+  upsertMetaByName('twitter:card', twitterCard);
   upsertMetaByName('twitter:title', title);
   upsertMetaByName('twitter:description', description);
   upsertMetaByName('twitter:image', image);
@@ -89,4 +93,3 @@ export function applySeo(input: SeoInput) {
   upsertCanonical(canonical);
   if (input.jsonLd) upsertJsonLd(input.jsonLd);
 }
-

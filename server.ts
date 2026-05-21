@@ -1,15 +1,18 @@
-﻿if (process.env.NODE_ENV !== 'production') {
+process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+if (process.env.NODE_ENV !== 'production') {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import db, { initDb } from './src/server/db';
+import { initDb } from './src/server/dbInitAsync';
+import dbAsync from './src/server/dbAsync';
 import { hashPassword, comparePassword, generateToken, verifyToken, authenticate, isAdmin } from './src/server/auth';
 import multer from 'multer';
 import slugify from 'slugify';
 import fs from 'fs';
+import { execFileSync } from 'child_process';
 import https from 'https';
 import crypto from 'crypto';
 import { pipeline } from 'stream/promises';
@@ -117,6 +120,9 @@ class CacheProvider {
 }
 
 const apiCache = new CacheProvider();
+const SETTINGS_CACHE_TTL_MS = 10 * 60 * 1000;
+let settingsCache: Record<string, string> = {};
+let settingsCacheExpiresAt = 0;
 
 console.log('--- SERVER.TS EXECUTING ---');
 
@@ -131,14 +137,10 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 function loadSettingsMap(keys?: string[]) {
-  const rows = keys && keys.length > 0
-    ? db.all(`SELECT \`key\`, value FROM settings WHERE \`key\` IN (${keys.map(() => '?').join(',')})`, ...keys)
-    : db.all('SELECT `key`, value FROM settings');
-
-  return (rows as any[]).reduce<Record<string, string>>((acc, row) => {
-    acc[row.key] = row.value;
-    return acc;
-  }, {});
+  if (!keys || keys.length === 0) return { ...settingsCache };
+  const selected: Record<string, string> = {};
+  for (const key of keys) selected[key] = settingsCache[key];
+  return selected;
 }
 
 function resolveMercadoPagoSettings() {
@@ -374,13 +376,13 @@ function moveUploadedFileToFinalPath(
   return { absolutePath: target, fileName: finalFileName };
 }
 
-function createUniqueProductSlug(baseName: string, ignoreProductId?: number) {
+async function createUniqueProductSlug(baseName: string, ignoreProductId?: number) {
   const baseSlugRaw = slugify(baseName || 'produto', { lower: true, strict: true, trim: true }) || 'produto';
   let candidate = baseSlugRaw;
   let sequence = 2;
 
   while (true) {
-    const existing = db.get('SELECT id FROM products WHERE slug = ?', candidate) as any;
+    const existing = await dbAsync.get('SELECT id FROM products WHERE slug = ?', candidate) as any;
     if (!existing || (ignoreProductId && Number(existing.id) === Number(ignoreProductId))) {
       return candidate;
     }
@@ -389,8 +391,8 @@ function createUniqueProductSlug(baseName: string, ignoreProductId?: number) {
   }
 }
 
-function resolveNewBadgeDays() {
-  const settings = loadSettingsMap(['new_badge_days']);
+async function resolveNewBadgeDays() {
+  const settings = await loadSettingsMapAsync(['new_badge_days']);
   const parsed = Number(settings.new_badge_days);
   if (Number.isFinite(parsed) && parsed > 0) {
     return Math.floor(parsed);
@@ -439,8 +441,8 @@ function extractMercadoPagoSignature(signatureHeader: string) {
   };
 }
 
-function verifyMercadoPagoWebhookSignature(req: express.Request, payload: any) {
-  const settings = loadSettingsMap(['mp_webhook_secret']);
+async function verifyMercadoPagoWebhookSignature(req: express.Request, payload: any) {
+  const settings = await loadSettingsMapAsync(['mp_webhook_secret']);
   const secret = String(process.env.MERCADOPAGO_WEBHOOK_SECRET || settings.mp_webhook_secret || '').trim();
   if (!secret) {
     return { ok: true, reason: 'secret_not_configured' };
@@ -467,15 +469,15 @@ function verifyMercadoPagoWebhookSignature(req: express.Request, payload: any) {
   return { ok: true, reason: 'verified' };
 }
 
-function isWebhookAlreadyProcessed(provider: string, eventId: string) {
+async function isWebhookAlreadyProcessed(provider: string, eventId: string) {
   if (!eventId) return false;
-  const row = db.get('SELECT id FROM processed_webhooks WHERE provider = ? AND event_id = ? LIMIT 1', provider, eventId) as any;
+  const row = await dbAsync.get('SELECT id FROM processed_webhooks WHERE provider = ? AND event_id = ? LIMIT 1', provider, eventId) as any;
   return Boolean(row?.id);
 }
 
-function markWebhookProcessed(provider: string, eventId: string, resourceId?: string | null) {
+async function markWebhookProcessed(provider: string, eventId: string, resourceId?: string | null) {
   if (!eventId) return;
-  db.run(
+  await dbAsync.run(
     `INSERT IGNORE INTO processed_webhooks (provider, event_id, resource_id)
      VALUES (?, ?, ?)`,
     provider,
@@ -485,7 +487,7 @@ function markWebhookProcessed(provider: string, eventId: string, resourceId?: st
 }
 
 async function verifyPayPalWebhookSignature(req: express.Request, payload: any) {
-  const s = loadSettingsMap([
+  const s = await loadSettingsMapAsync([
     'paypal_mode',
     'paypal_sandbox_client_id',
     'paypal_sandbox_client_secret',
@@ -565,8 +567,8 @@ async function verifyPayPalWebhookSignature(req: express.Request, payload: any) 
   }
 }
 
-function resolveEmailVerificationRequired() {
-  const settings = loadSettingsMap(['email_verification_required']);
+async function resolveEmailVerificationRequired() {
+  const settings = await loadSettingsMapAsync(['email_verification_required']);
   const raw = String(settings.email_verification_required || 'true').toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes';
 }
@@ -587,13 +589,13 @@ function getDownloadStatusPlaceholders() {
   return DOWNLOAD_ALLOWED_STATUSES.map(() => '?').join(', ');
 }
 
-function canUserAccessDownloads(userId: number, userEmail: string, emailVerifiedAt: unknown) {
-  if (!resolveEmailVerificationRequired()) return true;
+async function canUserAccessDownloads(userId: number, userEmail: string, emailVerifiedAt: unknown) {
+  if (!(await resolveEmailVerificationRequired())) return true;
   if (emailVerifiedAt) return true;
 
   const normalizedEmail = String(userEmail || '').trim().toLowerCase();
   const statusPlaceholders = getDownloadStatusPlaceholders();
-  const hasPaidOrder = db.get(
+  const hasPaidOrder = await dbAsync.get(
     `SELECT COUNT(1) AS total
      FROM orders o
      WHERE (
@@ -643,9 +645,138 @@ function buildUsersBaseQuery({
   return { whereClause, params };
 }
 
-function getOrderNotificationEmail() {
-  const settings = loadSettingsMap(['order_notifications_email', 'email_contact']);
+async function getOrderNotificationEmail() {
+  const settings = await loadSettingsMapAsync(['order_notifications_email', 'email_contact']);
   return String(settings.order_notifications_email || settings.email_contact || '').trim().toLowerCase();
+}
+
+async function loadSettingsMapAsync(keys?: string[]) {
+  const now = Date.now();
+  if (now >= settingsCacheExpiresAt) {
+    const rows = await dbAsync.all('SELECT `key`, value FROM settings') as any[];
+    settingsCache = rows.reduce<Record<string, string>>((acc, row) => {
+      acc[row.key] = row.value;
+      return acc;
+    }, {});
+    settingsCacheExpiresAt = now + SETTINGS_CACHE_TTL_MS;
+  }
+
+  if (!keys || keys.length === 0) return { ...settingsCache };
+  const selected: Record<string, string> = {};
+  for (const key of keys) selected[key] = settingsCache[key];
+  return selected;
+}
+
+async function buildOrderEmailPayload(orderId: number, paymentMethodRaw: string, orderStatusRaw: string, appUrl: string) {
+  const order = await dbAsync.get('SELECT * FROM orders WHERE id = ? LIMIT 1', orderId) as any;
+  if (!order) return null;
+  const details = await dbAsync.get('SELECT * FROM order_customer_details WHERE order_id = ? LIMIT 1', orderId) as any;
+  const orderItems = await dbAsync.all('SELECT * FROM order_items WHERE order_id = ? ORDER BY id ASC', orderId) as any[];
+
+  const paymentMethodLabel: Record<string, string> = {
+    pix: 'PIX',
+    credit_card: 'Cartao de credito',
+    debit_card: 'Cartao de debito',
+    paypal: 'PayPal',
+  };
+  const paymentMethod = String(paymentMethodRaw || order.payment_method || '');
+  const orderStatus = String(orderStatusRaw || order.status || '');
+  const orderDate = order?.created_at ? new Date(order.created_at).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR');
+
+  const itemsRows = orderItems
+    .map((i) => {
+      const qty = Number(i.quantity || 1);
+      const price = Number(i.price || 0);
+      return `<tr><td style="padding:8px 0;">${qty}x ${String(i.product_name || '')}</td><td style="padding:8px 0; text-align:right;">R$ ${price.toFixed(2)}</td></tr>`;
+    })
+    .join('');
+
+  const fullName = String(details?.first_name || '').trim() || String(order.customer_name || 'Cliente').split(' ')[0] || 'Cliente';
+  const lastName = String(details?.last_name || '').trim();
+  const customerName = `${fullName}${lastName ? ` ${lastName}` : ''}`.trim();
+
+  const customerDetailsHtml = `
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:16px; margin:16px 0;">
+      <h3 style="margin:0 0 10px 0; font-size:14px; color:#0f172a;">Dados do cliente</h3>
+      <p style="margin:3px 0;"><strong>Nome:</strong> ${fullName || '-'} ${lastName || ''}</p>
+      <p style="margin:3px 0;"><strong>CPF:</strong> ${details?.cpf || '-'}</p>
+      <p style="margin:3px 0;"><strong>E-mail:</strong> ${details?.email || order.customer_email || '-'}</p>
+      <p style="margin:3px 0;"><strong>Telefone:</strong> ${details?.phone || '-'}</p>
+      <p style="margin:3px 0;"><strong>Cidade:</strong> ${details?.city || '-'}</p>
+      <p style="margin:3px 0;"><strong>Estado:</strong> ${details?.state || '-'}</p>
+      <p style="margin:3px 0;"><strong>CEP:</strong> ${details?.postal_code || '-'}</p>
+      <p style="margin:3px 0;"><strong>Endereco:</strong> ${details?.address_line || '-'}, ${details?.number || '-'} - ${details?.neighborhood || '-'} ${details?.complement ? `(${details.complement})` : ''}</p>
+    </div>
+  `;
+
+  const orderEmailHtml = `
+    <div style="font-family:Arial,sans-serif;color:#0f172a;">
+      <h2 style="margin:0 0 12px 0;">Pedido #${order.id}</h2>
+      <p style="margin:0 0 8px 0;"><strong>Data da compra:</strong> ${orderDate}</p>
+      <p style="margin:0 0 8px 0;"><strong>Forma de pagamento:</strong> ${paymentMethodLabel[paymentMethod] || paymentMethod}</p>
+      <p style="margin:0 0 8px 0;"><strong>Status:</strong> ${orderStatus}</p>
+      <table width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px; border-collapse:collapse;">
+        <thead><tr><th align="left" style="border-bottom:1px solid #e2e8f0; padding:6px 0;">Produtos</th><th align="right" style="border-bottom:1px solid #e2e8f0; padding:6px 0;">Valor</th></tr></thead>
+        <tbody>${itemsRows}</tbody>
+      </table>
+      <p style="margin:12px 0 0 0;"><strong>Total:</strong> R$ ${Number(order.total || 0).toFixed(2)}</p>
+      ${customerDetailsHtml}
+      <p style="margin:8px 0 0 0;"><strong>ID do pedido:</strong> ${order.id}</p>
+    </div>
+  `;
+
+  return {
+    customerEmail: String(details?.email || order.customer_email || '').trim().toLowerCase(),
+    customerName,
+    variables: {
+      name: fullName || 'Cliente',
+      order_id: order.id,
+      order_total: `R$ ${Number(order.total || 0).toFixed(2)}`,
+      order_status: orderStatus,
+      items: orderEmailHtml,
+      payment_method: paymentMethodLabel[paymentMethod] || paymentMethod,
+      account_url: `${appUrl}/conta`,
+    },
+    adminVariables: {
+      name: 'Equipe',
+      order_id: order.id,
+      order_total: `R$ ${Number(order.total || 0).toFixed(2)}`,
+      order_status: orderStatus,
+      items: orderEmailHtml,
+      payment_method: paymentMethodLabel[paymentMethod] || paymentMethod,
+      account_url: `${appUrl}/admin/pedidos`,
+    },
+  };
+}
+
+async function buildMercadoPagoProductPayload(productId: number, req: express.Request) {
+  const product = await dbAsync.get(`
+    SELECT p.id, p.name, p.slug, p.description, p.image, p.price, p.sale_price, p.category_id, c.name AS category_name
+    FROM products p
+    LEFT JOIN product_categories c ON c.id = p.category_id
+    WHERE p.id = ?
+    LIMIT 1
+  `, productId) as any;
+
+  if (!product) return null;
+
+  const unitPrice = Number(product.sale_price ?? product.price ?? 0);
+  const imageUrl = normalizePublicMediaUrl(product.image);
+  const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+  const resolvedImageUrl = imageUrl
+    ? (imageUrl.startsWith('http') ? imageUrl : `${appUrl}${imageUrl}`)
+    : '';
+
+  return {
+    id: String(product.slug || product.id),
+    title: String(product.name || ''),
+    description: String(product.description || '').slice(0, 500),
+    category_id: String(product.category_name || product.category_id || 'matrizes'),
+    quantity: 1,
+    unit_price: Number(unitPrice.toFixed(2)),
+    picture_url: resolvedImageUrl,
+    sku: String(product.slug || product.id),
+  };
 }
 
 function decodePathComponentSafe(value: string) {
@@ -828,27 +959,25 @@ function logDownloadAttempt(payload: {
   ip?: string | null;
   userAgent?: string | null;
 }) {
-  try {
-    db.run(
-      `INSERT INTO download_logs
-       (user_id, order_id, order_item_id, product_id, file_name, file_path, file_size, sha256, status, error, ip, user_agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      payload.userId ?? null,
-      payload.orderId ?? null,
-      payload.orderItemId ?? null,
-      payload.productId ?? null,
-      payload.fileName ?? null,
-      payload.filePath ?? null,
-      payload.fileSize ?? null,
-      payload.sha256 ?? null,
-      payload.status,
-      payload.error ?? null,
-      payload.ip ?? null,
-      payload.userAgent ?? null,
-    );
-  } catch (error) {
+  void dbAsync.run(
+    `INSERT INTO download_logs
+     (user_id, order_id, order_item_id, product_id, file_name, file_path, file_size, sha256, status, error, ip, user_agent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    payload.userId ?? null,
+    payload.orderId ?? null,
+    payload.orderItemId ?? null,
+    payload.productId ?? null,
+    payload.fileName ?? null,
+    payload.filePath ?? null,
+    payload.fileSize ?? null,
+    payload.sha256 ?? null,
+    payload.status,
+    payload.error ?? null,
+    payload.ip ?? null,
+    payload.userAgent ?? null,
+  ).catch((error) => {
     console.error('Falha ao registrar log de download:', error);
-  }
+  });
 }
 
 async function computeFileSha256(filePath: string): Promise<string> {
@@ -989,15 +1118,89 @@ function resolvePublicMediaWithFallback(mediaUrl: unknown, slug: string, kind: '
   return fallbacks[0] || normalized || '';
 }
 
+function ensureDirSync(dirPath: string) {
+  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function safeJsonWrite(filePath: string, payload: any) {
+  ensureDirSync(path.dirname(filePath));
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+async function getAllTableNames(): Promise<string[]> {
+  const rows = await dbAsync.all(`
+    SELECT TABLE_NAME as table_name
+    FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = DATABASE()
+    ORDER BY TABLE_NAME ASC
+  `) as any[];
+  return rows.map((row) => String(row.table_name || '')).filter(Boolean);
+}
+
+function buildBackupArchive(snapshotPath: string, archivePath: string) {
+  ensureDirSync(path.dirname(archivePath));
+  if (fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+  try {
+    execFileSync('tar', ['-czf', archivePath, '-C', snapshotPath, '.'], { stdio: 'ignore' });
+    return;
+  } catch {
+    // fallback for Windows environments without tar in PATH
+  }
+  execFileSync(
+    'powershell',
+    [
+      '-NoProfile',
+      '-Command',
+      `Compress-Archive -Path "${snapshotPath}\\*" -DestinationPath "${archivePath}" -Force`,
+    ],
+    { stdio: 'ignore' },
+  );
+}
+
+function copyDirectoryRecursive(sourceDir: string, targetDir: string) {
+  if (!fs.existsSync(sourceDir)) return;
+  ensureDirSync(targetDir);
+  const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDirectoryRecursive(sourcePath, targetPath);
+    } else if (entry.isFile()) {
+      ensureDirSync(path.dirname(targetPath));
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+  }
+}
+
+function extractBackupArchive(archivePath: string, targetDir: string) {
+  ensureDirSync(targetDir);
+  try {
+    execFileSync('tar', ['-xzf', archivePath, '-C', targetDir], { stdio: 'ignore' });
+    return;
+  } catch {
+    // fallback for Windows environments without tar in PATH
+  }
+  execFileSync(
+    'powershell',
+    [
+      '-NoProfile',
+      '-Command',
+      `Expand-Archive -Path "${archivePath}" -DestinationPath "${targetDir}" -Force`,
+    ],
+    { stdio: 'ignore' },
+  );
+}
+
 function sha256(value: string) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function createEmailVerificationToken(userId: number, email: string) {
+async function createEmailVerificationToken(userId: number, email: string) {
   const rawToken = crypto.randomBytes(48).toString('hex');
   const tokenHash = sha256(rawToken);
-  db.run('UPDATE email_verification_tokens SET used = 1 WHERE user_id = ? AND used = 0', userId);
-  db.run(
+  await dbAsync.run('UPDATE email_verification_tokens SET used = 1 WHERE user_id = ? AND used = 0', userId);
+  await dbAsync.run(
     `INSERT INTO email_verification_tokens (user_id, email, token_hash, expires_at, used)
      VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR), 0)`,
     userId,
@@ -1009,7 +1212,7 @@ function createEmailVerificationToken(userId: number, email: string) {
 }
 
 async function sendVerificationEmail(user: { id: number; name: string; email: string }, req: express.Request) {
-  const rawToken = createEmailVerificationToken(Number(user.id), String(user.email).trim().toLowerCase());
+  const rawToken = await createEmailVerificationToken(Number(user.id), String(user.email).trim().toLowerCase());
   const appUrl = buildBaseAppUrl(req);
   const verifyUrl = `${appUrl}/api/auth/verify-email?token=${encodeURIComponent(rawToken)}`;
   return sendEmail({
@@ -1030,8 +1233,8 @@ function getClientIp(req: express.Request) {
   return (xff || remote || 'unknown').slice(0, 64);
 }
 
-function getLoginAttemptStats(email: string, ip: string) {
-  const row = db.get(
+async function getLoginAttemptStats(email: string, ip: string) {
+  const row = await dbAsync.get(
     `SELECT
       SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS fail_count,
       MAX(attempted_at) AS last_attempt_at
@@ -1049,8 +1252,8 @@ function getLoginAttemptStats(email: string, ip: string) {
   };
 }
 
-function recordLoginAttempt(email: string, ip: string, success: boolean) {
-  db.run(
+async function recordLoginAttempt(email: string, ip: string, success: boolean) {
+  await dbAsync.run(
     'INSERT INTO login_attempts (email, ip, success) VALUES (?, ?, ?)',
     email || null,
     ip || null,
@@ -1058,8 +1261,8 @@ function recordLoginAttempt(email: string, ip: string, success: boolean) {
   );
 }
 
-function getUserById(userId: number) {
-  return db.get(
+async function getUserById(userId: number) {
+  return await dbAsync.get(
     'SELECT id, name, email, role, status, email_verified_at, privacy_reaccept_required FROM users WHERE id = ? LIMIT 1',
     userId,
   ) as any;
@@ -1071,7 +1274,7 @@ function parseBooleanSetting(value: any, fallback = false) {
   return ['1', 'true', 'yes', 'on', 'enabled'].includes(normalized);
 }
 
-function resolveLgpdSettings() {
+async function resolveLgpdSettings() {
   const keys = [
     'lgpd_enabled',
     'lgpd_require_consent_register',
@@ -1091,7 +1294,7 @@ function resolveLgpdSettings() {
     'lgpd_policy_version_terms',
     'lgpd_policy_version_cookies',
   ];
-  const s = loadSettingsMap(keys);
+  const s = await loadSettingsMapAsync(keys);
   return {
     enabled: parseBooleanSetting(s.lgpd_enabled, true),
     requireConsentRegister: parseBooleanSetting(s.lgpd_require_consent_register, true),
@@ -1113,8 +1316,8 @@ function resolveLgpdSettings() {
   };
 }
 
-function getActivePolicyVersion(policyType: 'privacy' | 'terms' | 'cookies') {
-  const row = db.get(
+async function getActivePolicyVersion(policyType: 'privacy' | 'terms' | 'cookies') {
+  const row = await dbAsync.get(
     `SELECT version
      FROM lgpd_policies
      WHERE policy_type = ?
@@ -1127,15 +1330,16 @@ function getActivePolicyVersion(policyType: 'privacy' | 'terms' | 'cookies') {
   return version || null;
 }
 
-function resolveRequiredPolicyVersions(lgpd = resolveLgpdSettings()) {
+async function resolveRequiredPolicyVersions(lgpd?: any) {
+  const resolvedLgpd = lgpd || (await resolveLgpdSettings());
   return {
-    privacy: getActivePolicyVersion('privacy') || lgpd.policyVersionPrivacy,
-    terms: getActivePolicyVersion('terms') || lgpd.policyVersionTerms,
-    cookies: getActivePolicyVersion('cookies') || lgpd.policyVersionCookies,
+    privacy: (await getActivePolicyVersion('privacy')) || resolvedLgpd.policyVersionPrivacy,
+    terms: (await getActivePolicyVersion('terms')) || resolvedLgpd.policyVersionTerms,
+    cookies: (await getActivePolicyVersion('cookies')) || resolvedLgpd.policyVersionCookies,
   };
 }
 
-function logLgpdEvent(params: {
+async function logLgpdEvent(params: {
   req?: express.Request;
   userId?: number | null;
   actorUserId?: number | null;
@@ -1144,7 +1348,7 @@ function logLgpdEvent(params: {
   details?: Record<string, any> | null;
 }) {
   try {
-    db.run(
+    await dbAsync.run(
       `INSERT INTO lgpd_logs (user_id, actor_user_id, event_type, action, details_json, ip, user_agent)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       params.userId || null,
@@ -1160,7 +1364,7 @@ function logLgpdEvent(params: {
   }
 }
 
-function upsertUserConsent(params: {
+async function upsertUserConsent(params: {
   userId: number;
   consentKey: string;
   granted: boolean;
@@ -1172,7 +1376,7 @@ function upsertUserConsent(params: {
 }) {
   const ip = params.req ? getClientIp(params.req) : null;
   const userAgent = params.req ? String(params.req.headers['user-agent'] || '').slice(0, 500) : null;
-  db.run(
+  await dbAsync.run(
     `INSERT INTO lgpd_consents (
       user_id, consent_key, granted, legal_basis, purpose, source, policy_version, ip, user_agent, revoked_at
     )
@@ -1199,7 +1403,7 @@ function upsertUserConsent(params: {
     params.granted ? null : new Date().toISOString().slice(0, 19).replace('T', ' '),
   );
 
-  logLgpdEvent({
+  await logLgpdEvent({
     req: params.req,
     userId: params.userId,
     actorUserId: params.userId,
@@ -1209,14 +1413,14 @@ function upsertUserConsent(params: {
   });
 }
 
-function recordPolicyAcceptance(params: {
+async function recordPolicyAcceptance(params: {
   userId: number;
   policyType: 'privacy' | 'terms' | 'cookies';
   policyVersion: string;
   req?: express.Request;
   source?: string;
 }) {
-  db.run(
+  await dbAsync.run(
     `INSERT INTO lgpd_user_acceptances (user_id, policy_type, policy_version, ip, user_agent, source)
      VALUES (?, ?, ?, ?, ?, ?)`,
     params.userId,
@@ -1226,8 +1430,8 @@ function recordPolicyAcceptance(params: {
     params.req ? String(params.req.headers['user-agent'] || '').slice(0, 500) : null,
     params.source || 'web',
   );
-  db.run('UPDATE users SET privacy_reaccept_required = 0 WHERE id = ?', params.userId);
-  logLgpdEvent({
+  await dbAsync.run('UPDATE users SET privacy_reaccept_required = 0 WHERE id = ?', params.userId);
+  await logLgpdEvent({
     req: params.req,
     userId: params.userId,
     actorUserId: params.userId,
@@ -1244,7 +1448,7 @@ function normalizePolicyVersion(value: any) {
     .replace(/^v+/, '');
 }
 
-function userHasAcceptedPolicyVersion(userId: number, policyType: 'privacy' | 'terms' | 'cookies', policyVersion: string) {
+async function userHasAcceptedPolicyVersion(userId: number, policyType: 'privacy' | 'terms' | 'cookies', policyVersion: string) {
   const normalizedTarget = normalizePolicyVersion(policyVersion);
   if (!normalizedTarget) return false;
 
@@ -1255,7 +1459,7 @@ function userHasAcceptedPolicyVersion(userId: number, policyType: 'privacy' | 't
   ])).filter(Boolean);
   const placeholders = candidateVersions.map(() => '?').join(', ');
 
-  const row = db.get(
+  const row = await dbAsync.get(
     `SELECT id
      FROM lgpd_user_acceptances
      WHERE user_id = ?
@@ -1271,7 +1475,7 @@ function userHasAcceptedPolicyVersion(userId: number, policyType: 'privacy' | 't
   return Boolean(row?.id);
 }
 
-function userHasGrantedConsentVersion(
+async function userHasGrantedConsentVersion(
   userId: number,
   consentKeys: string[],
   policyVersion: string,
@@ -1280,7 +1484,7 @@ function userHasGrantedConsentVersion(
   if (!consentKeys.length || !normalizedTarget) return false;
 
   const consentPlaceholders = consentKeys.map(() => '?').join(', ');
-  const rows = db.all(
+  const rows = await dbAsync.all(
     `SELECT consent_key, policy_version
      FROM lgpd_consents
      WHERE user_id = ?
@@ -1297,10 +1501,10 @@ function userHasGrantedConsentVersion(
   });
 }
 
-function hasAnyGrantedConsent(userId: number, consentKeys: string[]) {
+async function hasAnyGrantedConsent(userId: number, consentKeys: string[]) {
   if (!Array.isArray(consentKeys) || consentKeys.length === 0) return false;
   const placeholders = consentKeys.map(() => '?').join(', ');
-  const row = db.get(
+  const row = await dbAsync.get(
     `SELECT id
      FROM lgpd_consents
      WHERE user_id = ?
@@ -1314,11 +1518,11 @@ function hasAnyGrantedConsent(userId: number, consentKeys: string[]) {
   return Boolean(row?.id);
 }
 
-function hasAnyPolicyAcceptance(
+async function hasAnyPolicyAcceptance(
   userId: number,
   policyType: 'privacy' | 'terms' | 'cookies',
 ) {
-  const row = db.get(
+  const row = await dbAsync.get(
     `SELECT id
      FROM lgpd_user_acceptances
      WHERE user_id = ?
@@ -1331,8 +1535,8 @@ function hasAnyPolicyAcceptance(
   return Boolean(row?.id);
 }
 
-function getActivePolicies() {
-  const policies = db.all(
+async function getActivePolicies() {
+  const policies = await dbAsync.all(
     `SELECT id, policy_type, version, title, content, is_active, force_reaccept, published_at, created_at, updated_at
      FROM lgpd_policies
      WHERE is_active = 1
@@ -1341,29 +1545,29 @@ function getActivePolicies() {
   return policies;
 }
 
-function ensureUserLgpdCompliance(userId: number) {
-  const lgpd = resolveLgpdSettings();
+async function ensureUserLgpdCompliance(userId: number) {
+  const lgpd = await resolveLgpdSettings();
   if (!lgpd.enabled || !lgpd.requirePolicyAcceptance) {
     return { ok: true };
   }
 
-  const userRow = db.get(
+  const userRow = await dbAsync.get(
     'SELECT id, privacy_reaccept_required FROM users WHERE id = ? LIMIT 1',
     userId,
   ) as any;
   const userRequiresReaccept = Number(userRow?.privacy_reaccept_required || 0) === 1;
   const enforceVersionMatch = lgpd.requireReacceptOnPolicyUpdate && userRequiresReaccept;
 
-  const requiredVersions = resolveRequiredPolicyVersions(lgpd);
+  const requiredVersions = await resolveRequiredPolicyVersions(lgpd);
   const missing: string[] = [];
   const hasTermsAccepted = enforceVersionMatch
     ? (
-      userHasAcceptedPolicyVersion(userId, 'terms', requiredVersions.terms) ||
-      userHasGrantedConsentVersion(userId, ['terms_of_use', 'terms'], requiredVersions.terms)
+      (await userHasAcceptedPolicyVersion(userId, 'terms', requiredVersions.terms)) ||
+      (await userHasGrantedConsentVersion(userId, ['terms_of_use', 'terms'], requiredVersions.terms))
     )
     : (
-      hasAnyGrantedConsent(userId, ['terms_of_use', 'terms']) ||
-      hasAnyPolicyAcceptance(userId, 'terms')
+      (await hasAnyGrantedConsent(userId, ['terms_of_use', 'terms'])) ||
+      (await hasAnyPolicyAcceptance(userId, 'terms'))
     );
   if (lgpd.requireTermsAcceptance && !hasTermsAccepted) {
     missing.push('terms');
@@ -1371,12 +1575,12 @@ function ensureUserLgpdCompliance(userId: number) {
 
   const hasPrivacyAccepted = enforceVersionMatch
     ? (
-      userHasAcceptedPolicyVersion(userId, 'privacy', requiredVersions.privacy) ||
-      userHasGrantedConsentVersion(userId, ['privacy_policy', 'privacy'], requiredVersions.privacy)
+      (await userHasAcceptedPolicyVersion(userId, 'privacy', requiredVersions.privacy)) ||
+      (await userHasGrantedConsentVersion(userId, ['privacy_policy', 'privacy'], requiredVersions.privacy))
     )
     : (
-      hasAnyGrantedConsent(userId, ['privacy_policy', 'privacy']) ||
-      hasAnyPolicyAcceptance(userId, 'privacy')
+      (await hasAnyGrantedConsent(userId, ['privacy_policy', 'privacy'])) ||
+      (await hasAnyPolicyAcceptance(userId, 'privacy'))
     );
   if (!hasPrivacyAccepted) {
     missing.push('privacy');
@@ -1384,12 +1588,12 @@ function ensureUserLgpdCompliance(userId: number) {
 
   const hasCookiesAccepted = enforceVersionMatch
     ? (
-      userHasAcceptedPolicyVersion(userId, 'cookies', requiredVersions.cookies) ||
-      userHasGrantedConsentVersion(userId, ['cookies_policy', 'cookie_consent', 'cookies'], requiredVersions.cookies)
+      (await userHasAcceptedPolicyVersion(userId, 'cookies', requiredVersions.cookies)) ||
+      (await userHasGrantedConsentVersion(userId, ['cookies_policy', 'cookie_consent', 'cookies'], requiredVersions.cookies))
     )
     : (
-      hasAnyGrantedConsent(userId, ['cookies_policy', 'cookie_consent', 'cookies']) ||
-      hasAnyPolicyAcceptance(userId, 'cookies')
+      (await hasAnyGrantedConsent(userId, ['cookies_policy', 'cookie_consent', 'cookies'])) ||
+      (await hasAnyPolicyAcceptance(userId, 'cookies'))
     );
   if (lgpd.requireCookieConsent && !hasCookiesAccepted) {
     missing.push('cookies');
@@ -1412,14 +1616,14 @@ function normalizeDateFilter(input: any, endOfDay = false) {
   return normalized;
 }
 
-function notifyCustomersPolicyUpdated(params: {
+async function notifyCustomersPolicyUpdated(params: {
   policyType: 'privacy' | 'terms' | 'cookies';
   policyVersion: string;
   policyUrl: string;
   actorUserId?: number;
   req?: express.Request;
 }) {
-  const recipients = db.all(
+  const recipients = await dbAsync.all(
     `SELECT id, name, email
      FROM users
      WHERE role = 'customer'
@@ -1453,7 +1657,7 @@ function notifyCustomersPolicyUpdated(params: {
       }
     }
 
-    logLgpdEvent({
+    await logLgpdEvent({
       req: params.req,
       actorUserId: params.actorUserId || null,
       eventType: 'policy',
@@ -1502,22 +1706,22 @@ function computePolicyLineDiff(oldText: string, newText: string) {
   };
 }
 
-function buildUserLgpdExportPayload(userId: number) {
-  const user = db.get('SELECT id, name, email, role, status, created_at, updated_at FROM users WHERE id = ?', userId) as any;
+async function buildUserLgpdExportPayload(userId: number) {
+  const user = await dbAsync.get('SELECT id, name, email, role, status, created_at, updated_at FROM users WHERE id = ?', userId) as any;
   if (!user) return null;
-  const profile = db.get('SELECT * FROM customers WHERE user_id = ?', userId) as any;
-  const orders = db.all('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC', userId);
-  const orderItems = db.all(
+  const profile = await dbAsync.get('SELECT * FROM customers WHERE user_id = ?', userId) as any;
+  const orders = await dbAsync.all('SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC', userId);
+  const orderItems = await dbAsync.all(
     `SELECT oi.* FROM order_items oi
      JOIN orders o ON o.id = oi.order_id
      WHERE o.user_id = ?
      ORDER BY oi.order_id DESC`,
     userId,
   );
-  const favorites = db.all('SELECT * FROM favorites WHERE user_id = ? ORDER BY created_at DESC', userId);
-  const consents = db.all('SELECT * FROM lgpd_consents WHERE user_id = ? ORDER BY updated_at DESC', userId);
-  const acceptances = db.all('SELECT * FROM lgpd_user_acceptances WHERE user_id = ? ORDER BY accepted_at DESC', userId);
-  const requests = db.all('SELECT * FROM lgpd_requests WHERE user_id = ? ORDER BY created_at DESC', userId);
+  const favorites = await dbAsync.all('SELECT * FROM favorites WHERE user_id = ? ORDER BY created_at DESC', userId);
+  const consents = await dbAsync.all('SELECT * FROM lgpd_consents WHERE user_id = ? ORDER BY updated_at DESC', userId);
+  const acceptances = await dbAsync.all('SELECT * FROM lgpd_user_acceptances WHERE user_id = ? ORDER BY accepted_at DESC', userId);
+  const requests = await dbAsync.all('SELECT * FROM lgpd_requests WHERE user_id = ? ORDER BY created_at DESC', userId);
 
   return {
     exported_at: new Date().toISOString(),
@@ -1532,7 +1736,7 @@ function buildUserLgpdExportPayload(userId: number) {
   };
 }
 
-function initSettings() {
+async function initSettings() {
   const defaultSettings = {
     site_name: 'Digital Bordados',
     site_description: 'ExcelÃƒÆ’Ã‚Âªncia em Matrizes de Bordado',
@@ -1569,6 +1773,7 @@ function initSettings() {
     paypal_production_client_secret: '',
     paypal_default_currency: 'USD',
     paypal_brl_usd_rate: '5.20',
+    paypal_brl_eur_rate: '6.00',
     paypal_webhook_id: '',
     lgpd_enabled: 'true',
     lgpd_require_consent_register: 'true',
@@ -1588,11 +1793,42 @@ function initSettings() {
     lgpd_policy_version_terms: '1.0',
     lgpd_policy_version_cookies: '1.0',
     lgpd_export_ttl_hours: '24',
+    home_company_enabled: 'true',
+    home_company_title: 'Nossa Empresa',
+    home_company_subtitle: 'Qualidade e confianca em matrizes de bordado digital',
+    home_company_text: 'Criamos experiencias em bordado com curadoria tecnica, producao consistente e atendimento especializado para quem vive do bordado.',
+    home_company_mission: 'Entregar matrizes de alta qualidade com agilidade e suporte humano.',
+    home_company_vision: 'Ser referencia nacional em matrizes para bordado profissional.',
+    home_company_values: 'Qualidade, Transparencia, Agilidade, Inovacao e Respeito ao cliente.',
+    home_company_image_main: '',
+    home_company_image_secondary: '',
+    home_company_cta_text: 'Conheca nossa colecao',
+    home_company_cta_link: '/loja',
+    home_company_bg_color: '#0f172a',
+    home_company_text_color: '#f8fafc',
+    home_company_icons: '["shield","sparkles","award"]',
+    seo_meta_title: 'Digital Bordados',
+    seo_meta_description: 'Matrizes de bordado digital com qualidade profissional.',
+    seo_keywords: 'matriz de bordado, bordado computadorizado, matriz pes, dst, jef',
+    seo_robots_index: 'true',
+    seo_robots_follow: 'true',
+    seo_og_image: '/uploads/seo-default-share.jpg',
+    seo_twitter_card: 'summary_large_image',
+    seo_facebook_url: '',
+    seo_instagram_url: '',
+    seo_twitter_url: '',
+    seo_organization_name: 'Digital Bordados',
+    seo_organization_logo: '',
+    seo_enable_product_schema: 'true',
+    seo_enable_organization_schema: 'true',
+    seo_enable_breadcrumb_schema: 'true',
+    seo_sitemap_enabled: 'true',
+    seo_robots_custom_rules: '',
   };
 
-  Object.entries(defaultSettings).forEach(([key, value]) => {
-    db.run('INSERT IGNORE INTO settings (`key`, value) VALUES (?, COALESCE(?, \'\'))', key, value);
-  });
+  for (const [key, value] of Object.entries(defaultSettings)) {
+    await dbAsync.run('INSERT IGNORE INTO settings (`key`, value) VALUES (?, COALESCE(?, \'\'))', key, value);
+  }
 
   const defaultPolicies = [
     {
@@ -1615,8 +1851,8 @@ function initSettings() {
     },
   ];
 
-  defaultPolicies.forEach((policy) => {
-    db.run(
+  for (const policy of defaultPolicies) {
+    await dbAsync.run(
       `INSERT IGNORE INTO lgpd_policies (policy_type, version, title, content, is_active, force_reaccept)
        VALUES (?, ?, ?, ?, 1, 0)`,
       policy.policy_type,
@@ -1624,44 +1860,44 @@ function initSettings() {
       policy.title,
       policy.content,
     );
-  });
+  }
 }
 
 async function initTestData() {
-  initSettings();
+  await initSettings();
   const hashedPassword = await hashPassword('123456');
   const adrianoPassword = await hashPassword('04039866');
 
   // 1. Novo UsuÃƒÆ’Ã‚Â¡rio Admin (Adriano Amorim)
-  const adrianoAdmin = db.get('SELECT * FROM users WHERE email = ?', 'contato@agenciagoodea.com');
+  const adrianoAdmin = await dbAsync.get('SELECT * FROM users WHERE email = ?', 'contato@agenciagoodea.com') as any;
   if (!adrianoAdmin) {
-    db.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Adriano Amorim', 'contato@agenciagoodea.com', adrianoPassword, 'admin', 'ativo');
+    await dbAsync.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Adriano Amorim', 'contato@agenciagoodea.com', adrianoPassword, 'admin', 'ativo');
     console.log('Admin Adriano created: contato@agenciagoodea.com / 04039866');
   } else {
-    db.run('UPDATE users SET name = ?, password = ?, role = "admin", status = "ativo" WHERE email = ?', 'Adriano Amorim', adrianoPassword, 'contato@agenciagoodea.com');
+    await dbAsync.run('UPDATE users SET name = ?, password = ?, role = "admin", status = "ativo" WHERE email = ?', 'Adriano Amorim', adrianoPassword, 'contato@agenciagoodea.com');
   }
 
   // 2. Antigo UsuÃƒÆ’Ã‚Â¡rio Admin (Digital Bordados)
-  const admin = db.get('SELECT * FROM users WHERE email = ?', 'admin@digitalbordados.com');
+  const admin = await dbAsync.get('SELECT * FROM users WHERE email = ?', 'admin@digitalbordados.com') as any;
   if (!admin) {
-    db.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Administrador', 'admin@digitalbordados.com', hashedPassword, 'admin', 'ativo');
+    await dbAsync.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Administrador', 'admin@digitalbordados.com', hashedPassword, 'admin', 'ativo');
     console.log('Test Admin created: admin@digitalbordados.com / 123456');
   } else {
     // Garantir senha e status atualizados se jÃƒÆ’Ã‚Â¡ existir
-    db.run('UPDATE users SET password = ?, role = "admin", status = "ativo" WHERE email = ?', hashedPassword, 'admin@digitalbordados.com');
+    await dbAsync.run('UPDATE users SET password = ?, role = "admin", status = "ativo" WHERE email = ?', hashedPassword, 'admin@digitalbordados.com');
   }
 
   // 3. UsuÃƒÆ’Ã‚Â¡rio Cliente
-  const customerUser = db.get('SELECT * FROM users WHERE email = ?', 'cliente@teste.com');
+  const customerUser = await dbAsync.get('SELECT * FROM users WHERE email = ?', 'cliente@teste.com') as any;
   if (!customerUser) {
-    const result = db.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Cliente Teste', 'cliente@teste.com', hashedPassword, 'customer', 'ativo');
+    const result = await dbAsync.run('INSERT INTO users (name, email, password, role, status) VALUES (?, ?, ?, ?, ?)', 'Cliente Teste', 'cliente@teste.com', hashedPassword, 'customer', 'ativo');
     
     // Inserir dados complementares na tabela customers
-    db.run('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', result.lastInsertRowid, '(11) 98888-7777', '123.456.789-00');
+    await dbAsync.run('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', result.lastInsertRowid, '(11) 98888-7777', '123.456.789-00');
     console.log('Test Customer created: cliente@teste.com / 123456');
   } else {
     // Garantir senha e status atualizados se jÃƒÆ’Ã‚Â¡ existir
-    db.run('UPDATE users SET password = ?, role = "customer", status = "ativo" WHERE email = ?', hashedPassword, 'cliente@teste.com');
+    await dbAsync.run('UPDATE users SET password = ?, role = "customer", status = "ativo" WHERE email = ?', hashedPassword, 'cliente@teste.com');
   }
 }
 
@@ -1678,16 +1914,16 @@ async function startServer() {
 
     // Insert some mock data if empty
     const shouldSeedDemoData = process.env.SEED_DEMO_DATA === 'true';
-    const count = db.get('SELECT count(*) as count FROM product_categories') as { count: number };
+    const count = await dbAsync.get('SELECT count(*) as count FROM product_categories') as { count: number };
     if (shouldSeedDemoData && count.count === 0) {
       console.log('Inserting mock categories and products...');
-      db.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Animais', 'animais');
-      db.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Animes', 'animes');
-      db.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Bandeiras', 'bandeiras');
-      db.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Carros', 'carros');
-      db.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Infantil', 'infantil');
+      await dbAsync.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Animais', 'animais');
+      await dbAsync.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Animes', 'animes');
+      await dbAsync.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Bandeiras', 'bandeiras');
+      await dbAsync.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Carros', 'carros');
+      await dbAsync.run('INSERT INTO product_categories (name, slug) VALUES (?, ?)', 'Infantil', 'infantil');
 
-      db.run(`
+      await dbAsync.run(`
         INSERT INTO products (name, slug, price, sale_price, image, category_id, stitch_count, colors, is_new)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
@@ -1697,7 +1933,7 @@ async function startServer() {
         'https://images.unsplash.com/photo-1558981403-c5f91ebca978?q=80&w=300&auto=format&fit=crop', 
         4, 15000, '3 cores', 1
       );
-      db.run(`
+      await dbAsync.run(`
         INSERT INTO products (name, slug, price, sale_price, image, category_id, stitch_count, colors, is_new)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
@@ -1707,7 +1943,7 @@ async function startServer() {
         'https://images.unsplash.com/photo-1558981403-c5f91ebca978?q=80&w=300&auto=format&fit=crop', 
         4, 12000, '2 cores', 1
       );
-      db.run(`
+      await dbAsync.run(`
         INSERT INTO products (name, slug, price, sale_price, image, category_id, stitch_count, colors, is_new)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
@@ -1782,7 +2018,7 @@ async function startServer() {
 
   // API Routes - AUTH
   // Busca inteligente de produtos (Posicionada no inÃƒÂ­cio para evitar conflitos)
-  app.get('/api/products/search', (req, res) => {
+  app.get('/api/products/search', async (req, res) => {
     try {
       const queryStr = req.query.q as string;
       if (!queryStr || queryStr.trim().length < 2) return res.json([]);
@@ -1790,7 +2026,7 @@ async function startServer() {
       const searchTerm = `%${queryStr.trim()}%`;
       
       // Busca direta e simples
-      const products = db.all(`
+      const products = await dbAsync.all(`
         SELECT id, name, slug, price, sale_price, image 
         FROM products 
         WHERE (name LIKE ? OR slug LIKE ? OR description LIKE ?)
@@ -1822,7 +2058,7 @@ async function startServer() {
     }
 
     try {
-      const lgpd = resolveLgpdSettings();
+      const lgpd = await resolveLgpdSettings();
       if (lgpd.enabled && lgpd.requireConsentRegister) {
         if (lgpd.requireTermsAcceptance && !parseBooleanSetting(terms_accepted, false)) {
           return res.status(400).json({ error: 'Voce precisa aceitar os Termos de Uso para continuar.', code: 'TERMS_REQUIRED' });
@@ -1849,27 +2085,30 @@ async function startServer() {
       }
 
       const hashedPassword = await hashPassword(rawPassword);
-      const verificationRequired = resolveEmailVerificationRequired();
+      const verificationRequired = await resolveEmailVerificationRequired();
       const emailVerifiedAt = verificationRequired ? null : new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-      const userResult = db.run(`
-        INSERT INTO users (name, email, password, role, email_verified_at)
-        VALUES (?, ?, ?, 'customer', ?)
-      `, name, normalizedEmail, hashedPassword, emailVerifiedAt);
-
-      const userId = Number(userResult.lastInsertRowid);
-      db.run('INSERT INTO customers (user_id) VALUES (?)', userId);
+      const userId = await dbAsync.transaction(async (conn) => {
+        const [userInsert] = await conn.execute(
+          `INSERT INTO users (name, email, password, role, email_verified_at)
+           VALUES (?, ?, ?, 'customer', ?)`,
+          [name, normalizedEmail, hashedPassword, emailVerifiedAt] as any,
+        );
+        const createdUserId = Number((userInsert as any).insertId || 0);
+        await conn.execute('INSERT INTO customers (user_id) VALUES (?)', [createdUserId] as any);
+        return createdUserId;
+      });
 
       if (lgpd.enabled) {
         if (parseBooleanSetting(privacy_accepted, false)) {
-          recordPolicyAcceptance({
+          await recordPolicyAcceptance({
             userId,
             policyType: 'privacy',
             policyVersion: lgpd.policyVersionPrivacy,
             req,
             source: 'register',
           });
-          upsertUserConsent({
+          await upsertUserConsent({
             userId,
             consentKey: 'privacy_policy',
             granted: true,
@@ -1881,14 +2120,14 @@ async function startServer() {
           });
         }
         if (parseBooleanSetting(terms_accepted, false)) {
-          recordPolicyAcceptance({
+          await recordPolicyAcceptance({
             userId,
             policyType: 'terms',
             policyVersion: lgpd.policyVersionTerms,
             req,
             source: 'register',
           });
-          upsertUserConsent({
+          await upsertUserConsent({
             userId,
             consentKey: 'terms_of_use',
             granted: true,
@@ -1900,14 +2139,14 @@ async function startServer() {
           });
         }
         if (parseBooleanSetting(cookie_accepted, false)) {
-          recordPolicyAcceptance({
+          await recordPolicyAcceptance({
             userId,
             policyType: 'cookies',
             policyVersion: lgpd.policyVersionCookies,
             req,
             source: 'register',
           });
-          upsertUserConsent({
+          await upsertUserConsent({
             userId,
             consentKey: 'cookies_policy',
             granted: true,
@@ -1919,7 +2158,7 @@ async function startServer() {
           });
         }
 
-        upsertUserConsent({
+        await upsertUserConsent({
           userId,
           consentKey: 'marketing_communications',
           granted: parseBooleanSetting(marketing_accepted, false),
@@ -1986,13 +2225,13 @@ async function startServer() {
       const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
       const normalizedPassword = typeof password === 'string' ? password : '';
       const ip = getClientIp(req);
-      const verificationRequired = resolveEmailVerificationRequired();
+      const verificationRequired = await resolveEmailVerificationRequired();
 
       if (!normalizedEmail || !normalizedPassword) {
         return res.status(400).json({ error: 'E-mail e senha sao obrigatorios' });
       }
 
-      const attemptStats = getLoginAttemptStats(normalizedEmail, ip);
+      const attemptStats = await getLoginAttemptStats(normalizedEmail, ip);
       if (attemptStats.failCount >= LOGIN_ATTEMPT_MAX_FAILS) {
         return res.status(429).json({
           error: 'Muitas tentativas invalidas. Aguarde alguns minutos e tente novamente.',
@@ -2001,17 +2240,17 @@ async function startServer() {
       }
 
       console.log(`Tentativa de login: ${normalizedEmail}`);
-      const user = db.get('SELECT * FROM users WHERE email = ?', normalizedEmail) as any;
+      const user = await dbAsync.get('SELECT * FROM users WHERE email = ?', normalizedEmail) as any;
 
       if (!user) {
         console.log(`Falha no login: Usuario nao encontrado - ${normalizedEmail}`);
-        recordLoginAttempt(normalizedEmail, ip, false);
+        await recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(401).json({ error: 'E-mail ou senha incorretos' });
       }
 
       if (!user.password || typeof user.password !== 'string') {
         console.error('Falha no login: usuario sem hash de senha valido', { userId: user.id, email: normalizedEmail });
-        recordLoginAttempt(normalizedEmail, ip, false);
+        await recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(500).json({ error: 'Conta sem senha valida. Redefina a senha do usuario.' });
       }
 
@@ -2020,19 +2259,19 @@ async function startServer() {
         passwordIsValid = await comparePassword(normalizedPassword, user.password);
       } catch (compareError) {
         console.error('Erro ao validar senha:', compareError);
-        recordLoginAttempt(normalizedEmail, ip, false);
+        await recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(500).json({ error: 'Erro ao validar credenciais' });
       }
 
       if (!passwordIsValid) {
         console.log(`Falha no login: Senha incorreta para ${normalizedEmail}`);
-        recordLoginAttempt(normalizedEmail, ip, false);
+        await recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(401).json({ error: 'E-mail ou senha incorretos' });
       }
 
       if (user.status !== 'ativo' && user.status !== 'active') {
         console.log(`Falha no login: Usuario inativo (${user.status}) - ${normalizedEmail}`);
-        recordLoginAttempt(normalizedEmail, ip, false);
+        await recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(403).json({ error: 'Esta conta esta inativa' });
       }
 
@@ -2050,7 +2289,7 @@ async function startServer() {
       console.log(`Login bem-sucedido: ${normalizedEmail} como ${type}`);
       const token = generateToken(tokenPayload);
       res.cookie('auth_token', token, getAuthCookieOptions(req));
-      recordLoginAttempt(normalizedEmail, ip, true);
+      await recordLoginAttempt(normalizedEmail, ip, true);
       return res.json({
         success: true,
         verification_required: verificationRequired,
@@ -2073,7 +2312,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get('/api/auth/me', (req, res) => {
+  app.get('/api/auth/me', async (req, res) => {
     const token = req.cookies.auth_token;
     if (!token) return res.json({ user: null });
 
@@ -2085,7 +2324,7 @@ async function startServer() {
 
     // Consulta o DB para retornar dados atualizados (incluindo avatar_url)
     try {
-      const fresh = db.get('SELECT id, name, email, role, avatar_url, email_verified_at, privacy_reaccept_required FROM users WHERE id = ?', Number(decoded.id)) as any;
+      const fresh = await dbAsync.get('SELECT id, name, email, role, avatar_url, email_verified_at, privacy_reaccept_required FROM users WHERE id = ?', Number(decoded.id)) as any;
       if (!fresh) return res.json({ user: null });
       const type = fresh.role === 'admin' ? 'user' : 'customer';
       return res.json({
@@ -2114,12 +2353,12 @@ async function startServer() {
         return res.status(400).json({ error: 'E-mail obrigatorio' });
       }
 
-      const verificationRequired = resolveEmailVerificationRequired();
+      const verificationRequired = await resolveEmailVerificationRequired();
       if (!verificationRequired) {
         return res.json({ success: true, message: 'Verificacao de e-mail desativada nas configuracoes.' });
       }
 
-      const user = db.get('SELECT id, name, email, status, email_verified_at FROM users WHERE email = ? LIMIT 1', normalizedEmail) as any;
+      const user = await dbAsync.get('SELECT id, name, email, status, email_verified_at FROM users WHERE email = ? LIMIT 1', normalizedEmail) as any;
       if (!user) {
         return res.json({ success: true });
       }
@@ -2142,7 +2381,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/auth/verify-email', (req, res) => {
+  app.get('/api/auth/verify-email', async (req, res) => {
     try {
       const token = String(req.query.token || '').trim();
       if (!token) {
@@ -2150,7 +2389,7 @@ async function startServer() {
       }
 
       const tokenHash = sha256(token);
-      const verification = db.get(
+      const verification = await dbAsync.get(
         `SELECT *
          FROM email_verification_tokens
          WHERE token_hash = ?
@@ -2164,13 +2403,13 @@ async function startServer() {
         return res.status(400).json({ success: false, error: 'Token invalido ou expirado' });
       }
 
-      db.transaction(() => {
-        db.run(
+      await dbAsync.transaction(async (conn) => {
+        await conn.execute(
           'UPDATE users SET email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          Number(verification.user_id),
+          [Number(verification.user_id)],
         );
-        db.run('UPDATE email_verification_tokens SET used = 1 WHERE id = ?', Number(verification.id));
-      })();
+        await conn.execute('UPDATE email_verification_tokens SET used = 1 WHERE id = ?', [Number(verification.id)]);
+      });
 
       return res.json({ success: true, message: 'E-mail confirmado com sucesso' });
     } catch (error) {
@@ -2180,11 +2419,11 @@ async function startServer() {
   });
 
   // API Routes - FAVORITES
-  app.get('/api/favorites', authenticate, (req, res) => {
+  app.get('/api/favorites', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
-      const newBadgeDays = resolveNewBadgeDays();
-      const favorites = db.all(`
+      const newBadgeDays = await resolveNewBadgeDays();
+      const favorites = await dbAsync.all(`
         SELECT
           f.product_id,
           f.created_at,
@@ -2217,7 +2456,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/favorites/:productId', authenticate, (req, res) => {
+  app.post('/api/favorites/:productId', authenticate, async (req, res) => {
     const user = (req as any).user;
     const productId = Number(req.params.productId);
 
@@ -2225,13 +2464,13 @@ async function startServer() {
       return res.status(400).json({ error: 'product_id invÃƒÂ¡lido' });
     }
 
-    const product = db.get('SELECT id, status FROM products WHERE id = ?', productId) as any;
+    const product = await dbAsync.get('SELECT id, status FROM products WHERE id = ?', productId) as any;
     if (!product || product.status !== 'active') {
       return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
     }
 
     try {
-      db.run('INSERT IGNORE INTO favorites (user_id, product_id) VALUES (?, ?)', user.id, productId);
+      await dbAsync.run('INSERT IGNORE INTO favorites (user_id, product_id) VALUES (?, ?)', user.id, productId);
       return res.status(201).json({ success: true, product_id: productId });
     } catch (error) {
       console.error('Add Favorite Error:', error);
@@ -2239,7 +2478,7 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/favorites/:productId', authenticate, (req, res) => {
+  app.delete('/api/favorites/:productId', authenticate, async (req, res) => {
     const user = (req as any).user;
     const productId = Number(req.params.productId);
 
@@ -2248,7 +2487,7 @@ async function startServer() {
     }
 
     try {
-      db.run('DELETE FROM favorites WHERE user_id = ? AND product_id = ?', user.id, productId);
+      await dbAsync.run('DELETE FROM favorites WHERE user_id = ? AND product_id = ?', user.id, productId);
       return res.json({ success: true, product_id: productId });
     } catch (error) {
       console.error('Remove Favorite Error:', error);
@@ -2265,7 +2504,7 @@ async function startServer() {
         return res.status(400).json({ error: 'E-mail invalido' });
       }
 
-      const user = db.get('SELECT * FROM users WHERE email = ?', normalizedEmail) as any;
+      const user = await dbAsync.get('SELECT * FROM users WHERE email = ?', normalizedEmail) as any;
       if (!user) {
         // Return success even if user not found for security reasons
         return res.json({ success: true });
@@ -2275,12 +2514,12 @@ async function startServer() {
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + 2);
 
-      db.run(
+      await dbAsync.run(
         'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
         user.id, token, expiresAt.toISOString()
       );
 
-      const settings = loadSettingsMap(['app_url']);
+      const settings = await loadSettingsMapAsync(['app_url']);
       const appUrl = process.env.APP_URL || settings.app_url || 'https://digitalbordados.com.br';
       const resetUrl = `${appUrl}/redefinir-senha?token=${token}`;
 
@@ -2309,7 +2548,7 @@ async function startServer() {
         return res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres' });
       }
 
-      const resetRequest = db.get(
+      const resetRequest = await dbAsync.get(
         'SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0 AND expires_at > CURRENT_TIMESTAMP',
         token
       ) as any;
@@ -2319,12 +2558,12 @@ async function startServer() {
       }
 
       const hashedPassword = await hashPassword(new_password);
-      db.run('UPDATE users SET password = ? WHERE id = ?', hashedPassword, resetRequest.user_id);
-      db.run('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', resetRequest.id);
+      await dbAsync.run('UPDATE users SET password = ? WHERE id = ?', hashedPassword, resetRequest.user_id);
+      await dbAsync.run('UPDATE password_reset_tokens SET used = 1 WHERE id = ?', resetRequest.id);
 
-      const user = db.get('SELECT * FROM users WHERE id = ?', resetRequest.user_id) as any;
+      const user = await dbAsync.get('SELECT * FROM users WHERE id = ?', resetRequest.user_id) as any;
       if (user) {
-        const settings = loadSettingsMap(['app_url']);
+        const settings = await loadSettingsMapAsync(['app_url']);
         const appUrl = settings.app_url || 'https://digitalbordados.com.br';
         
         await sendEmail({
@@ -2344,7 +2583,7 @@ async function startServer() {
   });
 
   // API Routes - ADMIN PRODUCTS
-  app.get('/api/admin/products', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/products', authenticate, isAdmin, async (req, res) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 10;
@@ -2365,7 +2604,7 @@ async function startServer() {
         params.push(`%${search}%`, `%${search}%`);
       }
 
-      const products = db.all(`
+      const products = await dbAsync.all(`
         SELECT p.id, p.name, p.slug, p.price, p.sale_price, p.image, p.status, p.created_at, p.category_id, c.name as category_name 
         FROM products p 
         LEFT JOIN product_categories c ON p.category_id = c.id 
@@ -2379,7 +2618,7 @@ async function startServer() {
         image: normalizePublicMediaUrl(product?.image),
       }));
 
-      const totalResult = db.get(`
+      const totalResult = await dbAsync.get(`
         SELECT COUNT(*) as total 
         FROM products p 
         ${whereClause}
@@ -2407,11 +2646,11 @@ async function startServer() {
     { name: 'gallery', maxCount: 10 },
     { name: 'production_files', maxCount: 5 },
     { name: 'production_sheet', maxCount: 1 }
-  ]), (req, res) => {
+  ]), async (req, res) => {
     const { 
-      name, description, short_description, price, sale_price, promotional_price, production_sheet,
+      name, slug, description, short_description, price, sale_price, promotional_price, production_sheet,
       category_id, category_ids, stitch_count, colors, is_featured, is_new,
-      seo_title, seo_description, tags, tag_ids, downloadable_files, gallery_urls
+      seo_title, seo_description, seo_keywords, canonical_url, noindex, tags, tag_ids, downloadable_files, gallery_urls
     } = req.body;
 
     const parseIdArray = (rawValue: any): number[] => {
@@ -2462,16 +2701,17 @@ async function startServer() {
       return res.status(400).json({ error: 'Categoria principal invÃƒÆ’Ã‚Â¡lida' });
     }
 
-    const uniqueSlug = createUniqueProductSlug(normalizedName);
+    const slugBase = typeof slug === 'string' && slug.trim() ? slug.trim() : normalizedName;
+    const uniqueSlug = await createUniqueProductSlug(slugBase);
 
     try {
-      const result = db.run(`
+      const result = await dbAsync.run(`
         INSERT INTO products (
           name, slug, description, short_description, price, sale_price, 
           image, production_sheet, category_id, stitch_count, colors, is_featured, is_new,
-          seo_title, seo_description
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, normalizedName, uniqueSlug, description || null, short_description || null, finalPrice, finalSalePrice, null, null, normalizedCategoryId, normalizedStitchCount, colors || null, is_featured === 'true' || is_featured === '1' ? 1 : 0, is_new === 'true' || is_new === '1' ? 1 : 0, seo_title || null, seo_description || null);
+          seo_title, seo_description, seo_keywords, canonical_url, noindex
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, normalizedName, uniqueSlug, description || null, short_description || null, finalPrice, finalSalePrice, null, null, normalizedCategoryId, normalizedStitchCount, colors || null, is_featured === 'true' || is_featured === '1' ? 1 : 0, is_new === 'true' || is_new === '1' ? 1 : 0, seo_title || null, seo_description || null, seo_keywords || null, canonical_url || null, noindex === 'true' || noindex === '1' ? 1 : 0);
 
       const productId = result.lastInsertRowid;
       const productIdNumber = Number(productId);
@@ -2498,24 +2738,24 @@ async function startServer() {
         productionSheetValue = `/uploads/${finalName}`;
       }
 
-      db.run('UPDATE products SET image = ?, production_sheet = ? WHERE id = ?', mainImagePath, productionSheetValue, productIdNumber);
+      await dbAsync.run('UPDATE products SET image = ?, production_sheet = ? WHERE id = ?', mainImagePath, productionSheetValue, productIdNumber);
 
       const parsedCategoryIds = parseIdArray(category_ids);
       const finalCategoryIds = parsedCategoryIds.length > 0
         ? parsedCategoryIds
         : (normalizedCategoryId ? [normalizedCategoryId] : []);
-      finalCategoryIds.forEach((categoryRelationId) => {
-        db.run('INSERT IGNORE INTO product_category_relations (product_id, category_id) VALUES (?, ?)', productId, categoryRelationId);
-      });
+      for (const categoryRelationId of finalCategoryIds) {
+        await dbAsync.run('INSERT IGNORE INTO product_category_relations (product_id, category_id) VALUES (?, ?)', productId, categoryRelationId);
+      }
 
       // Galeria
       if (files['gallery']) {
-        files['gallery'].forEach((f, index) => {
+        for (const [index, f] of files['gallery'].entries()) {
           const ext = path.extname(f.originalname || f.filename || '').toLowerCase() || '.jpg';
           const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext, `g${index + 1}`);
           moveUploadedFileToFinalPath(f, publicUploadsDir, finalName);
-          db.run('INSERT IGNORE INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${finalName}`, 'gallery');
-        });
+          await dbAsync.run('INSERT IGNORE INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${finalName}`, 'gallery');
+        }
       }
 
       if (gallery_urls !== undefined) {
@@ -2536,20 +2776,20 @@ async function startServer() {
           }
         }
 
-        parsedGalleryUrls.forEach((url) => {
-          db.run('INSERT IGNORE INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, url, 'gallery');
-        });
+        for (const url of parsedGalleryUrls) {
+          await dbAsync.run('INSERT IGNORE INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, url, 'gallery');
+        }
       }
 
       // Arquivos de ProduÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o
       if (files['production_files']) {
-        files['production_files'].forEach((f, index) => {
+        for (const [index, f] of files['production_files'].entries()) {
           const ext = path.extname(f.originalname || f.filename || '').toLowerCase() || '.zip';
           const suffix = index === 0 ? undefined : `a${index + 1}`;
           const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext, suffix);
           moveUploadedFileToFinalPath(f, privateUploadsDir, finalName);
-          db.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, finalName, `/uploads/arquivos/${finalName}`, 'production');
-        });
+          await dbAsync.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, finalName, `/uploads/arquivos/${finalName}`, 'production');
+        }
       }
 
       if (downloadable_files !== undefined) {
@@ -2565,27 +2805,27 @@ async function startServer() {
           }
         }
 
-        parsedDownloadableFiles.forEach((file) => {
+        for (const file of parsedDownloadableFiles) {
           if (typeof file === 'string') {
             const fileName = file.split('/').pop() || file;
-            db.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, fileName, file, 'downloadable');
-            return;
+            await dbAsync.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, fileName, file, 'downloadable');
+            continue;
           }
 
           const filePath = file?.file_path || file?.path || file?.url;
-          if (!filePath) return;
+          if (!filePath) continue;
           const fileName = file?.file_name || file?.name || filePath.split('/').pop() || 'arquivo';
           const fileType = file?.file_type || file?.type || 'downloadable';
-          db.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, fileName, filePath, fileType);
-        });
+          await dbAsync.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, fileName, filePath, fileType);
+        }
       }
 
       // Tags
       const parsedTagIds = parseIdArray(tag_ids ?? tags);
       if (parsedTagIds.length > 0) {
-        parsedTagIds.forEach((tagId) => {
-          db.run('INSERT IGNORE INTO product_tag_relations (product_id, tag_id) VALUES (?, ?)', productId, tagId);
-        });
+        for (const tagId of parsedTagIds) {
+          await dbAsync.run('INSERT IGNORE INTO product_tag_relations (product_id, tag_id) VALUES (?, ?)', productId, tagId);
+        }
       }
 
       res.json({ success: true, id: productId });
@@ -2608,9 +2848,9 @@ async function startServer() {
     { name: 'gallery', maxCount: 10 },
     { name: 'production_files', maxCount: 5 },
     { name: 'production_sheet', maxCount: 1 }
-  ]), (req, res) => {
+  ]), async (req, res) => {
     const productId = Number(req.params.id);
-    const existingProduct = db.get('SELECT * FROM products WHERE id = ?', productId) as any;
+    const existingProduct = await dbAsync.get('SELECT * FROM products WHERE id = ?', productId) as any;
 
     if (!existingProduct) {
       return res.status(404).json({ error: 'Produto nÃƒÆ’Ã‚Â£o encontrado' });
@@ -2630,6 +2870,11 @@ async function startServer() {
       category_ids,
       stitch_count,
       colors,
+      seo_title,
+      seo_description,
+      seo_keywords,
+      canonical_url,
+      noindex,
       tags,
       tag_ids,
       downloadable_files,
@@ -2685,6 +2930,13 @@ async function startServer() {
     const nextColors = colors !== undefined
       ? ((typeof colors === 'string' ? colors.trim() : String(colors)) || null)
       : existingProduct.colors;
+    const nextSeoTitle = seo_title !== undefined ? (String(seo_title || '').trim() || null) : existingProduct.seo_title;
+    const nextSeoDescription = seo_description !== undefined ? (String(seo_description || '').trim() || null) : existingProduct.seo_description;
+    const nextSeoKeywords = seo_keywords !== undefined ? (String(seo_keywords || '').trim() || null) : existingProduct.seo_keywords;
+    const nextCanonicalUrl = canonical_url !== undefined ? (String(canonical_url || '').trim() || null) : existingProduct.canonical_url;
+    const nextNoindex = noindex !== undefined
+      ? (String(noindex) === 'true' || String(noindex) === '1' ? 1 : 0)
+      : Number(existingProduct.noindex || 0);
 
     if (nextStitchCount !== null && !Number.isFinite(Number(nextStitchCount))) {
       return res.status(400).json({ error: 'Quantidade de pontos invÃƒÂ¡lida' });
@@ -2719,7 +2971,7 @@ async function startServer() {
         : existingProduct.production_sheet);
 
     try {
-      db.run(`
+      await dbAsync.run(`
         UPDATE products
         SET
           name = ?,
@@ -2733,9 +2985,14 @@ async function startServer() {
           colors = ?,
           image = ?,
           production_sheet = ?,
+          seo_title = ?,
+          seo_description = ?,
+          seo_keywords = ?,
+          canonical_url = ?,
+          noindex = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextProductionSheet, productId);
+      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextProductionSheet, nextSeoTitle, nextSeoDescription, nextSeoKeywords, nextCanonicalUrl, nextNoindex, productId);
 
       if (files['image']?.[0] && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.includes('/uploads/')) {
         const oldImageRelative = existingProduct.image.replace(/^https?:\/\/[^/]+/i, '');
@@ -2763,30 +3020,34 @@ async function startServer() {
 
       const parsedTagIds = parseIdArray(tag_ids ?? tags);
       if (tags !== undefined || tag_ids !== undefined) {
-        db.run('DELETE FROM product_tag_relations WHERE product_id = ?', productId);
+        await dbAsync.run('DELETE FROM product_tag_relations WHERE product_id = ?', productId);
         if (parsedTagIds.length > 0) {
-          parsedTagIds.forEach((tagId) => db.run('INSERT IGNORE INTO product_tag_relations (product_id, tag_id) VALUES (?, ?)', productId, tagId));
+          for (const tagId of parsedTagIds) {
+            await dbAsync.run('INSERT IGNORE INTO product_tag_relations (product_id, tag_id) VALUES (?, ?)', productId, tagId);
+          }
         }
       }
 
       const parsedCategoryIds = parseIdArray(category_ids);
       const shouldUpdateCategoryRelations = category_ids !== undefined || category_id !== undefined;
       if (shouldUpdateCategoryRelations) {
-        db.run('DELETE FROM product_category_relations WHERE product_id = ?', productId);
+        await dbAsync.run('DELETE FROM product_category_relations WHERE product_id = ?', productId);
 
         const finalCategoryIds = parsedCategoryIds.length > 0
           ? parsedCategoryIds
           : (nextCategoryId ? [nextCategoryId] : []);
 
         if (finalCategoryIds.length > 0) {
-          finalCategoryIds.forEach((cid) => db.run('INSERT IGNORE INTO product_category_relations (product_id, category_id) VALUES (?, ?)', productId, cid));
+          for (const cid of finalCategoryIds) {
+            await dbAsync.run('INSERT IGNORE INTO product_category_relations (product_id, category_id) VALUES (?, ?)', productId, cid);
+          }
         }
       }
 
       const hasNewGalleryFiles = Array.isArray(files['gallery']) && files['gallery'].length > 0;
       const hasGalleryUrlsPayload = gallery_urls !== undefined;
       if (hasNewGalleryFiles || hasGalleryUrlsPayload) {
-        db.run(`
+        await dbAsync.run(`
           DELETE FROM product_images
           WHERE product_id = ?
             AND (file_type = 'gallery' OR file_type IS NULL OR file_type = '')
@@ -2805,18 +3066,18 @@ async function startServer() {
             }
           }
 
-          parsedGalleryUrls.forEach((url) => {
-            db.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, url, 'gallery');
-          });
+          for (const url of parsedGalleryUrls) {
+            await dbAsync.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, url, 'gallery');
+          }
         }
 
         if (hasNewGalleryFiles) {
-          files['gallery'].forEach((file, index) => {
+          for (const [index, file] of files['gallery'].entries()) {
             const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.jpg';
             const finalName = buildProductMediaName(nextSlug, productId, ext, `g${index + 1}`);
             moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
-            db.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${finalName}`, 'gallery');
-          });
+            await dbAsync.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${finalName}`, 'gallery');
+          }
         }
       }
 
@@ -2824,16 +3085,16 @@ async function startServer() {
       const hasDownloadableFilesJson = downloadable_files !== undefined;
 
       if (hasNewProductionFiles || hasDownloadableFilesJson) {
-        db.run('DELETE FROM product_files WHERE product_id = ?', productId);
+        await dbAsync.run('DELETE FROM product_files WHERE product_id = ?', productId);
 
         if (hasNewProductionFiles) {
-          files['production_files'].forEach((file, index) => {
+          for (const [index, file] of files['production_files'].entries()) {
             const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.zip';
             const suffix = index === 0 ? undefined : `a${index + 1}`;
             const finalName = buildProductMediaName(nextSlug, productId, ext, suffix);
             moveUploadedFileToFinalPath(file, privateUploadsDir, finalName);
-            db.run('INSERT INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, finalName, `/uploads/arquivos/${finalName}`, 'production');
-          });
+            await dbAsync.run('INSERT INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, finalName, `/uploads/arquivos/${finalName}`, 'production');
+          }
         }
 
         if (hasDownloadableFilesJson) {
@@ -2849,32 +3110,32 @@ async function startServer() {
             }
           }
 
-          parsedDownloadableFiles.forEach((file) => {
+          for (const file of parsedDownloadableFiles) {
             if (typeof file === 'string') {
               const fileName = file.split('/').pop() || file;
-              db.run('INSERT INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, fileName, file, 'downloadable');
-              return;
+              await dbAsync.run('INSERT INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, fileName, file, 'downloadable');
+              continue;
             }
 
             const filePath = file?.file_path || file?.path;
-            if (!filePath) return;
+            if (!filePath) continue;
 
             const fileName = file?.file_name || file?.name || filePath.split('/').pop() || 'arquivo';
             const fileType = file?.file_type || file?.type || 'downloadable';
-            db.run('INSERT INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, fileName, filePath, fileType);
-          });
+            await dbAsync.run('INSERT INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, fileName, filePath, fileType);
+          }
         }
       }
 
-      const updatedProduct = db.get('SELECT * FROM products WHERE id = ?', productId) as any;
-      const updatedTags = db.all(`
+      const updatedProduct = await dbAsync.get('SELECT * FROM products WHERE id = ?', productId) as any;
+      const updatedTags = await dbAsync.all(`
         SELECT t.*
         FROM product_tags t
         JOIN product_tag_relations pt ON t.id = pt.tag_id
         WHERE pt.product_id = ?
       `, productId);
-      const updatedFiles = db.all('SELECT * FROM product_files WHERE product_id = ?', productId);
-      const updatedCategoryIds = db.all('SELECT category_id FROM product_category_relations WHERE product_id = ?', productId);
+      const updatedFiles = await dbAsync.all('SELECT * FROM product_files WHERE product_id = ?', productId);
+      const updatedCategoryIds = await dbAsync.all('SELECT category_id FROM product_category_relations WHERE product_id = ?', productId);
 
       res.status(200).json({
         ...updatedProduct,
@@ -2888,11 +3149,11 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/products/:id', authenticate, isAdmin, (req, res) => {
-    const product = db.get('SELECT * FROM products WHERE id = ?', req.params.id) as any;
+  app.get('/api/admin/products/:id', authenticate, isAdmin, async (req, res) => {
+    const product = await dbAsync.get('SELECT * FROM products WHERE id = ?', req.params.id) as any;
     if (!product) return res.status(404).json({ error: 'Produto nÃƒÆ’Ã‚Â£o encontrado' });
 
-    const images = (db.all(`
+    const images = (await dbAsync.all(`
       SELECT id, product_id, url, is_featured, created_at, file_type
       FROM product_images
       WHERE product_id = ?
@@ -2906,9 +3167,9 @@ async function startServer() {
       created_at: image?.created_at ?? null,
       file_type: image?.file_type ?? null,
     }));
-    const files = db.all('SELECT * FROM product_files WHERE product_id = ?', req.params.id);
-    const categoryRelations = db.all('SELECT category_id FROM product_category_relations WHERE product_id = ?', req.params.id) as any[];
-    const tags = db.all(`
+    const files = await dbAsync.all('SELECT * FROM product_files WHERE product_id = ?', req.params.id);
+    const categoryRelations = await dbAsync.all('SELECT category_id FROM product_category_relations WHERE product_id = ?', req.params.id) as any[];
+    const tags = await dbAsync.all(`
       SELECT t.* 
       FROM product_tags t 
       JOIN product_tag_relations pt ON t.id = pt.tag_id 
@@ -2923,9 +3184,155 @@ async function startServer() {
     res.json({ ...normalizedProduct, images, files, tags, category_ids: categoryRelations.map((row) => row.category_id) });
   });
 
-  app.delete('/api/admin/products/:id', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/products/:id/sync-mercadopago', authenticate, isAdmin, async (req, res) => {
     try {
-      db.run('DELETE FROM products WHERE id = ?', req.params.id);
+      const productId = Number(req.params.id || 0);
+      if (!Number.isInteger(productId) || productId <= 0) {
+        return res.status(400).json({ error: 'Produto inválido' });
+      }
+
+      const payload = await buildMercadoPagoProductPayload(productId, req);
+      if (!payload) {
+        return res.status(404).json({ error: 'Produto não encontrado' });
+      }
+
+      const hasDescription = Boolean(String(payload.description || '').trim());
+      const hasImage = Boolean(String(payload.picture_url || '').trim());
+      const status = hasDescription && hasImage ? 'synced' : 'warning';
+      const message = hasDescription && hasImage
+        ? 'Produto sincronizado para Mercado Pago com imagem e descrição.'
+        : 'Sincronização concluída com alerta: falta imagem principal ou descrição.';
+
+      await dbAsync.run(`
+        INSERT INTO mercadopago_product_sync_logs
+          (product_id, product_name, sku, status, message, payload_json, synced_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, productId, payload.title, payload.sku, status, message, JSON.stringify(payload), Number((req as any)?.user?.id || 0));
+
+      return res.json({ success: true, status, message, payload });
+    } catch (error) {
+      console.error('Product Mercado Pago sync error:', error);
+      return res.status(500).json({ error: 'Erro ao sincronizar produto com Mercado Pago' });
+    }
+  });
+
+  app.get('/api/admin/products/:id/sync-mercadopago/logs', authenticate, isAdmin, async (req, res) => {
+    try {
+      const productId = Number(req.params.id || 0);
+      if (!Number.isInteger(productId) || productId <= 0) {
+        return res.status(400).json({ error: 'Produto inválido' });
+      }
+      const logs = await dbAsync.all(`
+        SELECT id, product_id, product_name, sku, status, message, created_at
+        FROM mercadopago_product_sync_logs
+        WHERE product_id = ?
+        ORDER BY created_at DESC
+        LIMIT 30
+      `, productId);
+      return res.json(logs);
+    } catch (error) {
+      console.error('Product Mercado Pago sync logs error:', error);
+      return res.status(500).json({ error: 'Erro ao buscar logs de sincronização Mercado Pago' });
+    }
+  });
+
+  app.post('/api/admin/products/:id/duplicate', authenticate, isAdmin, async (req, res) => {
+    try {
+      const sourceId = Number(req.params.id || 0);
+      if (!Number.isInteger(sourceId) || sourceId <= 0) {
+        return res.status(400).json({ error: 'Produto inválido' });
+      }
+
+      const source = await dbAsync.get('SELECT * FROM products WHERE id = ? LIMIT 1', sourceId) as any;
+      if (!source) {
+        return res.status(404).json({ error: 'Produto não encontrado' });
+      }
+
+      const baseName = String(source.name || 'Produto');
+      const duplicatedName = `${baseName} (Cópia)`;
+      const duplicatedSlug = await createUniqueProductSlug(duplicatedName);
+
+      const duplicatedId = await dbAsync.transaction(async (conn) => {
+        const [result] = await conn.execute(`
+          INSERT INTO products (
+            name, slug, description, short_description, price, sale_price,
+            image, production_sheet, category_id, type, is_virtual, is_downloadable,
+            stitch_count, colors, is_featured, is_new, seo_title, seo_description,
+            seo_keywords, canonical_url, noindex, status
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          duplicatedName,
+          duplicatedSlug,
+          source.description || null,
+          source.short_description || null,
+          source.price || 0,
+          source.sale_price ?? null,
+          source.image || null,
+          source.production_sheet || null,
+          source.category_id || null,
+          source.type || 'simple',
+          source.is_virtual ?? 1,
+          source.is_downloadable ?? 1,
+          source.stitch_count ?? null,
+          source.colors || null,
+          source.is_featured ?? 0,
+          source.is_new ?? 0,
+          source.seo_title || null,
+          source.seo_description || null,
+          source.seo_keywords || null,
+          null, // canonical_url reset for duplicate
+          source.noindex ?? 0,
+          source.status || 'active',
+        ] as any);
+        const newId = Number((result as any).insertId || 0);
+        if (!newId) throw new Error('duplicate_insert_failed');
+
+        await conn.execute(`
+          INSERT INTO product_tag_relations (product_id, tag_id)
+          SELECT ?, ptr.tag_id
+          FROM product_tag_relations ptr
+          WHERE ptr.product_id = ?
+        `, [newId, sourceId] as any);
+
+        await conn.execute(`
+          INSERT INTO product_category_relations (product_id, category_id)
+          SELECT ?, pcr.category_id
+          FROM product_category_relations pcr
+          WHERE pcr.product_id = ?
+        `, [newId, sourceId] as any);
+
+        await conn.execute(`
+          INSERT INTO product_images (product_id, url, file_type, is_featured)
+          SELECT ?, pi.url, pi.file_type, pi.is_featured
+          FROM product_images pi
+          WHERE pi.product_id = ?
+        `, [newId, sourceId] as any);
+
+        await conn.execute(`
+          INSERT INTO product_files (product_id, file_path, file_name, file_type)
+          SELECT ?, pf.file_path, pf.file_name, pf.file_type
+          FROM product_files pf
+          WHERE pf.product_id = ?
+        `, [newId, sourceId] as any);
+
+        return newId;
+      });
+
+      return res.json({
+        success: true,
+        id: duplicatedId,
+        slug: duplicatedSlug,
+      });
+    } catch (error) {
+      console.error('Duplicate product error:', error);
+      return res.status(500).json({ error: 'Erro ao duplicar produto' });
+    }
+  });
+
+  app.delete('/api/admin/products/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      await dbAsync.run('DELETE FROM products WHERE id = ?', req.params.id);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Erro ao excluir produto' });
@@ -2933,8 +3340,8 @@ async function startServer() {
   });
 
   // API Routes - ADMIN CATEGORIES
-  app.get('/api/admin/categories', authenticate, isAdmin, (req, res) => {
-    const categories = db.all(`
+  app.get('/api/admin/categories', authenticate, isAdmin, async (req, res) => {
+    const categories = await dbAsync.all(`
       SELECT 
         c.*, 
         p.name as parent_name,
@@ -2950,7 +3357,7 @@ async function startServer() {
     res.json(categories);
   });
 
-  app.post('/api/admin/categories', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/categories', authenticate, isAdmin, async (req, res) => {
     const { name, slug: rawSlug, parent_id, sort_order, status, description } = req.body;
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
@@ -2963,7 +3370,7 @@ async function startServer() {
     const slug = (generatedSlug || safeName.toLowerCase().replace(/\s+/g, '-')).slice(0, 191);
 
     try {
-      const existingCategory = db.get(`
+      const existingCategory = await dbAsync.get(`
         SELECT id, name, slug, parent_id, sort_order, status, description
         FROM product_categories
         WHERE slug = ?
@@ -2973,12 +3380,12 @@ async function startServer() {
         return res.status(200).json(existingCategory);
       }
 
-      const result = db.run(`
+      const result = await dbAsync.run(`
         INSERT IGNORE INTO product_categories (name, slug, parent_id, sort_order, status, description)
         VALUES (?, ?, ?, ?, ?, ?)
       `, safeName, slug, parent_id || null, sort_order || 0, status || 'active', description || null);
 
-      const createdCategory = db.get(`
+      const createdCategory = await dbAsync.get(`
         SELECT id, name, slug, parent_id, sort_order, status, description
         FROM product_categories
         WHERE id = ?
@@ -2987,7 +3394,7 @@ async function startServer() {
       return res.status(200).json(createdCategory);
     } catch (error: any) {
       if (error?.message?.includes('UNIQUE constraint failed') || error?.code === 'ER_DUP_ENTRY') {
-        const existingCategory = db.get(`
+        const existingCategory = await dbAsync.get(`
           SELECT id, name, slug, parent_id, sort_order, status, description
           FROM product_categories
           WHERE slug = ?
@@ -3000,7 +3407,7 @@ async function startServer() {
     }
   });
 
-  app.put('/api/admin/categories/:id', authenticate, isAdmin, (req, res) => {
+  app.put('/api/admin/categories/:id', authenticate, isAdmin, async (req, res) => {
     const { name, slug: rawSlug, parent_id, sort_order, status, description } = req.body;
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
@@ -3014,7 +3421,7 @@ async function startServer() {
     const categoryId = Number(req.params.id);
 
     try {
-      const existingCategory = db.get(`
+      const existingCategory = await dbAsync.get(`
         SELECT id, name, slug, parent_id, sort_order, status, description
         FROM product_categories
         WHERE slug = ? AND id != ?
@@ -3024,13 +3431,13 @@ async function startServer() {
         return res.status(200).json(existingCategory);
       }
 
-      db.run(`
+      await dbAsync.run(`
         UPDATE product_categories 
         SET name = ?, slug = ?, parent_id = ?, sort_order = ?, status = ?, description = ?
         WHERE id = ?
       `, safeName, slug, parent_id || null, sort_order || 0, status || 'active', description || null, categoryId);
 
-      const updatedCategory = db.get(`
+      const updatedCategory = await dbAsync.get(`
         SELECT id, name, slug, parent_id, sort_order, status, description
         FROM product_categories
         WHERE id = ?
@@ -3043,7 +3450,7 @@ async function startServer() {
       return res.status(200).json(updatedCategory);
     } catch (error: any) {
       if (error?.message?.includes('UNIQUE constraint failed') || error?.code === 'ER_DUP_ENTRY') {
-        const existingCategory = db.get(`
+        const existingCategory = await dbAsync.get(`
           SELECT id, name, slug, parent_id, sort_order, status, description
           FROM product_categories
           WHERE slug = ?
@@ -3056,16 +3463,16 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/admin/categories/:id', authenticate, isAdmin, (req, res) => {
+  app.delete('/api/admin/categories/:id', authenticate, isAdmin, async (req, res) => {
     try {
-      db.run('DELETE FROM product_categories WHERE id = ?', req.params.id);
+      await dbAsync.run('DELETE FROM product_categories WHERE id = ?', req.params.id);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Erro ao excluir categoria' });
     }
   });
 
-  app.post('/api/admin/categories/bulk-delete', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/categories/bulk-delete', authenticate, isAdmin, async (req, res) => {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
     const normalizedIds = ids
       .map((value: any) => Number(value))
@@ -3077,7 +3484,7 @@ async function startServer() {
 
     try {
       const placeholders = normalizedIds.map(() => '?').join(', ');
-      const result = db.run(`DELETE FROM product_categories WHERE id IN (${placeholders})`, ...normalizedIds);
+      const result = await dbAsync.run(`DELETE FROM product_categories WHERE id IN (${placeholders})`, ...normalizedIds);
       res.json({ success: true, deleted: result.changes });
     } catch (error) {
       res.status(500).json({ error: 'Erro ao excluir categorias em massa' });
@@ -3085,7 +3492,7 @@ async function startServer() {
   });
 
   // API Routes - ADMIN TAGS
-  app.get('/api/admin/tags', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/tags', authenticate, isAdmin, async (req, res) => {
     try {
       const search = req.query.q;
       let query = 'SELECT * FROM product_tags';
@@ -3097,7 +3504,7 @@ async function startServer() {
       }
 
       query += ' ORDER BY name ASC LIMIT 100';
-      const tags = db.all(query, ...params);
+      const tags = await dbAsync.all(query, ...params);
       res.json(tags);
     } catch (error) {
       console.error('Admin Fetch Tags Error:', error);
@@ -3105,10 +3512,10 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/tags/most-used', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/tags/most-used', authenticate, isAdmin, async (req, res) => {
     const limitParam = Number(req.query.limit);
     const limit = Number.isInteger(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 20;
-    const tags = db.all(`
+    const tags = await dbAsync.all(`
       SELECT
         t.id,
         t.name,
@@ -3136,23 +3543,23 @@ async function startServer() {
       payment_method_id,
     } = req.body || {};
     const user = (req as any).user;
-    const freshUser = getUserById(Number(user?.id || 0));
+    const freshUser = await getUserById(Number(user?.id || 0));
     if (!freshUser) {
       return res.status(401).json({ error: 'Usuario nao encontrado' });
     }
     if (freshUser.status !== 'ativo' && freshUser.status !== 'active') {
       return res.status(403).json({ error: 'Conta inativa' });
     }
-    if (resolveEmailVerificationRequired() && !freshUser.email_verified_at) {
+    if ((await resolveEmailVerificationRequired()) && !freshUser.email_verified_at) {
       return res.status(403).json({
         error: 'Confirme seu e-mail para finalizar compras.',
         code: 'EMAIL_NOT_VERIFIED',
       });
     }
 
-    const lgpd = resolveLgpdSettings();
+    const lgpd = await resolveLgpdSettings();
     if (lgpd.enabled) {
-      const compliance = ensureUserLgpdCompliance(Number(freshUser.id));
+      const compliance = await ensureUserLgpdCompliance(Number(freshUser.id));
       if (!compliance.ok) {
         return res.status(403).json({
           error: 'Aceite as politicas de privacidade/termos para continuar.',
@@ -3186,7 +3593,12 @@ async function startServer() {
           return res.status(400).json({ error: 'Itens invÃƒÂ¡lidos no checkout' });
         }
 
-        const product = db.get('SELECT id, name, slug, price, sale_price FROM products WHERE id = ?', productId) as any;
+        const product = await dbAsync.get(`
+          SELECT p.id, p.name, p.slug, p.description, p.image, p.price, p.sale_price, p.category_id, c.name AS category_name
+          FROM products p
+          LEFT JOIN product_categories c ON c.id = p.category_id
+          WHERE p.id = ?
+        `, productId) as any;
         if (!product) {
           return res.status(400).json({ error: `Produto ${productId} nÃƒÂ£o encontrado` });
         }
@@ -3200,6 +3612,9 @@ async function startServer() {
           product_id: product.id,
           product_name: product.name,
           product_slug: product.slug,
+          product_description: String(product.description || ''),
+          product_image: String(product.image || ''),
+          product_category: String(product.category_name || product.category_id || ''),
           price: unitPrice,
           quantity,
         });
@@ -3213,6 +3628,14 @@ async function startServer() {
       const payerFirstName = String((payer as any)?.first_name || '').trim();
       const payerLastName = String((payer as any)?.last_name || '').trim();
       const payerCpf = normalizeCPF((payer as any)?.cpf);
+      const payerPhone = String((payer as any)?.phone || '').trim();
+      const payerCity = String((payer as any)?.city || '').trim();
+      const payerState = String((payer as any)?.state || '').trim();
+      const payerPostalCode = String((payer as any)?.postal_code || (payer as any)?.zip || '').trim();
+      const payerAddress = String((payer as any)?.address || '').trim();
+      const payerNumber = String((payer as any)?.number || '').trim();
+      const payerNeighborhood = String((payer as any)?.neighborhood || '').trim();
+      const payerComplement = String((payer as any)?.complement || '').trim();
 
       if (!payerEmail) {
         return res.status(400).json({ error: 'E-mail do pagador ÃƒÂ© obrigatÃƒÂ³rio' });
@@ -3221,36 +3644,60 @@ async function startServer() {
         return res.status(400).json({ error: 'CPF do pagador ÃƒÂ© obrigatÃƒÂ³rio' });
       }
 
-      const createOrderTransaction = db.transaction((payload: any) => {
-        const orderResult = db.run(`
+      const orderId = await dbAsync.transaction(async (conn) => {
+        const [orderResultRaw] = await conn.execute(`
           INSERT INTO orders (user_id, total, status, payment_method, customer_email, customer_name)
           VALUES (?, ?, 'pending', ?, ?, ?)
-        `, payload.userId, payload.total, payload.paymentMethod, payload.customerEmail, payload.customerName);
+        `, [user.id, subtotal, payment_method, payerEmail, `${payerFirstName} ${payerLastName}`.trim() || null]);
 
-        const orderId = Number(orderResult.lastInsertRowid);
-        payload.items.forEach((oi: any) => {
-          db.run(`
+        const orderIdTx = Number((orderResultRaw as any)?.insertId || 0);
+        for (const oi of orderItems) {
+          await conn.execute(`
             INSERT INTO order_items (order_id, product_id, product_name, product_slug, price, quantity)
             VALUES (?, ?, ?, ?, ?, ?)
-          `, orderId, oi.product_id, oi.product_name, oi.product_slug, oi.price, oi.quantity);
-        });
-
-        return orderId;
+          `, [orderIdTx, oi.product_id, oi.product_name, oi.product_slug, oi.price, oi.quantity]);
+        }
+        return orderIdTx;
       });
 
-      const orderId = createOrderTransaction({
-        userId: user.id,
-        total: subtotal,
-        paymentMethod: payment_method,
-        customerEmail: payerEmail,
-        customerName: `${payerFirstName} ${payerLastName}`.trim() || null,
-        items: orderItems,
-      });
+      await dbAsync.run(`
+        INSERT INTO order_customer_details
+          (order_id, first_name, last_name, cpf, email, phone, city, state, postal_code, address_line, number, neighborhood, complement)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          first_name = VALUES(first_name),
+          last_name = VALUES(last_name),
+          cpf = VALUES(cpf),
+          email = VALUES(email),
+          phone = VALUES(phone),
+          city = VALUES(city),
+          state = VALUES(state),
+          postal_code = VALUES(postal_code),
+          address_line = VALUES(address_line),
+          number = VALUES(number),
+          neighborhood = VALUES(neighborhood),
+          complement = VALUES(complement),
+          updated_at = CURRENT_TIMESTAMP
+      `,
+        orderId,
+        payerFirstName || null,
+        payerLastName || null,
+        payerCpf || null,
+        payerEmail || null,
+        payerPhone || null,
+        payerCity || null,
+        payerState || null,
+        payerPostalCode || null,
+        payerAddress || null,
+        payerNumber || null,
+        payerNeighborhood || null,
+        payerComplement || null,
+      );
 
       const { mode, accessToken } = resolveMercadoPagoSettings();
 
       if (lgpd.enabled && parseBooleanSetting(checkout_data_processing_accepted, false)) {
-        upsertUserConsent({
+        await upsertUserConsent({
           userId: Number(user.id),
           consentKey: 'checkout_data_processing',
           granted: true,
@@ -3263,7 +3710,7 @@ async function startServer() {
       }
 
       if (!accessToken) {
-        db.run(`UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, orderId);
+        await dbAsync.run(`UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, orderId);
         return res.status(400).json({
           error: 'Mercado Pago nao configurado. Preencha o Access Token em Configuracoes > Meios de Pagamento.',
         });
@@ -3271,6 +3718,21 @@ async function startServer() {
 
       const paymentClient = createMercadoPagoPaymentClient();
       const notificationBaseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+      const mpItems = orderItems.map((oi) => {
+        const normalizedImage = normalizePublicMediaUrl(oi.product_image || '');
+        const pictureUrl = normalizedImage
+          ? (normalizedImage.startsWith('http') ? normalizedImage : `${notificationBaseUrl}${normalizedImage}`)
+          : '';
+        return {
+          id: String(oi.product_slug || oi.product_id),
+          title: String(oi.product_name || ''),
+          description: String(oi.product_description || '').slice(0, 500),
+          category_id: String(oi.product_category || 'matrizes'),
+          quantity: Number(oi.quantity || 1),
+          unit_price: Number(Number(oi.price || 0).toFixed(2)),
+          picture_url: pictureUrl,
+        };
+      });
 
       const commonBody: any = {
         transaction_amount: Number(subtotal.toFixed(2)),
@@ -3283,6 +3745,9 @@ async function startServer() {
         },
         external_reference: String(orderId),
         notification_url: `${notificationBaseUrl}/api/webhooks/mercadopago`,
+        additional_info: {
+          items: mpItems,
+        },
       };
 
       let payment: any;
@@ -3314,7 +3779,7 @@ async function startServer() {
         }
       } catch (gatewayError: any) {
         const parsed = extractGatewayError(gatewayError);
-        db.run(`UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, orderId);
+        await dbAsync.run(`UPDATE orders SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, orderId);
         console.error('MercadoPago payment error:', parsed.details || gatewayError);
         return res.status(parsed.status >= 400 && parsed.status < 500 ? parsed.status : 400).json({
           error: parsed.message,
@@ -3326,7 +3791,7 @@ async function startServer() {
       const paymentStatus = String(payment?.status || 'pending');
 
       if (paymentId) {
-        db.run(`
+        await dbAsync.run(`
           UPDATE orders
           SET transaction_id = ?, payment_method = ?, status = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
@@ -3339,7 +3804,7 @@ async function startServer() {
       }
 
       if (paymentStatus === 'approved') {
-        db.run(`
+        await dbAsync.run(`
           UPDATE orders
           SET status = 'paid', paid_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
@@ -3350,35 +3815,21 @@ async function startServer() {
       
       // TRIGGER EMAIL: order_created
       const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-      const itemsHtml = orderItems.map(i => `<li>${i.quantity}x ${i.product_name} - R$ ${i.price.toFixed(2)}</li>`).join('');
-      sendEmail({
-        to: payerEmail,
-        templateKey: 'order_created',
-        variables: {
-          name: payerFirstName || 'Cliente',
-          order_id: orderId,
-          order_total: `R$ ${subtotal.toFixed(2)}`,
-          order_status: paymentStatus,
-          items: `<ul>${itemsHtml}</ul>`,
-          payment_method: payment_method,
-          account_url: `${appUrl}/conta`
-        }
-      }).catch(err => console.error('Failed to send order_created email:', err));
+      const emailPayload = await buildOrderEmailPayload(orderId, payment_method, paymentStatus, appUrl);
+      if (emailPayload?.customerEmail) {
+        sendEmail({
+          to: emailPayload.customerEmail,
+          templateKey: 'order_created',
+          variables: emailPayload.variables,
+        }).catch(err => console.error('Failed to send order_created email:', err));
+      }
 
-      const orderNotificationEmail = getOrderNotificationEmail();
-      if (orderNotificationEmail) {
+      const orderNotificationEmail = await getOrderNotificationEmail();
+      if (orderNotificationEmail && emailPayload) {
         sendEmail({
           to: orderNotificationEmail,
           templateKey: 'order_created',
-          variables: {
-            name: 'Equipe',
-            order_id: orderId,
-            order_total: `R$ ${subtotal.toFixed(2)}`,
-            order_status: paymentStatus,
-            items: `<ul>${itemsHtml}</ul>`,
-            payment_method: payment_method,
-            account_url: `${appUrl}/admin/pedidos`,
-          },
+          variables: emailPayload.adminVariables,
         }).catch((err) => console.error('Failed to send order_created team email:', err));
       }
 
@@ -3413,13 +3864,13 @@ async function startServer() {
       const payment = await paymentClient.get({ id: paymentId });
       const status = String(payment?.status || 'pending');
 
-      const order = db.get('SELECT id, user_id FROM orders WHERE transaction_id = ? LIMIT 1', paymentId) as any;
+      const order = await dbAsync.get('SELECT id, user_id FROM orders WHERE transaction_id = ? LIMIT 1', paymentId) as any;
       const orderId = order?.id ? Number(order.id) : null;
       if (orderId && Number(order.user_id) !== Number(user?.id)) {
         return res.status(403).json({ error: 'Pagamento nao pertence ao usuario autenticado' });
       }
       if (orderId && status === 'approved') {
-        db.run(`
+        await dbAsync.run(`
           UPDATE orders
           SET status = 'paid', paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
@@ -3436,17 +3887,17 @@ async function startServer() {
   app.post('/api/webhooks/mercadopago', async (req, res) => {
     const payload = req.body || {};
     try {
-      db.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify(payload), 'received');
-      const signatureCheck = verifyMercadoPagoWebhookSignature(req, payload);
+      await dbAsync.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify(payload), 'received');
+      const signatureCheck = await verifyMercadoPagoWebhookSignature(req, payload);
       if (!signatureCheck.ok) {
-        db.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify({ payload, reason: signatureCheck.reason }), 'invalid_signature');
+        await dbAsync.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify({ payload, reason: signatureCheck.reason }), 'invalid_signature');
         return res.status(401).json({ error: 'invalid_signature' });
       }
 
       const eventType = String((payload as any)?.type || (payload as any)?.action || '');
       const paymentId = String((payload as any)?.data?.id || (payload as any)?.id || '');
       const eventId = String(req.headers['x-request-id'] || `${eventType}:${paymentId || 'unknown'}`);
-      if (isWebhookAlreadyProcessed('mercadopago', eventId)) {
+      if (await isWebhookAlreadyProcessed('mercadopago', eventId)) {
         return res.sendStatus(200);
       }
 
@@ -3456,11 +3907,11 @@ async function startServer() {
           const payment = await paymentClient.get({ id: String(paymentId) });
           const paymentStatus = String(payment?.status || 'pending');
           const transactionId = String(payment?.id || paymentId);
-          const order = db.get('SELECT * FROM orders WHERE transaction_id = ? LIMIT 1', transactionId) as any;
+          const order = await dbAsync.get('SELECT * FROM orders WHERE transaction_id = ? LIMIT 1', transactionId) as any;
           if (order?.id) {
             const previousStatus = order.status;
             if (paymentStatus === 'approved') {
-              db.run(`
+              await dbAsync.run(`
                 UPDATE orders
                 SET status = 'paid', paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
@@ -3468,7 +3919,7 @@ async function startServer() {
 
               if (previousStatus !== 'paid') {
                 const appUrl = process.env.APP_URL || `http://${req.get('host')}`;
-                const itemsList = db.all('SELECT product_name, quantity, price FROM order_items WHERE order_id = ?', order.id) as any[];
+                const itemsList = await dbAsync.all('SELECT product_name, quantity, price FROM order_items WHERE order_id = ?', order.id) as any[];
                 const itemsHtml = itemsList.map(i => `<li>${i.quantity}x ${i.product_name} - R$ ${i.price.toFixed(2)}</li>`).join('');
 
                 sendEmail({
@@ -3483,7 +3934,7 @@ async function startServer() {
                   },
                 }).catch(err => console.error('Failed to send order_paid email:', err));
 
-                const orderNotificationEmail = getOrderNotificationEmail();
+                const orderNotificationEmail = await getOrderNotificationEmail();
                 if (orderNotificationEmail) {
                   sendEmail({
                     to: orderNotificationEmail,
@@ -3499,7 +3950,7 @@ async function startServer() {
                 }
               }
             } else if (paymentStatus === 'rejected' || paymentStatus === 'cancelled') {
-              db.run('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', paymentStatus, Number(order.id));
+              await dbAsync.run('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', paymentStatus, Number(order.id));
 
               if (previousStatus !== 'rejected' && previousStatus !== 'cancelled') {
                 const appUrl = process.env.APP_URL || `http://${req.get('host')}`;
@@ -3517,22 +3968,22 @@ async function startServer() {
             }
           }
 
-          markWebhookProcessed('mercadopago', eventId, paymentId);
-          db.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify({ eventType, paymentStatus, paymentId, eventId }), 'processed');
+          await markWebhookProcessed('mercadopago', eventId, paymentId);
+          await dbAsync.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify({ eventType, paymentStatus, paymentId, eventId }), 'processed');
         }
       }
     } catch (error) {
       console.error('MercadoPago webhook error:', error);
-      db.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify(payload), 'error');
+      await dbAsync.run('INSERT INTO webhook_logs (payload, status) VALUES (?, ?)', JSON.stringify(payload), 'error');
     }
 
     return res.sendStatus(200);
   });
-  app.get('/api/customer/account', authenticate, (req, res) => {
+  app.get('/api/customer/account', authenticate, async (req, res) => {
     const user = (req as any).user;
     try {
-      const lgpd = resolveLgpdSettings();
-      const profile = db.get(`
+      const lgpd = await resolveLgpdSettings();
+      const profile = await dbAsync.get(`
         SELECT
           u.id,
           u.name,
@@ -3567,7 +4018,7 @@ async function startServer() {
         LIMIT 1
       `, user.id) as any;
 
-      const summary = db.get(`
+      const summary = await dbAsync.get(`
         SELECT
           (
             SELECT COUNT(*)
@@ -3605,7 +4056,7 @@ async function startServer() {
         user: profile || null,
         lgpd: {
           enabled: lgpd.enabled,
-          compliance: ensureUserLgpdCompliance(Number(user.id)),
+          compliance: await ensureUserLgpdCompliance(Number(user.id)),
         },
         summary: {
           orders_count: Number(summary?.orders_count || 0),
@@ -3623,10 +4074,10 @@ async function startServer() {
     }
   });
 
-  app.get('/api/customer/orders', authenticate, (req, res) => {
+  app.get('/api/customer/orders', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
-      const orders = db.all(`
+      const orders = await dbAsync.all(`
         SELECT
           o.*,
           COALESCE(SUM(oi.quantity), 0) AS total_items
@@ -3644,9 +4095,9 @@ async function startServer() {
   });
 
   // API Routes - ADMIN ORDERS
-  app.get('/api/admin/orders', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/orders', authenticate, isAdmin, async (req, res) => {
     try {
-      const orders = db.all(`
+      const orders = await dbAsync.all(`
         SELECT 
           o.*, 
           COALESCE(u.name, o.customer_name) as user_name, 
@@ -3663,7 +4114,7 @@ async function startServer() {
   });
 
 
-  app.get('/api/customer/orders/:id', authenticate, (req, res) => {
+  app.get('/api/customer/orders/:id', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
       const orderId = Number(req.params.id);
@@ -3671,7 +4122,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Pedido invalido' });
       }
 
-      const order = db.get(`
+      const order = await dbAsync.get(`
         SELECT
           o.id,
           o.created_at,
@@ -3689,7 +4140,7 @@ async function startServer() {
         return res.status(404).json({ error: 'Pedido nao encontrado' });
       }
 
-      const items = db.all(`
+      const items = await dbAsync.all(`
         SELECT
           oi.id,
           oi.product_id,
@@ -3768,15 +4219,15 @@ async function startServer() {
         return deny(400, 'Caminho do arquivo e obrigatorio');
       }
 
-      const freshUser = getUserById(Number(user?.id || 0));
+      const freshUser = await getUserById(Number(user?.id || 0));
       if (!freshUser) {
         return deny(401, 'Usuario nao encontrado');
       }
-      if (!canUserAccessDownloads(Number(freshUser.id), String(freshUser.email || ''), freshUser.email_verified_at)) {
+      if (!(await canUserAccessDownloads(Number(freshUser.id), String(freshUser.email || ''), freshUser.email_verified_at))) {
         return deny(403, 'Confirme seu e-mail para acessar downloads.', { code: 'EMAIL_NOT_VERIFIED' });
       }
 
-      const lgpdCompliance = ensureUserLgpdCompliance(Number(freshUser.id));
+      const lgpdCompliance = await ensureUserLgpdCompliance(Number(freshUser.id));
       if (!lgpdCompliance.ok) {
         return deny(403, 'Aceite as politicas LGPD para acessar seus downloads.', {
           code: lgpdCompliance.code,
@@ -3826,7 +4277,7 @@ async function startServer() {
 
       const placeholders = filePathCandidates.map(() => '?').join(', ');
       const statusPlaceholders = getDownloadStatusPlaceholders();
-      const ownedDownload = db.get(`
+      const ownedDownload = await dbAsync.get(`
         SELECT
           o.id AS order_id,
           oi.id AS order_item_id,
@@ -3961,23 +4412,23 @@ async function startServer() {
     }
   });
 
-  app.get('/api/customer/downloads', authenticate, (req, res) => {
+  app.get('/api/customer/downloads', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
-      const freshUser = getUserById(Number(user?.id || 0));
+      const freshUser = await getUserById(Number(user?.id || 0));
       if (!freshUser) {
         return res.status(401).json({ error: 'Usuario nao encontrado' });
       }
-      if (!canUserAccessDownloads(Number(freshUser.id), String(freshUser.email || ''), freshUser.email_verified_at)) {
+      if (!(await canUserAccessDownloads(Number(freshUser.id), String(freshUser.email || ''), freshUser.email_verified_at))) {
         return res.status(403).json({ error: 'Confirme seu e-mail para acessar downloads.', code: 'EMAIL_NOT_VERIFIED' });
       }
-      const lgpdCompliance = ensureUserLgpdCompliance(Number(freshUser.id));
+      const lgpdCompliance = await ensureUserLgpdCompliance(Number(freshUser.id));
       if (!lgpdCompliance.ok) {
         return res.status(403).json({ error: 'Aceite as politicas LGPD para acessar seus downloads.', code: lgpdCompliance.code, missing: lgpdCompliance.missing });
       }
 
       const statusPlaceholders = getDownloadStatusPlaceholders();
-      const downloads = db.all(`
+      const downloads = await dbAsync.all(`
         SELECT
           oi.id AS download_id,
           o.id AS order_id,
@@ -4044,13 +4495,13 @@ async function startServer() {
         return res.status(400).json({ error: 'E-mail invalido' });
       }
 
-      const duplicate = db.get('SELECT id FROM users WHERE email = ? AND id <> ?', normalizedEmail, user.id) as any;
+      const duplicate = await dbAsync.get('SELECT id FROM users WHERE email = ? AND id <> ?', normalizedEmail, user.id) as any;
       if (duplicate) {
         return res.status(409).json({ error: 'Este e-mail ja esta em uso por outra conta' });
       }
 
-      db.transaction(() => {
-        db.run(`
+      await dbAsync.transaction(async (conn) => {
+        await conn.execute(`
           UPDATE users
           SET
             name = ?,
@@ -4061,17 +4512,18 @@ async function startServer() {
             cpf = ?,
             updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `, normalizedDisplayName, normalizedEmail, normalizedFirstName || null, normalizedLastName || null, normalizedPhone || null, normalizedCpf || null, user.id);
+        `, [normalizedDisplayName, normalizedEmail, normalizedFirstName || null, normalizedLastName || null, normalizedPhone || null, normalizedCpf || null, user.id]);
 
-        const customer = db.get('SELECT id FROM customers WHERE user_id = ?', user.id) as any;
+        const [customerRows] = await conn.execute('SELECT id FROM customers WHERE user_id = ?', [user.id]);
+        const customer = Array.isArray(customerRows) ? (customerRows as any[])[0] : undefined;
         if (customer?.id) {
-          db.run('UPDATE customers SET phone = ?, cpf = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', normalizedPhone || null, normalizedCpf || null, user.id);
+          await conn.execute('UPDATE customers SET phone = ?, cpf = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', [normalizedPhone || null, normalizedCpf || null, user.id]);
         } else {
-          db.run('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', user.id, normalizedPhone || null, normalizedCpf || null);
+          await conn.execute('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', [user.id, normalizedPhone || null, normalizedCpf || null]);
         }
-      })();
+      });
 
-      const updated = db.get(`
+      const updated = await dbAsync.get(`
         SELECT id, name, email, role, first_name, last_name, phone, cpf, avatar_url
         FROM users WHERE id = ? LIMIT 1
       `, user.id) as any;
@@ -4098,7 +4550,7 @@ async function startServer() {
         return res.status(400).json({ error: 'A confirmacao da nova senha nao confere' });
       }
 
-      const dbUser = db.get('SELECT id, password, email, name FROM users WHERE id = ? LIMIT 1', user.id) as any;
+      const dbUser = await dbAsync.get('SELECT id, password, email, name FROM users WHERE id = ? LIMIT 1', user.id) as any;
       if (!dbUser) {
         return res.status(404).json({ error: 'Usuario nao encontrado' });
       }
@@ -4109,7 +4561,7 @@ async function startServer() {
       }
 
       const hashed = await hashPassword(String(new_password));
-      db.run('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', hashed, user.id);
+      await dbAsync.run('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', hashed, user.id);
 
       return res.json({ success: true, message: 'Senha atualizada com sucesso' });
     } catch (error) {
@@ -4118,7 +4570,7 @@ async function startServer() {
     }
   });
 
-  app.put('/api/customer/addresses', authenticate, (req, res) => {
+  app.put('/api/customer/addresses', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
       const billing = req.body?.billing || {};
@@ -4139,9 +4591,9 @@ async function startServer() {
         shipping_country: String(shipping.country || '').trim() || null,
       };
 
-      const customer = db.get('SELECT id FROM customers WHERE user_id = ?', user.id) as any;
+      const customer = await dbAsync.get('SELECT id FROM customers WHERE user_id = ?', user.id) as any;
       if (customer?.id) {
-        db.run(`
+        await dbAsync.run(`
           UPDATE customers
           SET
             billing_address = ?,
@@ -4184,7 +4636,7 @@ async function startServer() {
           user.id,
         );
       } else {
-        db.run(`
+        await dbAsync.run(`
           INSERT INTO customers (
             user_id, phone, cpf,
             billing_address, billing_city, billing_neighborhood, billing_state, billing_zip, billing_country,
@@ -4221,14 +4673,14 @@ async function startServer() {
     }
   });
 
-  app.post('/api/customer/avatar', authenticate, upload.single('avatar'), (req, res) => {
+  app.post('/api/customer/avatar', authenticate, upload.single('avatar'), async (req, res) => {
     try {
       const user = (req as any).user;
       if (!req.file?.filename) {
         return res.status(400).json({ error: 'Arquivo de avatar nao enviado' });
       }
       const avatarUrl = `/uploads/${req.file.filename}`;
-      db.run('UPDATE users SET avatar_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', avatarUrl, user.id);
+      await dbAsync.run('UPDATE users SET avatar_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', avatarUrl, user.id);
       return res.json({ success: true, avatar_url: avatarUrl });
     } catch (error) {
       console.error('Customer Upload Avatar Error:', error);
@@ -4236,10 +4688,10 @@ async function startServer() {
     }
   });
 
-  app.get('/api/lgpd/policies/active', (req, res) => {
+  app.get('/api/lgpd/policies/active', async (req, res) => {
     try {
-      const lgpd = resolveLgpdSettings();
-      const policies = getActivePolicies();
+      const lgpd = await resolveLgpdSettings();
+      const policies = await getActivePolicies();
       res.json({
         enabled: lgpd.enabled,
         versions: {
@@ -4255,7 +4707,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/lgpd/cookies/consent', (req, res) => {
+  app.post('/api/lgpd/cookies/consent', async (req, res) => {
     try {
       const {
         necessary = true,
@@ -4266,8 +4718,8 @@ async function startServer() {
       } = req.body || {};
       const user = (req as any).user || null;
       const consentId = String(consent_id || crypto.randomBytes(16).toString('hex'));
-      const lgpd = resolveLgpdSettings();
-      db.run(
+      const lgpd = await resolveLgpdSettings();
+      await dbAsync.run(
         `INSERT INTO lgpd_cookie_consents (
           user_id, consent_id, necessary, statistics, marketing, preferences, consent_version, ip, user_agent
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -4291,14 +4743,14 @@ async function startServer() {
         String(req.headers['user-agent'] || '').slice(0, 500),
       );
       if (user?.id) {
-        recordPolicyAcceptance({
+        await recordPolicyAcceptance({
           userId: Number(user.id),
           policyType: 'cookies',
           policyVersion: lgpd.policyVersionCookies,
           req,
           source: 'cookie_banner',
         });
-        upsertUserConsent({
+        await upsertUserConsent({
           userId: Number(user.id),
           consentKey: 'cookies_policy',
           granted: true,
@@ -4316,32 +4768,32 @@ async function startServer() {
     }
   });
 
-  app.get('/api/customer/privacy', authenticate, (req, res) => {
+  app.get('/api/customer/privacy', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
-      const lgpd = resolveLgpdSettings();
-      const consents = db.all(
+      const lgpd = await resolveLgpdSettings();
+      const consents = await dbAsync.all(
         `SELECT consent_key, granted, legal_basis, purpose, source, policy_version, updated_at, revoked_at
          FROM lgpd_consents
          WHERE user_id = ?
          ORDER BY updated_at DESC`,
         user.id,
       );
-      const acceptances = db.all(
+      const acceptances = await dbAsync.all(
         `SELECT policy_type, policy_version, accepted_at, source
          FROM lgpd_user_acceptances
          WHERE user_id = ?
          ORDER BY accepted_at DESC`,
         user.id,
       );
-      const requests = db.all(
+      const requests = await dbAsync.all(
         `SELECT id, request_type, status, payload, response_notes, created_at, handled_at
          FROM lgpd_requests
          WHERE user_id = ?
          ORDER BY created_at DESC`,
         user.id,
       );
-      const compliance = ensureUserLgpdCompliance(Number(user.id));
+      const compliance = await ensureUserLgpdCompliance(Number(user.id));
       res.json({
         settings: lgpd,
         compliance,
@@ -4359,8 +4811,8 @@ async function startServer() {
     try {
       const user = (req as any).user;
       const body = req.body || {};
-      const lgpd = resolveLgpdSettings();
-      const requiredVersions = resolveRequiredPolicyVersions(lgpd);
+      const lgpd = await resolveLgpdSettings();
+      const requiredVersions = await resolveRequiredPolicyVersions(lgpd);
 
       const hasMarketingInput =
         Object.prototype.hasOwnProperty.call(body, 'marketing') ||
@@ -4401,7 +4853,7 @@ async function startServer() {
       );
 
       if (hasMarketingInput) {
-        upsertUserConsent({
+        await upsertUserConsent({
           userId: Number(user.id),
           consentKey: 'marketing_communications',
           granted: marketingAccepted,
@@ -4418,14 +4870,14 @@ async function startServer() {
       const shouldAcceptCookies = acceptRequired ? lgpd.requireCookieConsent : cookiesAccepted;
 
       if (shouldAcceptPrivacy) {
-        recordPolicyAcceptance({
+        await recordPolicyAcceptance({
           userId: Number(user.id),
           policyType: 'privacy',
           policyVersion: requiredVersions.privacy,
           req,
           source: 'my_account',
         });
-        upsertUserConsent({
+        await upsertUserConsent({
           userId: Number(user.id),
           consentKey: 'privacy_policy',
           granted: true,
@@ -4438,14 +4890,14 @@ async function startServer() {
       }
 
       if (shouldAcceptTerms) {
-        recordPolicyAcceptance({
+        await recordPolicyAcceptance({
           userId: Number(user.id),
           policyType: 'terms',
           policyVersion: requiredVersions.terms,
           req,
           source: 'my_account',
         });
-        upsertUserConsent({
+        await upsertUserConsent({
           userId: Number(user.id),
           consentKey: 'terms_of_use',
           granted: true,
@@ -4457,14 +4909,14 @@ async function startServer() {
         });
       }
       if (shouldAcceptCookies) {
-        recordPolicyAcceptance({
+        await recordPolicyAcceptance({
           userId: Number(user.id),
           policyType: 'cookies',
           policyVersion: requiredVersions.cookies,
           req,
           source: 'my_account',
         });
-        upsertUserConsent({
+        await upsertUserConsent({
           userId: Number(user.id),
           consentKey: 'cookies_policy',
           granted: true,
@@ -4476,7 +4928,7 @@ async function startServer() {
         });
       }
 
-      const freshUser = db.get('SELECT id, name, email FROM users WHERE id = ?', Number(user.id)) as any;
+      const freshUser = await dbAsync.get('SELECT id, name, email FROM users WHERE id = ?', Number(user.id)) as any;
       if (hasMarketingInput && freshUser?.email) {
         sendEmail({
           to: freshUser.email,
@@ -4497,7 +4949,7 @@ async function startServer() {
           cookies: shouldAcceptCookies,
           marketing: hasMarketingInput ? marketingAccepted : null,
         },
-        compliance: ensureUserLgpdCompliance(Number(user.id)),
+        compliance: await ensureUserLgpdCompliance(Number(user.id)),
       });
     } catch (error) {
       console.error('Update privacy consents error:', error);
@@ -4505,7 +4957,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/customer/privacy/request', authenticate, (req, res) => {
+  app.post('/api/customer/privacy/request', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
       const { request_type, details = '' } = req.body || {};
@@ -4515,7 +4967,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Tipo de solicitacao invalido' });
       }
 
-      const result = db.run(
+      const result = await dbAsync.run(
         `INSERT INTO lgpd_requests (user_id, request_type, status, payload)
          VALUES (?, ?, 'pending', ?)`,
         Number(user.id),
@@ -4524,7 +4976,7 @@ async function startServer() {
       );
 
       const requestId = Number(result.lastInsertRowid);
-      logLgpdEvent({
+      await logLgpdEvent({
         req,
         userId: Number(user.id),
         actorUserId: Number(user.id),
@@ -4533,7 +4985,7 @@ async function startServer() {
         details: { request_id: requestId, request_type: normalizedType },
       });
 
-      const freshUser = db.get('SELECT id, name, email FROM users WHERE id = ?', Number(user.id)) as any;
+      const freshUser = await dbAsync.get('SELECT id, name, email FROM users WHERE id = ?', Number(user.id)) as any;
       if (freshUser?.email) {
         sendEmail({
           to: freshUser.email,
@@ -4557,10 +5009,10 @@ async function startServer() {
     try {
       const user = (req as any).user;
       const format = String(req.query.format || 'json').toLowerCase();
-      const payload = buildUserLgpdExportPayload(Number(user.id));
+      const payload = await buildUserLgpdExportPayload(Number(user.id));
       if (!payload?.user) return res.status(404).json({ error: 'Usuario nao encontrado' });
 
-      logLgpdEvent({
+      await logLgpdEvent({
         req,
         userId: Number(user.id),
         actorUserId: Number(user.id),
@@ -4659,9 +5111,9 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/lgpd/policies', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/lgpd/policies', authenticate, isAdmin, async (req, res) => {
     try {
-      const policies = db.all(
+      const policies = await dbAsync.all(
         `SELECT id, policy_type, version, title, content, is_active, force_reaccept, published_at, created_at, updated_at
          FROM lgpd_policies
          ORDER BY policy_type ASC, created_at DESC`,
@@ -4673,7 +5125,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/lgpd/policies/diff', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/lgpd/policies/diff', authenticate, isAdmin, async (req, res) => {
     try {
       const leftId = Number(req.query.left || 0);
       const rightId = Number(req.query.right || 0);
@@ -4681,11 +5133,11 @@ async function startServer() {
         return res.status(400).json({ error: 'Parametros left e right sao obrigatorios' });
       }
 
-      const leftPolicy = db.get(
+      const leftPolicy = await dbAsync.get(
         'SELECT id, policy_type, version, title, content, is_active, updated_at FROM lgpd_policies WHERE id = ? LIMIT 1',
         leftId,
       ) as any;
-      const rightPolicy = db.get(
+      const rightPolicy = await dbAsync.get(
         'SELECT id, policy_type, version, title, content, is_active, updated_at FROM lgpd_policies WHERE id = ? LIMIT 1',
         rightId,
       ) as any;
@@ -4737,10 +5189,10 @@ async function startServer() {
         return res.status(400).json({ error: 'ID do usuario invalido' });
       }
 
-      const payload = buildUserLgpdExportPayload(targetUserId);
+      const payload = await buildUserLgpdExportPayload(targetUserId);
       if (!payload?.user) return res.status(404).json({ error: 'Usuario nao encontrado' });
 
-      logLgpdEvent({
+      await logLgpdEvent({
         req,
         userId: targetUserId,
         actorUserId: Number(adminUser.id),
@@ -4839,7 +5291,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/admin/lgpd/policies', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/lgpd/policies', authenticate, isAdmin, async (req, res) => {
     try {
       const adminUser = (req as any).user;
       const { policy_type, version, title, content, is_active = false, force_reaccept = false } = req.body || {};
@@ -4851,7 +5303,7 @@ async function startServer() {
         return res.status(400).json({ error: 'version, title e content sao obrigatorios' });
       }
 
-      const result = db.run(
+      const result = await dbAsync.run(
         `INSERT INTO lgpd_policies (policy_type, version, title, content, is_active, force_reaccept, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         normalizedType,
@@ -4864,25 +5316,25 @@ async function startServer() {
       );
 
       if (parseBooleanSetting(is_active, false)) {
-        db.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ? AND id <> ?', normalizedType, Number(result.lastInsertRowid));
-        if (normalizedType === 'privacy') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', String(version).trim());
-        if (normalizedType === 'terms') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', String(version).trim());
-        if (normalizedType === 'cookies') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', String(version).trim());
+        await dbAsync.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ? AND id <> ?', normalizedType, Number(result.lastInsertRowid));
+        if (normalizedType === 'privacy') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', String(version).trim());
+        if (normalizedType === 'terms') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', String(version).trim());
+        if (normalizedType === 'cookies') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', String(version).trim());
       }
 
       if (parseBooleanSetting(force_reaccept, false)) {
-        db.run('UPDATE users SET privacy_reaccept_required = 1 WHERE role = "customer"');
+        await dbAsync.run('UPDATE users SET privacy_reaccept_required = 1 WHERE role = "customer"');
       }
 
       if (parseBooleanSetting(is_active, false)) {
-        const lgpd = resolveLgpdSettings();
+        const lgpd = await resolveLgpdSettings();
         const policyUrl =
           normalizedType === 'privacy'
             ? lgpd.privacyUrl
             : normalizedType === 'terms'
               ? lgpd.termsUrl
               : lgpd.cookiePolicyUrl;
-        notifyCustomersPolicyUpdated({
+        await notifyCustomersPolicyUpdated({
           policyType: normalizedType as 'privacy' | 'terms' | 'cookies',
           policyVersion: String(version).trim(),
           policyUrl,
@@ -4891,7 +5343,7 @@ async function startServer() {
         });
       }
 
-      logLgpdEvent({
+      await logLgpdEvent({
         req,
         actorUserId: Number(adminUser.id),
         eventType: 'policy',
@@ -4909,7 +5361,7 @@ async function startServer() {
     }
   });
 
-  app.put('/api/admin/lgpd/policies/:id', authenticate, isAdmin, (req, res) => {
+  app.put('/api/admin/lgpd/policies/:id', authenticate, isAdmin, async (req, res) => {
     try {
       const adminUser = (req as any).user;
       const policyId = Number(req.params.id);
@@ -4917,7 +5369,7 @@ async function startServer() {
         return res.status(400).json({ error: 'ID da politica invalido' });
       }
 
-      const currentPolicy = db.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', policyId) as any;
+      const currentPolicy = await dbAsync.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', policyId) as any;
       if (!currentPolicy) {
         return res.status(404).json({ error: 'Politica nao encontrada' });
       }
@@ -4943,7 +5395,7 @@ async function startServer() {
         return res.status(400).json({ error: 'version, title e content sao obrigatorios' });
       }
 
-      const duplicated = db.get(
+      const duplicated = await dbAsync.get(
         'SELECT id FROM lgpd_policies WHERE policy_type = ? AND version = ? AND id <> ? LIMIT 1',
         normalizedType,
         normalizedVersion,
@@ -4953,7 +5405,7 @@ async function startServer() {
         return res.status(409).json({ error: 'Ja existe outra politica com este tipo e versao' });
       }
 
-      db.run(
+      await dbAsync.run(
         `UPDATE lgpd_policies
          SET policy_type = ?, version = ?, title = ?, content = ?, is_active = ?, force_reaccept = ?
          WHERE id = ?`,
@@ -4967,25 +5419,25 @@ async function startServer() {
       );
 
       if (parseBooleanSetting(is_active, false)) {
-        db.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ? AND id <> ?', normalizedType, policyId);
-        if (normalizedType === 'privacy') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', normalizedVersion);
-        if (normalizedType === 'terms') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', normalizedVersion);
-        if (normalizedType === 'cookies') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', normalizedVersion);
+        await dbAsync.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ? AND id <> ?', normalizedType, policyId);
+        if (normalizedType === 'privacy') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', normalizedVersion);
+        if (normalizedType === 'terms') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', normalizedVersion);
+        if (normalizedType === 'cookies') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', normalizedVersion);
       }
 
       if (parseBooleanSetting(force_reaccept, false)) {
-        db.run('UPDATE users SET privacy_reaccept_required = 1 WHERE role = "customer"');
+        await dbAsync.run('UPDATE users SET privacy_reaccept_required = 1 WHERE role = "customer"');
       }
 
       if (parseBooleanSetting(is_active, false)) {
-        const lgpd = resolveLgpdSettings();
+        const lgpd = await resolveLgpdSettings();
         const policyUrl =
           normalizedType === 'privacy'
             ? lgpd.privacyUrl
             : normalizedType === 'terms'
               ? lgpd.termsUrl
               : lgpd.cookiePolicyUrl;
-        notifyCustomersPolicyUpdated({
+        await notifyCustomersPolicyUpdated({
           policyType: normalizedType as 'privacy' | 'terms' | 'cookies',
           policyVersion: normalizedVersion,
           policyUrl,
@@ -4994,7 +5446,7 @@ async function startServer() {
         });
       }
 
-      logLgpdEvent({
+      await logLgpdEvent({
         req,
         actorUserId: Number(adminUser.id),
         eventType: 'policy',
@@ -5017,7 +5469,7 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/admin/lgpd/policies/:id', authenticate, isAdmin, (req, res) => {
+  app.delete('/api/admin/lgpd/policies/:id', authenticate, isAdmin, async (req, res) => {
     try {
       const adminUser = (req as any).user;
       const policyId = Number(req.params.id);
@@ -5025,7 +5477,7 @@ async function startServer() {
         return res.status(400).json({ error: 'ID da politica invalido' });
       }
 
-      const policy = db.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', policyId) as any;
+      const policy = await dbAsync.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', policyId) as any;
       if (!policy) {
         return res.status(404).json({ error: 'Politica nao encontrada' });
       }
@@ -5034,7 +5486,7 @@ async function startServer() {
       const isActive = Number(policy.is_active) === 1;
 
       if (isActive) {
-        const replacement = db.get(
+        const replacement = await dbAsync.get(
           `SELECT id
              FROM lgpd_policies
             WHERE policy_type = ?
@@ -5051,20 +5503,20 @@ async function startServer() {
           });
         }
 
-        db.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ?', policyType);
-        db.run('UPDATE lgpd_policies SET is_active = 1 WHERE id = ?', Number(replacement.id));
+        await dbAsync.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ?', policyType);
+        await dbAsync.run('UPDATE lgpd_policies SET is_active = 1 WHERE id = ?', Number(replacement.id));
 
-        const replacementPolicy = db.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', Number(replacement.id)) as any;
+        const replacementPolicy = await dbAsync.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', Number(replacement.id)) as any;
         if (replacementPolicy) {
-          if (policyType === 'privacy') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', String(replacementPolicy.version || '1.0'));
-          if (policyType === 'terms') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', String(replacementPolicy.version || '1.0'));
-          if (policyType === 'cookies') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', String(replacementPolicy.version || '1.0'));
+          if (policyType === 'privacy') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', String(replacementPolicy.version || '1.0'));
+          if (policyType === 'terms') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', String(replacementPolicy.version || '1.0'));
+          if (policyType === 'cookies') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', String(replacementPolicy.version || '1.0'));
         }
       }
 
-      db.run('DELETE FROM lgpd_policies WHERE id = ?', policyId);
+      await dbAsync.run('DELETE FROM lgpd_policies WHERE id = ?', policyId);
 
-      logLgpdEvent({
+      await logLgpdEvent({
         req,
         actorUserId: Number(adminUser.id),
         eventType: 'policy',
@@ -5084,31 +5536,31 @@ async function startServer() {
     }
   });
 
-  app.post('/api/admin/lgpd/policies/:id/activate', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/lgpd/policies/:id/activate', authenticate, isAdmin, async (req, res) => {
     try {
       const adminUser = (req as any).user;
-      const policy = db.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', Number(req.params.id)) as any;
+      const policy = await dbAsync.get('SELECT * FROM lgpd_policies WHERE id = ? LIMIT 1', Number(req.params.id)) as any;
       if (!policy) return res.status(404).json({ error: 'Politica nao encontrada' });
 
-      db.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ?', policy.policy_type);
-      db.run('UPDATE lgpd_policies SET is_active = 1 WHERE id = ?', Number(policy.id));
+      await dbAsync.run('UPDATE lgpd_policies SET is_active = 0 WHERE policy_type = ?', policy.policy_type);
+      await dbAsync.run('UPDATE lgpd_policies SET is_active = 1 WHERE id = ?', Number(policy.id));
 
-      if (policy.policy_type === 'privacy') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', String(policy.version));
-      if (policy.policy_type === 'terms') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', String(policy.version));
-      if (policy.policy_type === 'cookies') db.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', String(policy.version));
+      if (policy.policy_type === 'privacy') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_privacy"', String(policy.version));
+      if (policy.policy_type === 'terms') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_terms"', String(policy.version));
+      if (policy.policy_type === 'cookies') await dbAsync.run('UPDATE settings SET value = ? WHERE `key` = "lgpd_policy_version_cookies"', String(policy.version));
 
       if (parseBooleanSetting(req.body?.force_reaccept, false) || Number(policy.force_reaccept) === 1) {
-        db.run('UPDATE users SET privacy_reaccept_required = 1 WHERE role = "customer"');
+        await dbAsync.run('UPDATE users SET privacy_reaccept_required = 1 WHERE role = "customer"');
       }
 
-      const lgpd = resolveLgpdSettings();
+      const lgpd = await resolveLgpdSettings();
       const policyUrl =
         policy.policy_type === 'privacy'
           ? lgpd.privacyUrl
           : policy.policy_type === 'terms'
             ? lgpd.termsUrl
             : lgpd.cookiePolicyUrl;
-      notifyCustomersPolicyUpdated({
+      await notifyCustomersPolicyUpdated({
         policyType: String(policy.policy_type) as 'privacy' | 'terms' | 'cookies',
         policyVersion: String(policy.version),
         policyUrl,
@@ -5116,7 +5568,7 @@ async function startServer() {
         req,
       });
 
-      logLgpdEvent({
+      await logLgpdEvent({
         req,
         actorUserId: Number(adminUser.id),
         eventType: 'policy',
@@ -5131,7 +5583,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/lgpd/consents', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/lgpd/consents', authenticate, isAdmin, async (req, res) => {
     try {
       const page = Math.max(1, Number(req.query.page || 1));
       const limit = Math.min(500, Math.max(10, Number(req.query.limit || 100)));
@@ -5178,7 +5630,7 @@ async function startServer() {
       }
 
       const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-      const countRow = db.get(
+      const countRow = await dbAsync.get(
         `SELECT COUNT(*) AS total
          FROM lgpd_consents c
          JOIN users u ON u.id = c.user_id
@@ -5187,7 +5639,7 @@ async function startServer() {
       ) as any;
       const total = Number(countRow?.total || 0);
       const totalPages = Math.max(1, Math.ceil(total / limit));
-      const rows = db.all(
+      const rows = await dbAsync.all(
         `SELECT c.id, c.user_id, u.name AS user_name, u.email AS user_email, c.consent_key, c.granted, c.legal_basis,
                 c.source, c.policy_version, c.updated_at, c.revoked_at, c.ip
          FROM lgpd_consents c
@@ -5220,7 +5672,7 @@ async function startServer() {
     }
   });
 
-  app.put('/api/admin/lgpd/consents/:id', authenticate, isAdmin, (req, res) => {
+  app.put('/api/admin/lgpd/consents/:id', authenticate, isAdmin, async (req, res) => {
     try {
       const adminUser = (req as any).user;
       const consentId = Number(req.params.id);
@@ -5228,7 +5680,7 @@ async function startServer() {
         return res.status(400).json({ error: 'ID de consentimento invÃ¡lido' });
       }
 
-      const consent = db.get(
+      const consent = await dbAsync.get(
         `SELECT c.*, u.email AS user_email
          FROM lgpd_consents c
          LEFT JOIN users u ON u.id = c.user_id
@@ -5244,7 +5696,7 @@ async function startServer() {
       const granted = parseBooleanSetting(req.body?.granted, false);
       const reason = String(req.body?.reason || '').trim().slice(0, 300);
 
-      upsertUserConsent({
+      await upsertUserConsent({
         userId: Number(consent.user_id),
         consentKey: String(consent.consent_key || ''),
         granted,
@@ -5255,7 +5707,7 @@ async function startServer() {
         policyVersion: consent.policy_version ? String(consent.policy_version) : null,
       });
 
-      logLgpdEvent({
+      await logLgpdEvent({
         req,
         userId: Number(consent.user_id),
         actorUserId: Number(adminUser.id),
@@ -5277,7 +5729,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/lgpd/requests', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/lgpd/requests', authenticate, isAdmin, async (req, res) => {
     try {
       const page = Math.max(1, Number(req.query.page || 1));
       const limit = Math.min(500, Math.max(10, Number(req.query.limit || 100)));
@@ -5310,7 +5762,7 @@ async function startServer() {
         params.push(to);
       }
       const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-      const countRow = db.get(
+      const countRow = await dbAsync.get(
         `SELECT COUNT(*) AS total
          FROM lgpd_requests r
          JOIN users u ON u.id = r.user_id
@@ -5319,7 +5771,7 @@ async function startServer() {
       ) as any;
       const total = Number(countRow?.total || 0);
       const totalPages = Math.max(1, Math.ceil(total / limit));
-      const rows = db.all(
+      const rows = await dbAsync.all(
         `SELECT r.*, u.name AS user_name, u.email AS user_email, a.name AS handled_by_name
          FROM lgpd_requests r
          JOIN users u ON u.id = r.user_id
@@ -5361,11 +5813,11 @@ async function startServer() {
         return res.status(400).json({ error: 'Status invalido' });
       }
 
-      const requestRow = db.get('SELECT * FROM lgpd_requests WHERE id = ?', requestId) as any;
+      const requestRow = await dbAsync.get('SELECT * FROM lgpd_requests WHERE id = ?', requestId) as any;
       if (!requestRow) return res.status(404).json({ error: 'Solicitacao nao encontrada' });
-      const targetUser = db.get('SELECT id, name, email FROM users WHERE id = ?', Number(requestRow.user_id)) as any;
+      const targetUser = await dbAsync.get('SELECT id, name, email FROM users WHERE id = ?', Number(requestRow.user_id)) as any;
 
-      db.run(
+      await dbAsync.run(
         `UPDATE lgpd_requests
          SET status = ?, response_notes = ?, handled_by = ?, handled_at = CASE WHEN ? IN ('completed','refused') THEN CURRENT_TIMESTAMP ELSE handled_at END
          WHERE id = ?`,
@@ -5378,8 +5830,8 @@ async function startServer() {
 
       if (normalizedStatus === 'completed' && String(requestRow.request_type) === 'delete') {
         const targetUserId = Number(requestRow.user_id);
-        const targetUserBeforeAnonymize = db.get('SELECT email, name FROM users WHERE id = ?', targetUserId) as any;
-        db.run(
+        const targetUserBeforeAnonymize = await dbAsync.get('SELECT email, name FROM users WHERE id = ?', targetUserId) as any;
+        await dbAsync.run(
           `UPDATE users
            SET name = CONCAT('Usuario ', id), email = CONCAT('anon+', id, '@anon.local'),
                phone = NULL, cpf = NULL, first_name = NULL, last_name = NULL,
@@ -5387,13 +5839,13 @@ async function startServer() {
            WHERE id = ?`,
           targetUserId,
         );
-        db.run('UPDATE customers SET phone = NULL, cpf = NULL, address = NULL, city = NULL, state = NULL, zip = NULL, country = NULL, billing_address = NULL, billing_city = NULL, billing_neighborhood = NULL, billing_state = NULL, billing_zip = NULL, billing_country = NULL, shipping_address = NULL, shipping_city = NULL, shipping_neighborhood = NULL, shipping_state = NULL, shipping_zip = NULL, shipping_country = NULL WHERE user_id = ?', targetUserId);
-        db.run('DELETE FROM favorites WHERE user_id = ?', targetUserId);
-        db.run('UPDATE lgpd_consents SET granted = 0, revoked_at = CURRENT_TIMESTAMP WHERE user_id = ?', targetUserId);
-        db.run('DELETE FROM download_tokens WHERE user_id = ?', targetUserId);
-        db.run('DELETE FROM email_verification_tokens WHERE user_id = ?', targetUserId);
-        db.run('DELETE FROM password_reset_tokens WHERE user_id = ?', targetUserId);
-        db.run('DELETE FROM login_attempts WHERE email = ?', String(targetUserBeforeAnonymize?.email || ''));
+        await dbAsync.run('UPDATE customers SET phone = NULL, cpf = NULL, address = NULL, city = NULL, state = NULL, zip = NULL, country = NULL, billing_address = NULL, billing_city = NULL, billing_neighborhood = NULL, billing_state = NULL, billing_zip = NULL, billing_country = NULL, shipping_address = NULL, shipping_city = NULL, shipping_neighborhood = NULL, shipping_state = NULL, shipping_zip = NULL, shipping_country = NULL WHERE user_id = ?', targetUserId);
+        await dbAsync.run('DELETE FROM favorites WHERE user_id = ?', targetUserId);
+        await dbAsync.run('UPDATE lgpd_consents SET granted = 0, revoked_at = CURRENT_TIMESTAMP WHERE user_id = ?', targetUserId);
+        await dbAsync.run('DELETE FROM download_tokens WHERE user_id = ?', targetUserId);
+        await dbAsync.run('DELETE FROM email_verification_tokens WHERE user_id = ?', targetUserId);
+        await dbAsync.run('DELETE FROM password_reset_tokens WHERE user_id = ?', targetUserId);
+        await dbAsync.run('DELETE FROM login_attempts WHERE email = ?', String(targetUserBeforeAnonymize?.email || ''));
 
         if (targetUserBeforeAnonymize?.email) {
           sendEmail({
@@ -5405,7 +5857,7 @@ async function startServer() {
       }
 
       if (normalizedStatus === 'completed' && String(requestRow.request_type) === 'export' && targetUser?.email) {
-        const settings = loadSettingsMap(['app_url', 'lgpd_export_ttl_hours']);
+        const settings = await loadSettingsMapAsync(['app_url', 'lgpd_export_ttl_hours']);
         const appUrl = String(settings.app_url || process.env.APP_URL || 'https://digitalbordados.com.br').replace(/\/$/, '');
         const downloadUrl = `${appUrl}/minha-conta/privacidade`;
         const expiresIn = String(settings.lgpd_export_ttl_hours || '24');
@@ -5420,7 +5872,7 @@ async function startServer() {
         }).catch((err) => console.error('LGPD export-ready email error:', err));
       }
 
-      logLgpdEvent({
+      await logLgpdEvent({
         req,
         userId: Number(requestRow.user_id),
         actorUserId: Number(adminUser.id),
@@ -5436,7 +5888,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/lgpd/logs', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/lgpd/logs', authenticate, isAdmin, async (req, res) => {
     try {
       const page = Math.max(1, Number(req.query.page || 1));
       const limit = Math.min(1000, Math.max(20, Number(req.query.limit || 200)));
@@ -5485,7 +5937,7 @@ async function startServer() {
         params.push(to);
       }
       const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
-      const countRow = db.get(
+      const countRow = await dbAsync.get(
         `SELECT COUNT(*) AS total
          FROM lgpd_logs l
          LEFT JOIN users u ON u.id = l.user_id
@@ -5495,7 +5947,7 @@ async function startServer() {
       ) as any;
       const total = Number(countRow?.total || 0);
       const totalPages = Math.max(1, Math.ceil(total / limit));
-      const rows = db.all(
+      const rows = await dbAsync.all(
         `SELECT l.*, u.name AS user_name, u.email AS user_email, a.name AS actor_name
          FROM lgpd_logs l
          LEFT JOIN users u ON u.id = l.user_id
@@ -5528,20 +5980,20 @@ async function startServer() {
   });
 
   // ROTA DE DESENVOLVIMENTO: Simular pagamento aprovado
-  app.post('/api/dev/approve-order/:id', authenticate, isAdmin, (req, res) => {
+  app.post('/api/dev/approve-order/:id', authenticate, isAdmin, async (req, res) => {
     if (isProduction) {
       return res.status(404).json({ error: 'Rota indisponivel neste ambiente' });
     }
     const orderId = req.params.id;
     try {
-      db.run("UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?", orderId);
+      await dbAsync.run("UPDATE orders SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?", orderId);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Erro ao aprovar pedido' });
     }
   });
 
-  app.post('/api/admin/tags', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/tags', authenticate, isAdmin, async (req, res) => {
     const { name } = req.body;
     const normalizedName = typeof name === 'string' ? name.trim() : '';
 
@@ -5554,17 +6006,17 @@ async function startServer() {
     const slug = (generatedSlug || safeName.toLowerCase().replace(/\s+/g, '-')).slice(0, 191);
 
     try {
-      const existingTag = db.get('SELECT id, name, slug FROM product_tags WHERE slug = ?', slug) as any;
+      const existingTag = await dbAsync.get('SELECT id, name, slug FROM product_tags WHERE slug = ?', slug) as any;
       if (existingTag) {
         return res.status(200).json(existingTag);
       }
 
-      const result = db.run('INSERT IGNORE INTO product_tags (name, slug) VALUES (?, ?)', safeName, slug);
-      const createdTag = db.get('SELECT id, name, slug FROM product_tags WHERE id = ?', result.lastInsertRowid) as any;
+      const result = await dbAsync.run('INSERT IGNORE INTO product_tags (name, slug) VALUES (?, ?)', safeName, slug);
+      const createdTag = await dbAsync.get('SELECT id, name, slug FROM product_tags WHERE id = ?', result.lastInsertRowid) as any;
       return res.status(200).json(createdTag);
     } catch (error: any) {
       if (error?.message?.includes('UNIQUE constraint failed') || error?.code === 'ER_DUP_ENTRY') {
-        const existingTag = db.get('SELECT id, name, slug FROM product_tags WHERE slug = ?', slug) as any;
+        const existingTag = await dbAsync.get('SELECT id, name, slug FROM product_tags WHERE slug = ?', slug) as any;
         if (existingTag) {
           return res.status(200).json(existingTag);
         }
@@ -5573,9 +6025,9 @@ async function startServer() {
     }
   });
 
-  app.delete('/api/admin/tags/:id', authenticate, isAdmin, (req, res) => {
+  app.delete('/api/admin/tags/:id', authenticate, isAdmin, async (req, res) => {
     try {
-      db.run('DELETE FROM product_tags WHERE id = ?', req.params.id);
+      await dbAsync.run('DELETE FROM product_tags WHERE id = ?', req.params.id);
       res.json({ success: true });
     } catch (error) {
       console.error('Admin Fetch Orders Error:', error);
@@ -5583,7 +6035,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/admin/orders/import', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/orders/import', authenticate, isAdmin, async (req, res) => {
     const {
       user_id = null,
       customer_email = null,
@@ -5655,70 +6107,57 @@ async function startServer() {
     }
 
     try {
-      const importOrderTransaction = db.transaction((payload: any) => {
-        let safeUserId: number | null = payload.userId;
+      const orderId = await dbAsync.transaction(async (conn) => {
+        let safeUserId: number | null = rawUserId;
         if (safeUserId !== null) {
-          const existingUser = db.get('SELECT id FROM users WHERE id = ?', safeUserId) as any;
+          const [existingUserRows] = await conn.execute('SELECT id FROM users WHERE id = ?', [safeUserId]);
+          const existingUser = Array.isArray(existingUserRows) ? (existingUserRows as any[])[0] : undefined;
           if (!existingUser) {
             safeUserId = null;
           }
         }
 
-        const orderResult = db.run(`
+        const [orderResultRaw] = await conn.execute(`
           INSERT INTO orders (
             user_id, customer_email, customer_name, total, status, payment_method, transaction_id,
             billing_address, woo_order_id, created_at, paid_at, updated_at
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, CURRENT_TIMESTAMP)
-        `,
+        `, [
           safeUserId,
-          payload.customerEmail,
-          payload.customerName,
-          payload.total,
-          payload.status,
-          payload.paymentMethod,
-          payload.transactionId,
-          payload.billingAddress,
-          payload.wooOrderId,
-          payload.createdAt,
-          payload.paidAt,
-        );
+          customer_email ? String(customer_email).trim().toLowerCase() : null,
+          customer_name ? String(customer_name).trim() : null,
+          Number(orderTotal.toFixed(2)),
+          typeof status === 'string' && status.trim() ? status.trim() : 'pending',
+          payment_method ? String(payment_method) : null,
+          transaction_id ? String(transaction_id) : null,
+          billing_address ? String(billing_address) : null,
+          woo_order_id ? String(woo_order_id) : null,
+          created_at || null,
+          paid_at || null,
+        ]);
 
-        const orderId = Number(orderResult.lastInsertRowid);
-        payload.items.forEach((item: any) => {
+        const orderIdTx = Number((orderResultRaw as any)?.insertId || 0);
+        for (const item of normalizedItems) {
           let safeProductId: number | null = item.product_id;
           if (safeProductId !== null) {
-            const existingProduct = db.get('SELECT id FROM products WHERE id = ?', safeProductId) as any;
+            const [existingProductRows] = await conn.execute('SELECT id FROM products WHERE id = ?', [safeProductId]);
+            const existingProduct = Array.isArray(existingProductRows) ? (existingProductRows as any[])[0] : undefined;
             if (!existingProduct) {
               safeProductId = null;
             }
           }
 
-          db.run(`
+          await conn.execute(`
             INSERT INTO order_items (order_id, product_id, product_name, price, quantity)
             VALUES (?, ?, ?, ?, ?)
-          `, orderId, safeProductId, item.product_name, item.price, item.quantity);
-        });
+          `, [orderIdTx, safeProductId, item.product_name, item.price, item.quantity]);
+        }
 
-        return orderId;
+        return orderIdTx;
       });
 
-      const orderId = importOrderTransaction({
-        userId: rawUserId,
-        customerEmail: customer_email ? String(customer_email).trim().toLowerCase() : null,
-        customerName: customer_name ? String(customer_name).trim() : null,
-        total: Number(orderTotal.toFixed(2)),
-        status: typeof status === 'string' && status.trim() ? status.trim() : 'pending',
-        paymentMethod: payment_method ? String(payment_method) : null,
-        transactionId: transaction_id ? String(transaction_id) : null,
-        billingAddress: billing_address ? String(billing_address) : null,
-        wooOrderId: woo_order_id ? String(woo_order_id) : null,
-        createdAt: created_at || null,
-        paidAt: paid_at || null,
-        items: normalizedItems,
-      });
-
-      const createdOrder = db.get('SELECT id, status FROM orders WHERE id = ?', orderId) as any;
+      const createdOrder = await dbAsync.get('SELECT id, status FROM orders WHERE id = ?', orderId) as any;
       return res.status(201).json({
         id: Number(createdOrder?.id || orderId),
         status: createdOrder?.status || 'pending',
@@ -5729,9 +6168,9 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/orders/:id', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/orders/:id', authenticate, isAdmin, async (req, res) => {
     try {
-      const order = db.get(`
+      const order = await dbAsync.get(`
         SELECT o.*, u.name as user_name, u.email as user_email
         FROM orders o
         LEFT JOIN users u ON o.user_id = u.id
@@ -5740,7 +6179,7 @@ async function startServer() {
 
       if (!order) return res.status(404).json({ error: 'Pedido nÃƒÆ’Ã‚Â£o encontrado' });
 
-      const items = db.all(`
+      const items = await dbAsync.all(`
         SELECT oi.*, p.name 
         FROM order_items oi
         JOIN products p ON oi.product_id = p.id
@@ -5754,7 +6193,7 @@ async function startServer() {
     }
   });
 
-  app.put('/api/admin/orders/:id/status', authenticate, isAdmin, (req, res) => {
+  app.put('/api/admin/orders/:id/status', authenticate, isAdmin, async (req, res) => {
     const { status } = req.body;
     try {
       const updateData: any[] = [status, req.params.id];
@@ -5766,7 +6205,7 @@ async function startServer() {
       
       query += ' WHERE id = ?';
       
-      db.run(query, ...updateData);
+      await dbAsync.run(query, ...updateData);
       res.json({ success: true });
     } catch (error) {
       console.error('Admin Update Order Status Error:', error);
@@ -5775,7 +6214,7 @@ async function startServer() {
   });
 
   // API Routes - ADMIN USERS
-  app.get('/api/admin/users', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     try {
       const page = Math.max(1, Number(req.query.page || 1));
       const limitRaw = Number(req.query.limit || 20);
@@ -5785,14 +6224,14 @@ async function startServer() {
       const roleFilter = String(req.query.role || 'all').trim().toLowerCase();
       const { whereClause, params } = buildUsersBaseQuery({ searchTerm, roleFilter });
 
-      const totalRow = db.get(`
+      const totalRow = await dbAsync.get(`
         SELECT COUNT(*) AS total
         FROM users u
         ${whereClause}
       `, ...params) as any;
       const total = Number(totalRow?.total || 0);
 
-      const users = db.all(`
+      const users = await dbAsync.all(`
         SELECT 
           u.id, u.name, u.email, u.role, u.status, u.created_at,
           u.phone, u.cpf, u.first_name, u.last_name, u.date_registered,
@@ -5821,14 +6260,14 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/users/export', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/users/export', authenticate, isAdmin, async (req, res) => {
     try {
       const format = String(req.query.format || 'csv').trim().toLowerCase();
       const searchTerm = String(req.query.search || '').trim().toLowerCase();
       const roleFilter = String(req.query.role || 'all').trim().toLowerCase();
       const { whereClause, params } = buildUsersBaseQuery({ searchTerm, roleFilter });
 
-      const users = db.all(`
+      const users = await dbAsync.all(`
         SELECT 
           u.id, u.name, u.email, u.role, u.status, u.created_at,
           u.phone, u.cpf, u.first_name, u.last_name, u.date_registered,
@@ -5921,7 +6360,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Nome, e-mail e senha sÃƒÆ’Ã‚Â£o obrigatÃƒÆ’Ã‚Â³rios' });
     }
 
-    const existingUser = db.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
+    const existingUser = await dbAsync.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
     if (existingUser) {
       return res.status(409).json({ error: 'E-mail jÃƒÆ’Ã‚Â¡ cadastrado' });
     }
@@ -5929,13 +6368,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     const hashedPassword = await hashPassword(String(password));
 
     try {
-      const trans = db.transaction(() => {
-        const userResult = db.run(`
+      const userId = await dbAsync.transaction(async (conn) => {
+        const [userResultRaw] = await conn.execute(`
           INSERT INTO users (
             name, email, password, role, status, phone, cpf, first_name, last_name, date_registered
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
+        `, [
           normalizedName,
           normalizedEmail,
           hashedPassword,
@@ -5946,17 +6385,18 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           first_name || null,
           last_name || null,
           date_registered || null,
-        );
+        ]);
 
-        const userId = Number(userResult.lastInsertRowid);
-        const existingCustomer = db.get('SELECT id FROM customers WHERE user_id = ? LIMIT 1', userId) as any;
+        const userIdTx = Number((userResultRaw as any)?.insertId || 0);
+        const [existingCustomerRows] = await conn.execute('SELECT id FROM customers WHERE user_id = ? LIMIT 1', [userIdTx]);
+        const existingCustomer = Array.isArray(existingCustomerRows) ? (existingCustomerRows as any[])[0] : undefined;
 
         if (existingCustomer) {
-          db.run(`
+          await conn.execute(`
             UPDATE customers
             SET phone = ?, cpf = ?, address = ?, city = ?, state = ?, zip = ?, country = ?, updated_at = CURRENT_TIMESTAMP
             WHERE user_id = ?
-          `,
+          `, [
             phone || null,
             cpf || null,
             address || null,
@@ -5964,14 +6404,14 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             state || null,
             zip || null,
             country || null,
-            userId,
-          );
+            userIdTx,
+          ]);
         } else {
-          db.run(`
+          await conn.execute(`
             INSERT INTO customers (user_id, phone, cpf, address, city, state, zip, country)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          `,
-            userId,
+          `, [
+            userIdTx,
             phone || null,
             cpf || null,
             address || null,
@@ -5979,14 +6419,12 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             state || null,
             zip || null,
             country || null,
-          );
+          ]);
         }
 
-        return userId;
+        return userIdTx;
       });
-
-      const userId = trans();
-      const createdUser = db.get(`
+      const createdUser = await dbAsync.get(`
         SELECT
           u.id, u.name, u.email, u.role, u.status, u.created_at,
           u.phone, u.cpf, u.first_name, u.last_name, u.date_registered,
@@ -6006,7 +6444,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.post('/api/admin/users/import', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/users/import', authenticate, isAdmin, async (req, res) => {
     const {
       name,
       email,
@@ -6035,73 +6473,53 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       return res.status(400).json({ error: 'name, email e password sÃƒÂ£o obrigatÃƒÂ³rios' });
     }
 
-    const existingUser = db.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
+    const existingUser = await dbAsync.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
     if (existingUser) {
       return res.status(409).json({ error: 'already_exists', id: Number(existingUser.id) });
     }
 
     try {
-      const importUserTransaction = db.transaction((payload: any) => {
-        const userResult = db.run(`
+      const userId = await dbAsync.transaction(async (conn) => {
+        const [userResultRaw] = await conn.execute(`
           INSERT INTO users (
             name, email, password, role, status, phone, cpf, date_registered, first_name, last_name, woo_user_id
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-          payload.name,
-          payload.email,
-          payload.password,
-          payload.role,
-          payload.status,
-          payload.phone,
-          payload.cpf,
-          payload.dateRegistered,
-          payload.firstName,
-          payload.lastName,
-          payload.wooUserId,
-        );
+        `, [
+          normalizedName,
+          normalizedEmail,
+          String(password),
+          normalizedRole,
+          normalizedStatus,
+          phone || null,
+          cpf || null,
+          date_registered || null,
+          first_name || null,
+          last_name || null,
+          woo_user_id ? String(woo_user_id) : null,
+        ]);
 
-        const userId = Number(userResult.lastInsertRowid);
-        db.run(`
+        const userIdTx = Number((userResultRaw as any)?.insertId || 0);
+        await conn.execute(`
           INSERT INTO customers (user_id, phone, cpf, address, city, state, zip, country)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-          userId,
-          payload.phone,
-          payload.cpf,
-          payload.address,
-          payload.city,
-          payload.state,
-          payload.zip,
-          payload.country,
-        );
-
-        return userId;
-      });
-
-      const userId = importUserTransaction({
-        name: normalizedName,
-        email: normalizedEmail,
-        password: String(password),
-        role: normalizedRole,
-        status: normalizedStatus,
-        phone: phone || null,
-        cpf: cpf || null,
-        address: address || null,
-        city: city || null,
-        state: state || null,
-        zip: zip || null,
-        country: country || null,
-        dateRegistered: date_registered || null,
-        firstName: first_name || null,
-        lastName: last_name || null,
-        wooUserId: woo_user_id ? String(woo_user_id) : null,
+        `, [
+          userIdTx,
+          phone || null,
+          cpf || null,
+          address || null,
+          city || null,
+          state || null,
+          zip || null,
+          country || null,
+        ]);
+        return userIdTx;
       });
 
       return res.status(201).json({ id: userId, status: 'created' });
     } catch (error: any) {
       if (error?.message?.includes('Duplicate entry') || error?.code === 'ER_DUP_ENTRY') {
-        const duplicate = db.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
+        const duplicate = await dbAsync.get('SELECT id FROM users WHERE email = ?', normalizedEmail) as any;
         return res.status(409).json({ error: 'already_exists', id: duplicate ? Number(duplicate.id) : null });
       }
       console.error('Admin Import User Error:', error);
@@ -6143,12 +6561,12 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Nome e e-mail sÃƒÂ£o obrigatÃƒÂ³rios' });
     }
 
-    const existingUser = db.get('SELECT id FROM users WHERE id = ?', userId) as any;
+    const existingUser = await dbAsync.get('SELECT id FROM users WHERE id = ?', userId) as any;
     if (!existingUser) {
       return res.status(404).json({ error: 'UsuÃƒÂ¡rio nÃƒÂ£o encontrado' });
     }
 
-    const duplicateEmail = db.get('SELECT id FROM users WHERE email = ? AND id <> ?', normalizedEmail, userId) as any;
+    const duplicateEmail = await dbAsync.get('SELECT id FROM users WHERE email = ? AND id <> ?', normalizedEmail, userId) as any;
     if (duplicateEmail) {
       return res.status(409).json({ error: 'E-mail jÃƒÂ¡ cadastrado' });
     }
@@ -6159,9 +6577,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         hashedPassword = await hashPassword(normalizedPassword);
       }
 
-      const trans = db.transaction(() => {
+      await dbAsync.transaction(async (conn) => {
         if (normalizedPassword) {
-          db.run(`
+          await conn.execute(`
             UPDATE users
             SET
               name = ?,
@@ -6176,7 +6594,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
               date_registered = ?,
               updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-          `,
+          `, [
             normalizedName,
             normalizedEmail,
             hashedPassword,
@@ -6188,9 +6606,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             last_name || null,
             date_registered || null,
             userId,
-          );
+          ]);
         } else {
-          db.run(`
+          await conn.execute(`
             UPDATE users
             SET
               name = ?,
@@ -6204,7 +6622,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
               date_registered = ?,
               updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-          `,
+          `, [
             normalizedName,
             normalizedEmail,
             normalizedRole,
@@ -6215,16 +6633,17 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             last_name || null,
             date_registered || null,
             userId,
-          );
+          ]);
         }
 
-        const existingCustomer = db.get('SELECT id FROM customers WHERE user_id = ? LIMIT 1', userId) as any;
+        const [existingCustomerRows] = await conn.execute('SELECT id FROM customers WHERE user_id = ? LIMIT 1', [userId]);
+        const existingCustomer = Array.isArray(existingCustomerRows) ? (existingCustomerRows as any[])[0] : undefined;
         if (existingCustomer) {
-          db.run(`
+          await conn.execute(`
             UPDATE customers
             SET phone = ?, cpf = ?, address = ?, city = ?, state = ?, zip = ?, country = ?, updated_at = CURRENT_TIMESTAMP
             WHERE user_id = ?
-          `,
+          `, [
             phone || null,
             cpf || null,
             address || null,
@@ -6233,12 +6652,12 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             zip || null,
             country || null,
             userId,
-          );
+          ]);
         } else {
-          db.run(`
+          await conn.execute(`
             INSERT INTO customers (user_id, phone, cpf, address, city, state, zip, country)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          `,
+          `, [
             userId,
             phone || null,
             cpf || null,
@@ -6247,13 +6666,11 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             state || null,
             zip || null,
             country || null,
-          );
+          ]);
         }
       });
 
-      trans();
-
-      const updatedUser = db.get(`
+      const updatedUser = await dbAsync.get(`
         SELECT
           u.id, u.name, u.email, u.role, u.status, u.created_at,
           u.phone, u.cpf, u.first_name, u.last_name, u.date_registered,
@@ -6275,10 +6692,10 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   app.put('/api/admin/users/:id', authenticate, isAdmin, adminUpdateUserHandler);
   app.post('/api/admin/users/:id/update', authenticate, isAdmin, adminUpdateUserHandler);
 
-  app.put('/api/admin/users/:id/role', authenticate, isAdmin, (req, res) => {
+  app.put('/api/admin/users/:id/role', authenticate, isAdmin, async (req, res) => {
     const { role } = req.body;
     try {
-      db.run('UPDATE users SET role = ? WHERE id = ?', role, req.params.id);
+      await dbAsync.run('UPDATE users SET role = ? WHERE id = ?', role, req.params.id);
       res.json({ success: true });
     } catch (error) {
       console.error('Admin Update User Role Error:', error);
@@ -6286,13 +6703,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.delete('/api/admin/users/:id', authenticate, isAdmin, (req, res) => {
+  app.delete('/api/admin/users/:id', authenticate, isAdmin, async (req, res) => {
     try {
       // Don't allow deleting self
       if (req.params.id === (req as any).user.id.toString()) {
         return res.status(400).json({ error: 'VocÃƒÆ’Ã‚Âª nÃƒÆ’Ã‚Â£o pode excluir a si mesmo' });
       }
-      db.run('DELETE FROM users WHERE id = ?', req.params.id);
+      await dbAsync.run('DELETE FROM users WHERE id = ?', req.params.id);
       res.json({ success: true });
     } catch (error) {
       console.error('Admin Delete User Error:', error);
@@ -6300,9 +6717,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
   
-  app.get('/api/admin/settings', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/settings', authenticate, isAdmin, async (req, res) => {
     try {
-      const rows = db.all('SELECT `key`, value FROM settings') as any[];
+      const rows = await dbAsync.all('SELECT `key`, value FROM settings') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);
@@ -6312,24 +6729,220 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.post('/api/admin/settings', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/settings', authenticate, isAdmin, async (req, res) => {
     const settings = req.body;
     try {
-      const trans = db.transaction((data) => {
-        for (const [key, value] of Object.entries(data)) {
-          db.run(
+      await dbAsync.transaction(async (conn) => {
+        for (const [key, value] of Object.entries(settings || {})) {
+          await conn.execute(
             'INSERT INTO settings (`key`, value) VALUES (?, COALESCE(?, \'\')) ON DUPLICATE KEY UPDATE value = COALESCE(VALUES(value), \'\')',
-            key,
-            value == null ? '' : String(value),
+            [key, value == null ? '' : String(value)],
           );
         }
       });
-      trans(settings);
       apiCache.delete('public_settings');
+      settingsCacheExpiresAt = 0;
       res.json({ success: true });
     } catch (error) {
       console.error('Update Settings Error:', error);
       res.status(500).json({ error: 'Erro ao atualizar configuraÃƒÂ§ÃƒÂµes' });
+    }
+  });
+
+  app.get('/api/admin/backups', authenticate, isAdmin, async (req, res) => {
+    try {
+      const rows = await dbAsync.all(`
+        SELECT id, backup_key, mode, status, archive_path, snapshot_path, size_bytes, integrity_ok, notes, created_by, created_at
+        FROM system_backups
+        ORDER BY created_at DESC
+        LIMIT 200
+      `) as any[];
+      res.json(rows);
+    } catch (error) {
+      console.error('List backups error:', error);
+      res.status(500).json({ error: 'Erro ao listar backups.' });
+    }
+  });
+
+  app.post('/api/admin/backups/create', authenticate, isAdmin, async (req, res) => {
+    try {
+      const mode = String(req.body?.mode || 'full').toLowerCase() === 'incremental' ? 'incremental' : 'full';
+      const now = new Date();
+      const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+      const backupKey = `backup-${mode}-${stamp}`;
+      const backupRoot = path.join(process.cwd(), 'storage', 'backups');
+      const snapshotPath = path.join(backupRoot, backupKey, 'snapshot');
+      const archivePath = path.join(backupRoot, `${backupKey}.tar.gz`);
+      const dbPath = path.join(snapshotPath, 'database');
+      const filesPath = path.join(snapshotPath, 'files');
+      ensureDirSync(dbPath);
+      ensureDirSync(filesPath);
+
+      const allTables = await getAllTableNames();
+      const ignoredTables = new Set(['system_backups']);
+      for (const tableName of allTables) {
+        if (ignoredTables.has(tableName)) continue;
+        const rows = await dbAsync.all(`SELECT * FROM \`${tableName}\``) as any[];
+        safeJsonWrite(path.join(dbPath, `${tableName}.json`), rows);
+      }
+
+      const uploadsSource = path.join(process.cwd(), 'public', 'uploads');
+      const uploadsTarget = path.join(filesPath, 'public', 'uploads');
+      copyDirectoryRecursive(uploadsSource, uploadsTarget);
+
+      const metadata = {
+        key: backupKey,
+        mode,
+        created_at: now.toISOString(),
+        table_count: allTables.filter((name) => !ignoredTables.has(name)).length,
+        includes: ['database', 'public/uploads'],
+        node_env: process.env.NODE_ENV || 'development',
+      };
+      safeJsonWrite(path.join(snapshotPath, 'metadata.json'), metadata);
+
+      buildBackupArchive(snapshotPath, archivePath);
+      const archiveStat = fs.statSync(archivePath);
+      const snapshotStat = fs.statSync(path.join(snapshotPath, 'metadata.json'));
+      const integrityOk = archiveStat.size > 0 && snapshotStat.size > 0 ? 1 : 0;
+
+      await dbAsync.run(
+        `INSERT INTO system_backups
+          (backup_key, mode, status, archive_path, snapshot_path, size_bytes, integrity_ok, notes, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        backupKey,
+        mode,
+        integrityOk ? 'completed' : 'warning',
+        archivePath,
+        snapshotPath,
+        Number(archiveStat.size || 0),
+        integrityOk,
+        integrityOk ? 'Backup concluido com sucesso.' : 'Backup finalizado com alerta de integridade.',
+        Number((req as any)?.user?.id || 0) || null,
+      );
+
+      res.json({
+        success: true,
+        backup_key: backupKey,
+        mode,
+        archive_path: archivePath,
+        size_bytes: Number(archiveStat.size || 0),
+        integrity_ok: Boolean(integrityOk),
+      });
+    } catch (error: any) {
+      console.error('Create backup error:', error);
+      res.status(500).json({ error: error?.message || 'Erro ao criar backup.' });
+    }
+  });
+
+  app.get('/api/admin/backups/download/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const row = await dbAsync.get(
+        'SELECT id, backup_key, archive_path FROM system_backups WHERE id = ?',
+        Number(req.params.id),
+      ) as any;
+      if (!row) return res.status(404).json({ error: 'Backup nao encontrado.' });
+      const archivePath = String(row.archive_path || '');
+      if (!archivePath || !fs.existsSync(archivePath)) {
+        return res.status(404).json({ error: 'Arquivo do backup nao encontrado no servidor.' });
+      }
+      return res.download(archivePath, `${row.backup_key}.tar.gz`);
+    } catch (error) {
+      console.error('Download backup error:', error);
+      return res.status(500).json({ error: 'Erro ao baixar backup.' });
+    }
+  });
+
+  app.delete('/api/admin/backups/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const row = await dbAsync.get(
+        'SELECT id, archive_path, snapshot_path FROM system_backups WHERE id = ?',
+        Number(req.params.id),
+      ) as any;
+      if (!row) return res.status(404).json({ error: 'Backup nao encontrado.' });
+
+      const archivePath = String(row.archive_path || '');
+      const snapshotPath = String(row.snapshot_path || '');
+      if (archivePath && fs.existsSync(archivePath)) fs.unlinkSync(archivePath);
+      if (snapshotPath && fs.existsSync(snapshotPath)) fs.rmSync(snapshotPath, { recursive: true, force: true });
+
+      await dbAsync.run('DELETE FROM system_backups WHERE id = ?', Number(req.params.id));
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Delete backup error:', error);
+      return res.status(500).json({ error: 'Erro ao excluir backup.' });
+    }
+  });
+
+  app.post('/api/admin/backups/restore/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const row = await dbAsync.get(
+        'SELECT id, archive_path, snapshot_path, backup_key FROM system_backups WHERE id = ?',
+        Number(req.params.id),
+      ) as any;
+      if (!row) return res.status(404).json({ error: 'Backup nao encontrado.' });
+
+      let snapshotPath = String(row.snapshot_path || '');
+      if (!snapshotPath || !fs.existsSync(snapshotPath)) {
+        const archivePath = String(row.archive_path || '');
+        if (!archivePath || !fs.existsSync(archivePath)) {
+          return res.status(404).json({ error: 'Snapshot e arquivo compactado nao encontrados.' });
+        }
+        const restoreRoot = path.join(process.cwd(), 'storage', 'backups', `${row.backup_key}-restore`);
+        if (fs.existsSync(restoreRoot)) fs.rmSync(restoreRoot, { recursive: true, force: true });
+        ensureDirSync(restoreRoot);
+        extractBackupArchive(archivePath, restoreRoot);
+        snapshotPath = restoreRoot;
+      }
+
+      const dbPath = path.join(snapshotPath, 'database');
+      if (!fs.existsSync(dbPath)) {
+        return res.status(400).json({ error: 'Snapshot invalido: pasta de banco nao encontrada.' });
+      }
+
+      const tableFiles = fs.readdirSync(dbPath).filter((f) => f.toLowerCase().endsWith('.json'));
+      const skipTables = new Set(['system_backups']);
+      await dbAsync.transaction(async (conn) => {
+        for (const fileName of tableFiles) {
+          const tableName = fileName.replace(/\.json$/i, '');
+          if (!tableName || skipTables.has(tableName)) continue;
+          const rows = JSON.parse(fs.readFileSync(path.join(dbPath, fileName), 'utf8'));
+          if (!Array.isArray(rows)) continue;
+          await conn.execute(`DELETE FROM \`${tableName}\``);
+          for (const rowData of rows) {
+            const keys = Object.keys(rowData || {});
+            if (keys.length === 0) continue;
+            const placeholders = keys.map(() => '?').join(',');
+            const columns = keys.map((key) => `\`${key}\``).join(',');
+            const values = keys.map((key) => (rowData as any)[key]);
+            await conn.execute(
+              `INSERT INTO \`${tableName}\` (${columns}) VALUES (${placeholders})`,
+              values,
+            );
+          }
+        }
+      });
+
+      const uploadsFrom = path.join(snapshotPath, 'files', 'public', 'uploads');
+      const uploadsTo = path.join(process.cwd(), 'public', 'uploads');
+      if (fs.existsSync(uploadsFrom)) {
+        copyDirectoryRecursive(uploadsFrom, uploadsTo);
+      }
+
+      await dbAsync.run(
+        `INSERT INTO system_backups
+          (backup_key, mode, status, archive_path, snapshot_path, size_bytes, integrity_ok, notes, created_by)
+         VALUES (?, 'restore', 'completed', ?, ?, 0, 1, ?, ?)`,
+        `restore-${Date.now()}`,
+        String(row.archive_path || ''),
+        snapshotPath,
+        `Restauracao aplicada a partir de ${row.backup_key}.`,
+        Number((req as any)?.user?.id || 0) || null,
+      );
+
+      return res.json({ success: true, restored_from: row.backup_key });
+    } catch (error: any) {
+      console.error('Restore backup error:', error);
+      return res.status(500).json({ error: error?.message || 'Erro ao restaurar backup.' });
     }
   });
 
@@ -6371,9 +6984,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   });
 
   // API Routes - EMAIL TEMPLATES
-  app.get('/api/admin/email-templates', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/email-templates', authenticate, isAdmin, async (req, res) => {
     try {
-      const templates = db.all('SELECT * FROM email_templates ORDER BY id ASC');
+      const templates = await dbAsync.all('SELECT * FROM email_templates ORDER BY id ASC');
       res.json(templates);
     } catch (error) {
       console.error('Error fetching email templates:', error);
@@ -6381,9 +6994,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.get('/api/admin/email-templates/:key', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/email-templates/:key', authenticate, isAdmin, async (req, res) => {
     try {
-      const template = db.get('SELECT * FROM email_templates WHERE `key` = ?', req.params.key);
+      const template = await dbAsync.get('SELECT * FROM email_templates WHERE `key` = ?', req.params.key);
       if (!template) return res.status(404).json({ error: 'Template nÃƒÂ£o encontrado' });
       res.json(template);
     } catch (error) {
@@ -6392,12 +7005,12 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.put('/api/admin/email-templates/:key', authenticate, isAdmin, (req, res) => {
+  app.put('/api/admin/email-templates/:key', authenticate, isAdmin, async (req, res) => {
     try {
       const { subject, body } = req.body;
       if (!subject || !body) return res.status(400).json({ error: 'Subject e body sÃƒÂ£o obrigatÃƒÂ³rios' });
 
-      const changes = db.run(
+      const changes = await dbAsync.run(
         'UPDATE email_templates SET subject = ?, body = ? WHERE `key` = ?',
         subject, body, req.params.key
       );
@@ -6412,7 +7025,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
   app.post('/api/admin/email/test-connection', authenticate, isAdmin, async (req, res) => {
     try {
-      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_secure")') as any[];
+      const rows = await dbAsync.all('SELECT `key`, value FROM settings WHERE `key` IN ("smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_secure")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       
       const transporter = nodemailer.createTransport({
@@ -6480,7 +7093,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.post('/api/admin/email-templates/seed', authenticate, isAdmin, (req, res) => {
+  app.post('/api/admin/email-templates/seed', authenticate, isAdmin, async (req, res) => {
     try {
       const seedTemplates = [
         {
@@ -6504,14 +7117,14 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         }
       ];
 
-      db.transaction((templates) => {
-        for (const t of templates) {
-          db.run(
+      await dbAsync.transaction(async (conn) => {
+        for (const t of seedTemplates) {
+          await conn.execute(
             'INSERT IGNORE INTO email_templates (`key`, name, subject, body, variables, active) VALUES (?, ?, ?, ?, ?, 1)',
-            t.key, t.name, t.subject, t.body, t.variables
+            [t.key, t.name, t.subject, t.body, t.variables],
           );
         }
-      })(seedTemplates);
+      });
 
       res.json({ success: true });
     } catch (error) {
@@ -6520,9 +7133,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.get('/api/admin/email-logs', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/email-logs', authenticate, isAdmin, async (req, res) => {
     try {
-      const logs = db.all('SELECT * FROM email_logs ORDER BY created_at DESC LIMIT 100');
+      const logs = await dbAsync.all('SELECT * FROM email_logs ORDER BY created_at DESC LIMIT 100');
       res.json(logs);
     } catch (error) {
       console.error('Error fetching email logs:', error);
@@ -6530,13 +7143,99 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.get('/api/admin/dashboard/stats', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/email/budget-logs', authenticate, isAdmin, async (req, res) => {
+    try {
+      const status = String(req.query.status || '').trim().toLowerCase();
+      const q = String(req.query.q || '').trim();
+      const limit = Math.max(1, Math.min(500, Number(req.query.limit || 300)));
+      const where: string[] = [];
+      const params: any[] = [];
+      if (status && ['pending', 'sent', 'erro'].includes(status)) {
+        where.push('l.status = ?');
+        params.push(status);
+      }
+      if (q) {
+        where.push('(mr.name LIKE ? OR mr.email LIKE ? OR l.to_email LIKE ? OR l.template_key LIKE ?)');
+        params.push('%' + q + '%', '%' + q + '%', '%' + q + '%', '%' + q + '%');
+      }
+      const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+      const logs = await dbAsync.all(`
+        SELECT
+          l.*,
+          mr.name AS requester_name,
+          mr.email AS requester_email,
+          mr.whatsapp AS requester_whatsapp
+        FROM matrix_request_email_logs l
+        LEFT JOIN matrix_requests mr ON mr.id = l.matrix_request_id
+        ${whereSql}
+        ORDER BY l.created_at DESC
+        LIMIT ${limit}
+      `, ...params);
+      res.json(logs);
+    } catch (error) {
+      console.error('Error fetching budget email logs:', error);
+      res.status(500).json({ error: 'Erro ao buscar logs de orçamento' });
+    }
+  });
+
+  app.post('/api/admin/email/budget-logs/:id/retry', authenticate, isAdmin, async (req, res) => {
+    try {
+      const logId = Number(req.params.id || 0);
+      if (!logId) return res.status(400).json({ error: 'Log inválido.' });
+      const row = await dbAsync.get(`
+        SELECT l.*, mr.name, mr.email, mr.whatsapp, mr.details, mr.reference_image
+        FROM matrix_request_email_logs l
+        LEFT JOIN matrix_requests mr ON mr.id = l.matrix_request_id
+        WHERE l.id = ?
+      `, logId) as any;
+      if (!row) return res.status(404).json({ error: 'Log não encontrado.' });
+      if (!row.to_email || !row.template_key) {
+        return res.status(400).json({ error: 'Log sem destinatário/template para reenvio.' });
+      }
+
+      const settings = await loadSettingsMapAsync(['app_url']);
+      const appUrl = settings.app_url || `${req.protocol}${req.get('host')}`;
+      const referenceImageUrl = row.reference_image ? `${appUrl}${row.reference_image}` : '';
+      await dbAsync.run('UPDATE matrix_request_email_logs SET status = ?, error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 'pending', logId);
+
+      const result = await sendEmail({
+        to: String(row.to_email),
+        templateKey: String(row.template_key),
+        variables: {
+          request_id: row.matrix_request_id,
+          name: row.name || '',
+          email: row.email || '',
+          whatsapp: row.whatsapp || '',
+          details: row.details || '',
+          reference_image: referenceImageUrl,
+        },
+      });
+
+      if (!result.success) {
+        await dbAsync.run(
+          'UPDATE matrix_request_email_logs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          'erro',
+          String(result.error || 'Falha no reenvio').slice(0, 2000),
+          logId,
+        );
+        return res.status(400).json({ success: false, error: result.error || 'Falha no reenvio' });
+      }
+
+      await dbAsync.run('UPDATE matrix_request_email_logs SET status = ?, error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 'sent', logId);
+      return res.json({ success: true });
+    } catch (error: any) {
+      console.error('Retry budget email error:', error);
+      return res.status(500).json({ error: error?.message || 'Erro ao reenviar e-mail.' });
+    }
+  });
+
+  app.get('/api/admin/dashboard/stats', authenticate, isAdmin, async (req, res) => {
     const cached = apiCache.get('admin_dashboard_stats');
     if (cached) return res.json(cached);
 
     try {
       // PerÃƒÂ­odo Atual (30 dias)
-      const currentStats = db.get(`
+      const currentStats = await dbAsync.get(`
         SELECT 
           SUM(total) as totalSales,
           COUNT(*) as paidOrders
@@ -6546,7 +7245,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       `) as any;
 
       // PerÃƒÂ­odo Anterior (30-60 dias atrÃƒÂ¡s) para cÃƒÂ¡lculo de tendÃƒÂªncia
-      const previousStats = db.get(`
+      const previousStats = await dbAsync.get(`
         SELECT 
           SUM(total) as totalSales,
           COUNT(*) as paidOrders
@@ -6556,10 +7255,10 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           AND created_at < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
       `) as any;
 
-      const activeProducts = db.get("SELECT COUNT(*) as count FROM products WHERE status = 'active'") as any;
-      const totalCustomers = db.get("SELECT COUNT(*) as count FROM users WHERE role = 'customer'") as any;
+      const activeProducts = await dbAsync.get("SELECT COUNT(*) as count FROM products WHERE status = 'active'") as any;
+      const totalCustomers = await dbAsync.get("SELECT COUNT(*) as count FROM users WHERE role = 'customer'") as any;
       
-      const prevCustomers = db.get(`
+      const prevCustomers = await dbAsync.get(`
         SELECT COUNT(*) as count FROM users 
         WHERE role = 'customer' 
         AND created_at < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
@@ -6572,7 +7271,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         return (diff >= 0 ? '+' : '') + diff.toFixed(1) + '%';
       };
 
-      const recentOrders = db.all(`
+      const recentOrders = await dbAsync.all(`
         SELECT o.*, COALESCE(o.customer_name, u.name) as display_name, u.email as customer_email
         FROM orders o 
         LEFT JOIN users u ON o.user_id = u.id 
@@ -6580,7 +7279,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         LIMIT 6
       `);
 
-      const salesChart = db.all(`
+      const salesChart = await dbAsync.all(`
         SELECT DATE_FORMAT(created_at, '%d/%m') as date, SUM(total) as total 
         FROM orders 
         WHERE status IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
@@ -6589,7 +7288,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         ORDER BY MIN(created_at) ASC
       `);
 
-      const activities = db.all(`
+      const activities = await dbAsync.all(`
         SELECT * FROM (
           (SELECT 'order' as type, CONCAT('Novo pedido #', id) as message, created_at FROM orders ORDER BY created_at DESC LIMIT 5)
           UNION ALL
@@ -6625,104 +7324,245 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.get('/api/admin/reports', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/reports', authenticate, isAdmin, async (req, res) => {
     try {
-      const { period } = req.query;
-      let interval = 'INTERVAL 30 DAY';
+      const period = String(req.query.period || '30d');
+      const start = String(req.query.start || '');
+      const end = String(req.query.end || '');
+      const paidStatuses = "'paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing'";
       let dateFormat = '%d/%m';
+      let whereCurrent = '';
+      let wherePrevious = '';
 
-      if (period === '7d') interval = 'INTERVAL 7 DAY';
-      else if (period === '90d') interval = 'INTERVAL 90 DAY';
-      else if (period === '12m') {
-        interval = 'INTERVAL 1 YEAR';
+      if (period === 'today') {
+        whereCurrent = 'DATE(created_at) = CURDATE()';
+        wherePrevious = 'DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)';
+        dateFormat = '%H:00';
+      } else if (period === 'yesterday') {
+        whereCurrent = 'DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)';
+        wherePrevious = 'DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 2 DAY)';
+        dateFormat = '%H:00';
+      } else if (period === '7d') {
+        whereCurrent = 'created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)';
+        wherePrevious = 'created_at >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) AND created_at < DATE_SUB(CURDATE(), INTERVAL 7 DAY)';
+      } else if (period === '30d') {
+        whereCurrent = 'created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
+        wherePrevious = 'created_at >= DATE_SUB(CURDATE(), INTERVAL 60 DAY) AND created_at < DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
+      } else if (period === 'current_month') {
+        whereCurrent = 'YEAR(created_at) = YEAR(CURDATE()) AND MONTH(created_at) = MONTH(CURDATE())';
+        wherePrevious = 'YEAR(created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND MONTH(created_at) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))';
+      } else if (period === 'last_month') {
+        whereCurrent = 'YEAR(created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND MONTH(created_at) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))';
+        wherePrevious = 'YEAR(created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 2 MONTH)) AND MONTH(created_at) = MONTH(DATE_SUB(CURDATE(), INTERVAL 2 MONTH))';
+      } else if (period === 'current_year') {
+        whereCurrent = 'YEAR(created_at) = YEAR(CURDATE())';
+        wherePrevious = 'YEAR(created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 YEAR))';
         dateFormat = '%m/%Y';
+      } else if (period === 'custom' && start && end) {
+        whereCurrent = `DATE(created_at) BETWEEN '${start}' AND '${end}'`;
+        wherePrevious = '';
+      } else {
+        whereCurrent = 'created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
+        wherePrevious = 'created_at >= DATE_SUB(CURDATE(), INTERVAL 60 DAY) AND created_at < DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
       }
 
-      // Receita e Pedidos
-      const revenueData = db.get(`
-        SELECT 
-          SUM(total) as total, 
+      const revenueData = await dbAsync.get(`
+        SELECT
+          SUM(total) as gross_total,
+          SUM(total) as net_total,
           AVG(total) as average,
           COUNT(*) as orderCount
-        FROM orders 
-        WHERE status IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
-          AND created_at >= DATE_SUB(CURDATE(), ${interval})
+        FROM orders
+        WHERE status IN (${paidStatuses})
+          AND ${whereCurrent}
       `) as any;
 
-      // GrÃƒÂ¡fico de Vendas
-      const salesChart = db.all(`
+      const previousData = wherePrevious
+        ? (await dbAsync.get(`
+            SELECT
+              SUM(total) as gross_total,
+              SUM(total) as net_total,
+              COUNT(*) as orderCount
+            FROM orders
+            WHERE status IN (${paidStatuses})
+              AND ${wherePrevious}
+          `) as any)
+        : { gross_total: 0, net_total: 0, orderCount: 0 };
+
+      const salesChart = await dbAsync.all(`
         SELECT DATE_FORMAT(created_at, '${dateFormat}') as name, SUM(total) as value
-        FROM orders 
-        WHERE status IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
-          AND created_at >= DATE_SUB(CURDATE(), ${interval})
+        FROM orders
+        WHERE status IN (${paidStatuses})
+          AND ${whereCurrent}
         GROUP BY name
         ORDER BY MIN(created_at) ASC
       `);
 
-      // Top Matrizes
-      const topProducts = db.all(`
-        SELECT 
-          COALESCE(p.name, oi.product_name, 'Produto Indefinido') as name, 
+      const topProducts = await dbAsync.all(`
+        SELECT
+          COALESCE(p.name, oi.product_name, 'Produto Indefinido') as name,
           COUNT(oi.id) as sales
         FROM order_items oi
         LEFT JOIN products p ON oi.product_id = p.id
         JOIN orders o ON oi.order_id = o.id
-        WHERE o.status IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
-          AND o.created_at >= DATE_SUB(CURDATE(), ${interval})
+        WHERE o.status IN (${paidStatuses})
+          AND ${whereCurrent.split('created_at').join('o.created_at')}
         GROUP BY name
         ORDER BY sales DESC
-        LIMIT 5
+        LIMIT 12
       `);
 
-      // MÃƒÂ©todos de Pagamento
-      const paymentMethods = db.all(`
+      const paymentMethods = await dbAsync.all(`
         SELECT payment_method as name, COUNT(*) as value
         FROM orders
-        WHERE status IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
-          AND created_at >= DATE_SUB(CURDATE(), ${interval})
+        WHERE status IN (${paidStatuses})
+          AND ${whereCurrent}
         GROUP BY payment_method
       `);
 
-      // Performance por Categoria
-      const categoryUsage = db.all(`
+      const categoryUsage = await dbAsync.all(`
         SELECT pc.name, COUNT(oi.id) as count
         FROM order_items oi
         LEFT JOIN products p ON (oi.product_id = p.id OR oi.product_name = p.name)
         JOIN product_categories pc ON p.category_id = pc.id
         JOIN orders o ON oi.order_id = o.id
-        WHERE o.status IN ('paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing')
-          AND o.created_at >= DATE_SUB(CURDATE(), ${interval})
+        WHERE o.status IN (${paidStatuses})
+          AND ${whereCurrent.split('created_at').join('o.created_at')}
         GROUP BY pc.name
         ORDER BY count DESC
-        LIMIT 6
+        LIMIT 12
       `);
+
+      const calcTrend = (current: number, previous: number) => {
+        const c = Number(current || 0);
+        const p = Number(previous || 0);
+        if (!p) return c > 0 ? 100 : 0;
+        return ((c - p) / p) * 100;
+      };
+
+      const grossCurrent = Number(revenueData?.gross_total || 0);
+      const netCurrent = Number(revenueData?.net_total || 0);
+      const ordersCurrent = Number(revenueData?.orderCount || 0);
+      const grossPrevious = Number(previousData?.gross_total || 0);
+      const netPrevious = Number(previousData?.net_total || 0);
+      const ordersPrevious = Number(previousData?.orderCount || 0);
+      const avgCurrent = ordersCurrent > 0 ? netCurrent / ordersCurrent : 0;
+      const avgPrevious = ordersPrevious > 0 ? netPrevious / ordersPrevious : 0;
 
       res.json({
         revenue: {
-          total: revenueData?.total || 0,
-          average: revenueData?.average || 0
+          total: netCurrent,
+          average: Number(revenueData?.average || avgCurrent || 0),
+          gross: grossCurrent,
+          net: netCurrent,
         },
-        orders: {
-          total: revenueData?.orderCount || 0
+        orders: { total: ordersCurrent },
+        comparison: {
+          gross: calcTrend(grossCurrent, grossPrevious),
+          net: calcTrend(netCurrent, netPrevious),
+          orders: calcTrend(ordersCurrent, ordersPrevious),
+          average_ticket: calcTrend(avgCurrent, avgPrevious),
         },
         salesChart,
         topProducts,
         paymentMethods,
-        categoryUsage
+        categoryUsage,
       });
     } catch (error) {
       console.error('Reports Stats Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar dados dos relatÃƒÂ³rios' });
+      res.status(500).json({ error: 'Erro ao buscar dados dos relat?rios' });
     }
   });
 
   // API Routes - CONTENT
-  app.get('/api/settings', (req, res) => {
+  app.get('/robots.txt', (req, res) => {
+    try {
+      const s = loadSettingsMap([
+        'seo_robots_index',
+        'seo_robots_follow',
+        'seo_robots_custom_rules',
+        'seo_sitemap_enabled',
+        'app_url',
+      ]);
+      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const indexAllowed = String(s.seo_robots_index || 'true').toLowerCase() === 'true';
+      const followAllowed = String(s.seo_robots_follow || 'true').toLowerCase() === 'true';
+      const customRules = String(s.seo_robots_custom_rules || '').trim();
+      const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
+
+      const baseRules = indexAllowed && followAllowed
+        ? ['User-agent: *', 'Allow: /']
+        : ['User-agent: *', 'Disallow: /'];
+      const lines = [
+        ...baseRules,
+        ...(customRules ? [customRules] : []),
+        ...(sitemapEnabled ? [`Sitemap: ${appUrl}/sitemap.xml`] : []),
+      ];
+
+      res.type('text/plain; charset=utf-8');
+      return res.send(`${lines.join('\n')}\n`);
+    } catch (error) {
+      console.error('robots.txt error:', error);
+      res.type('text/plain; charset=utf-8');
+      return res.send('User-agent: *\nAllow: /\n');
+    }
+  });
+
+  app.get('/sitemap.xml', async (req, res) => {
+    try {
+      const s = await loadSettingsMapAsync(['seo_sitemap_enabled', 'app_url']);
+      const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
+      if (!sitemapEnabled) {
+        return res.status(404).type('text/plain').send('Sitemap desabilitado');
+      }
+
+      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const staticPaths = ['/', '/loja', '/contato', '/orcamento', '/login', '/cadastro'];
+      const productSlugs = await dbAsync.all(`SELECT slug, updated_at, created_at FROM products WHERE status = 'active'`) as any[];
+      const categorySlugs = await dbAsync.all(`SELECT slug, updated_at, created_at FROM product_categories WHERE status = 'active'`) as any[];
+
+      const xmlEscape = (v: string) =>
+        String(v || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&apos;');
+
+      const urls: Array<{ loc: string; lastmod?: string; priority?: string }> = [];
+      staticPaths.forEach((path) => urls.push({ loc: `${appUrl}${path}`, priority: path === '/' ? '1.0' : '0.8' }));
+      productSlugs.forEach((row) => urls.push({ loc: `${appUrl}/produto/${row.slug}`, lastmod: String(row.updated_at || row.created_at || '').slice(0, 10), priority: '0.7' }));
+      categorySlugs.forEach((row) => urls.push({ loc: `${appUrl}/?category=${row.slug}`, lastmod: String(row.updated_at || row.created_at || '').slice(0, 10), priority: '0.6' }));
+
+      const body = urls
+        .map((u) => {
+          const lines = [
+            '<url>',
+            `<loc>${xmlEscape(u.loc)}</loc>`,
+            ...(u.lastmod ? [`<lastmod>${xmlEscape(u.lastmod)}</lastmod>`] : []),
+            ...(u.priority ? [`<priority>${xmlEscape(u.priority)}</priority>`] : []),
+            '</url>',
+          ];
+          return lines.join('');
+        })
+        .join('');
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>` +
+        `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}</urlset>`;
+      res.type('application/xml; charset=utf-8');
+      return res.send(xml);
+    } catch (error) {
+      console.error('sitemap.xml error:', error);
+      return res.status(500).type('text/plain').send('Erro ao gerar sitemap');
+    }
+  });
+
+  app.get('/api/settings', async (req, res) => {
     try {
       const cached = apiCache.get('public_settings');
       if (cached) return res.json(cached);
 
-      const rows = db.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "redirect_to_checkout_after_add_to_cart", "brand_logos", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies")') as any[];
+      const rows = await dbAsync.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "redirect_to_checkout_after_add_to_cart", "brand_logos", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies", "top_bar_message", "top_bar_enabled", "home_company_enabled", "home_company_title", "home_company_subtitle", "home_company_text", "home_company_mission", "home_company_vision", "home_company_values", "home_company_image_main", "home_company_image_secondary", "home_company_cta_text", "home_company_cta_link", "home_company_bg_color", "home_company_text_color", "home_company_icons", "seo_meta_title", "seo_meta_description", "seo_keywords", "seo_robots_index", "seo_robots_follow", "seo_og_image", "seo_twitter_card", "seo_facebook_url", "seo_instagram_url", "seo_twitter_url", "seo_organization_name", "seo_organization_logo", "seo_enable_product_schema", "seo_enable_organization_schema", "seo_enable_breadcrumb_schema", "seo_sitemap_enabled", "seo_robots_custom_rules")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);
@@ -6732,12 +7572,12 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.get('/api/categories', (req, res) => {
+  app.get('/api/categories', async (req, res) => {
     try {
       const cached = apiCache.get('public_categories');
       if (cached) return res.json(cached);
 
-      const categories = db.all("SELECT * FROM product_categories WHERE status = 'active' ORDER BY sort_order ASC, name ASC");
+      const categories = await dbAsync.all("SELECT * FROM product_categories WHERE status = 'active' ORDER BY sort_order ASC, name ASC");
       apiCache.set('public_categories', categories, 600); // 10 minutes cache
       res.json(categories);
     } catch (error) {
@@ -6766,18 +7606,41 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       const referenceImagePath = req.file?.filename ? `/uploads/${req.file.filename}` : null;
 
-      const insertResult = db.run(`
+      const insertResult = await dbAsync.run(`
         INSERT INTO matrix_requests (name, email, whatsapp, details, reference_image, status)
         VALUES (?, ?, ?, ?, ?, 'pending')
       `, normalizedName, normalizedEmail, normalizedWhatsapp, normalizedDetails || null, referenceImagePath);
 
-      const settings = loadSettingsMap(['app_url', 'email_contact', 'matrix_request_team_email']);
+      const settings = await loadSettingsMapAsync(['app_url', 'email_contact', 'matrix_request_team_email']);
       const appUrl = settings.app_url || `${req.protocol}://${req.get('host')}`;
       const referenceImageUrl = referenceImagePath ? `${appUrl}${referenceImagePath}` : '';
       const requestId = Number(insertResult.lastInsertRowid || 0);
       const teamEmail = String(settings.matrix_request_team_email || settings.email_contact || '').trim().toLowerCase();
 
+      const createBudgetLog = async (recipientType: 'team' | 'customer', toEmail: string, templateKey: string) => {
+        const result = await dbAsync.run(`
+          INSERT INTO matrix_request_email_logs (matrix_request_id, recipient_type, to_email, template_key, status)
+          VALUES (?, ?, ?, ?, 'pending')
+        `, requestId, recipientType, toEmail || null, templateKey);
+        return Number(result.lastInsertRowid || 0);
+      };
+      const resolveEmailError = (value: any) => String(value || '').slice(0, 2000);
+      const markBudgetLog = async (logId: number, status: 'sent' | 'erro' | 'pending', errorMsg?: string) => {
+        if (!logId) return;
+        await dbAsync.run(`
+          UPDATE matrix_request_email_logs
+          SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, status, errorMsg || null, logId);
+      };
+
+      let teamStatus: 'sent' | 'erro' | 'pending' = 'pending';
+      let customerStatus: 'sent' | 'erro' | 'pending' = 'pending';
+      let teamError = '';
+      let customerError = '';
+
       if (teamEmail) {
+        const teamLogId = await createBudgetLog('team', teamEmail, 'matrix_request_team_received');
         const teamEmailResult = await sendEmail({
           to: teamEmail,
           templateKey: 'matrix_request_team_received',
@@ -6791,10 +7654,20 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           },
         });
         if (!teamEmailResult.success) {
+          await markBudgetLog(teamLogId, 'erro', resolveEmailError(teamEmailResult.error));
+          teamStatus = 'erro';
+          teamError = resolveEmailError(teamEmailResult.error);
           console.error('Matrix request team email failed:', teamEmailResult.error);
+        } else {
+          await markBudgetLog(teamLogId, 'sent');
+          teamStatus = 'sent';
         }
+      } else {
+        teamStatus = 'erro';
+        teamError = 'Email da equipe nao configurado em Configuracoes > E-mail > Equipe de Orcamento.';
       }
 
+      const customerLogId = await createBudgetLog('customer', normalizedEmail, 'matrix_request_in_analysis');
       const customerEmailResult = await sendEmail({
         to: normalizedEmail,
         templateKey: 'matrix_request_in_analysis',
@@ -6808,13 +7681,26 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         },
       });
       if (!customerEmailResult.success) {
-        return res.status(500).json({ error: customerEmailResult.error || 'Falha ao enviar email de confirmacao' });
+        await markBudgetLog(customerLogId, 'erro', resolveEmailError(customerEmailResult.error));
+        customerStatus = 'erro';
+        customerError = resolveEmailError(customerEmailResult.error);
+      } else {
+        await markBudgetLog(customerLogId, 'sent');
+        customerStatus = 'sent';
       }
+
+      const hasEmailFailure = teamStatus === 'erro' || customerStatus === 'erro';
 
       return res.status(201).json({
         success: true,
         id: requestId,
-        message: 'Solicitacao de matriz enviada com sucesso',
+        message: hasEmailFailure
+          ? 'Solicitacao registrada. Houve falha em um ou mais envios de e-mail; verifique Configuracoes > E-mail > Logs de Orcamento.'
+          : 'Solicitacao de matriz enviada com sucesso',
+        email_delivery: {
+          team: { status: teamStatus, error: teamError || null },
+          customer: { status: customerStatus, error: customerError || null },
+        },
       });
     } catch (error) {
       console.error('Matrix request submit error:', error);
@@ -6824,7 +7710,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
 
 
-  app.get('/api/products', (req, res) => {
+  app.get('/api/products', async (req, res) => {
     try {
       const { category, q, page = '1', limit = '12' } = req.query;
       const currentPage = Math.max(1, parseInt(page as string));
@@ -6859,7 +7745,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         params.push(`%${q}%`, `%${q}%`, `%${q}%`);
       }
 
-      const totalCountRow = db.get(`
+      const totalCountRow = await dbAsync.get(`
         SELECT COUNT(DISTINCT p.id) as total 
         FROM products p 
         ${whereClause}
@@ -6877,8 +7763,8 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         LIMIT ? OFFSET ?
       `;
 
-      const newBadgeDays = resolveNewBadgeDays();
-      const products = (db.all(query, ...params, itemsPerPage, offset) as any[]).map((product) => ({
+      const newBadgeDays = await resolveNewBadgeDays();
+      const products = (await dbAsync.all(query, ...params, itemsPerPage, offset) as any[]).map((product) => ({
         ...product,
         is_new: resolveProductIsNew(product, newBadgeDays),
       }));
@@ -6938,9 +7824,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.get('/api/products/:slug', (req, res) => {
+  app.get('/api/products/:slug', async (req, res) => {
     try {
-      const productRow = db.get(`
+      const productRow = await dbAsync.get(`
         SELECT p.*, pc.name as category_name, pc.slug as category_slug
         FROM products p
         LEFT JOIN product_categories pc ON p.category_id = pc.id
@@ -6948,14 +7834,14 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       `, req.params.slug) as any;
 
       if (!productRow) return res.status(404).json({ error: 'Produto nao encontrado' });
-      const newBadgeDays = resolveNewBadgeDays();
+      const newBadgeDays = await resolveNewBadgeDays();
       const product = {
         ...productRow,
         is_new: resolveProductIsNew(productRow, newBadgeDays),
       };
 
-      // Related products (all shared categories: primary + extra relations)
-      const categoryRows = db.all(`
+      // Related products: prioritize same category best-sellers; fill with random actives if needed.
+      const categoryRows = await dbAsync.all(`
         SELECT DISTINCT category_id
         FROM product_category_relations
         WHERE product_id = ? AND category_id IS NOT NULL
@@ -6969,30 +7855,76 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         ),
       );
 
+      const maxRelated = 24;
       let relatedRows: any[] = [];
       if (categoryIds.length > 0) {
         const placeholders = categoryIds.map(() => '?').join(', ');
-        relatedRows = db.all(`
-          SELECT DISTINCT
+        relatedRows = await dbAsync.all(`
+          SELECT
             p.*,
+            COALESCE(SUM(
+              CASE
+                WHEN o.status IN ('paid', 'approved', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing') THEN oi.quantity
+                ELSE 0
+              END
+            ), 0) AS sold_qty,
             CASE
               WHEN p.category_id IN (${placeholders}) OR pcr.category_id IN (${placeholders}) THEN 2
               ELSE 0
             END AS relevance_score
           FROM products p
           LEFT JOIN product_category_relations pcr ON pcr.product_id = p.id
+          LEFT JOIN order_items oi ON oi.product_id = p.id
+          LEFT JOIN orders o ON o.id = oi.order_id
           WHERE p.id != ?
             AND p.status = 'active'
-          ORDER BY relevance_score DESC, p.created_at DESC, p.id DESC
-        `, ...categoryIds, ...categoryIds, product.id) as any[];
+            AND (
+              p.category_id IN (${placeholders})
+              OR pcr.category_id IN (${placeholders})
+            )
+          GROUP BY p.id
+          ORDER BY sold_qty DESC, relevance_score DESC, p.created_at DESC, p.id DESC
+          LIMIT ?
+        `, ...categoryIds, ...categoryIds, product.id, ...categoryIds, ...categoryIds, maxRelated) as any[];
       } else {
-        relatedRows = db.all(`
+        relatedRows = await dbAsync.all(`
+          SELECT
+            p.*,
+            COALESCE(SUM(
+              CASE
+                WHEN o.status IN ('paid', 'approved', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing') THEN oi.quantity
+                ELSE 0
+              END
+            ), 0) AS sold_qty
+          FROM products p
+          LEFT JOIN order_items oi ON oi.product_id = p.id
+          LEFT JOIN orders o ON o.id = oi.order_id
+          WHERE p.id != ?
+            AND p.status = 'active'
+          GROUP BY p.id
+          ORDER BY sold_qty DESC, p.created_at DESC, p.id DESC
+          LIMIT ?
+        `, product.id, maxRelated) as any[];
+      }
+
+      if (relatedRows.length < maxRelated) {
+        const existingIds = new Set<number>(relatedRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id)));
+        const missing = maxRelated - relatedRows.length;
+        const fallbackRows = await dbAsync.all(`
           SELECT p.*
           FROM products p
           WHERE p.id != ?
             AND p.status = 'active'
-          ORDER BY p.created_at DESC, p.id DESC
-        `, product.id) as any[];
+          ORDER BY RAND()
+          LIMIT ?
+        `, product.id, missing * 2) as any[];
+
+        fallbackRows.forEach((row) => {
+          const id = Number(row?.id || 0);
+          if (!id || existingIds.has(id) || relatedRows.length >= maxRelated) return;
+          existingIds.add(id);
+          relatedRows.push({ ...row, sold_qty: 0, relevance_score: 0 });
+        });
       }
 
       const relatedProducts = relatedRows.map((relatedProduct) => ({
@@ -7001,7 +7933,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       }));
 
       // Gallery images
-      const galleryRows = db.all(`
+      const galleryRows = await dbAsync.all(`
         SELECT id, product_id, url, is_featured, created_at, file_type
         FROM product_images
         WHERE product_id = ?
@@ -7049,13 +7981,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   });
 
   // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Reviews Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-  app.get('/api/products/:slug/reviews', (req, res) => {
+  app.get('/api/products/:slug/reviews', async (req, res) => {
     try {
       const { slug } = req.params;
-      const product = db.get('SELECT id FROM products WHERE slug = ?', slug) as any;
+      const product = await dbAsync.get('SELECT id FROM products WHERE slug = ?', slug) as any;
       if (!product) return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
 
-      const reviews = db.all(`
+      const reviews = await dbAsync.all(`
         SELECT r.*, u.name as user_name 
         FROM reviews r 
         LEFT JOIN users u ON r.user_id = u.id 
@@ -7063,7 +7995,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         ORDER BY r.created_at DESC
       `, product.id);
 
-      const stats = db.get('SELECT AVG(rating) as avgRating FROM reviews WHERE product_id = ? AND status = "approved"', product.id) as any;
+      const stats = await dbAsync.get('SELECT AVG(rating) as avgRating FROM reviews WHERE product_id = ? AND status = "approved"', product.id) as any;
 
       res.json({ reviews, avgRating: stats?.avgRating || 0 });
     } catch (error) {
@@ -7072,7 +8004,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  app.post('/api/products/:slug/reviews', authenticate, (req, res) => {
+  app.post('/api/products/:slug/reviews', authenticate, async (req, res) => {
     try {
       const { slug } = req.params;
       const { rating, comment } = req.body;
@@ -7082,10 +8014,10 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Nota e comentÃƒÂ¡rio sÃƒÂ£o obrigatÃƒÂ³rios' });
       }
 
-      const product = db.get('SELECT id FROM products WHERE slug = ?', slug) as any;
+      const product = await dbAsync.get('SELECT id FROM products WHERE slug = ?', slug) as any;
       if (!product) return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
 
-      db.run(`
+      await dbAsync.run(`
         INSERT INTO reviews (user_id, product_id, rating, comment, status) 
         VALUES (?, ?, ?, ?, 'approved')
       `, user.id, product.id, rating, comment);
@@ -7101,12 +8033,12 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
   // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ PayPal Utilities Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-  function getPayPalConfig() {
-    const s = loadSettingsMap([
+  async function getPayPalConfig() {
+    const s = await loadSettingsMapAsync([
       'paypal_enabled', 'paypal_mode',
       'paypal_sandbox_client_id', 'paypal_sandbox_client_secret',
       'paypal_production_client_id', 'paypal_production_client_secret',
-      'paypal_default_currency', 'paypal_brl_usd_rate', 'paypal_webhook_id',
+      'paypal_default_currency', 'paypal_brl_usd_rate', 'paypal_brl_eur_rate', 'paypal_webhook_id',
     ]);
     const mode = (process.env.PAYPAL_MODE || s.paypal_mode || 'sandbox').toLowerCase() as 'sandbox' | 'production';
     const clientId = mode === 'production'
@@ -7115,11 +8047,22 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     const clientSecret = mode === 'production'
       ? (process.env.PAYPAL_PRODUCTION_CLIENT_SECRET || s.paypal_production_client_secret || '')
       : (process.env.PAYPAL_SANDBOX_CLIENT_SECRET || s.paypal_sandbox_client_secret || '');
-    const currency = process.env.PAYPAL_DEFAULT_CURRENCY || s.paypal_default_currency || 'USD';
-    const rate = parseFloat(process.env.PAYPAL_BRL_USD_RATE || s.paypal_brl_usd_rate || '5.20');
+    const rawCurrency = String(process.env.PAYPAL_DEFAULT_CURRENCY || s.paypal_default_currency || 'USD').toUpperCase();
+    const currency = (['BRL', 'USD', 'EUR'].includes(rawCurrency) ? rawCurrency : 'USD') as 'BRL' | 'USD' | 'EUR';
+    const usdRate = parseFloat(process.env.PAYPAL_BRL_USD_RATE || s.paypal_brl_usd_rate || '5.20');
+    const eurRate = parseFloat(process.env.PAYPAL_BRL_EUR_RATE || s.paypal_brl_eur_rate || '6.00');
     const webhookId = process.env.PAYPAL_WEBHOOK_ID || s.paypal_webhook_id || '';
     const enabled = (s.paypal_enabled === 'true');
-    return { mode, clientId, clientSecret, currency, rate, webhookId, enabled };
+    return {
+      mode,
+      clientId,
+      clientSecret,
+      currency,
+      usdRate: Number.isFinite(usdRate) && usdRate > 0 ? usdRate : 5.2,
+      eurRate: Number.isFinite(eurRate) && eurRate > 0 ? eurRate : 6.0,
+      webhookId,
+      enabled,
+    };
   }
 
   function getPayPalBaseUrl(mode: string) {
@@ -7140,8 +8083,10 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     return res.data.access_token as string;
   }
 
-  function convertBrlToUsd(totalBrl: number, rate: number) {
-    return Math.round((totalBrl / rate) * 100) / 100;
+  function convertBrlToCurrency(totalBrl: number, currency: 'BRL' | 'USD' | 'EUR', usdRate: number, eurRate: number) {
+    if (currency === 'BRL') return Math.round(totalBrl * 100) / 100;
+    if (currency === 'EUR') return Math.round((totalBrl / eurRate) * 100) / 100;
+    return Math.round((totalBrl / usdRate) * 100) / 100;
   }
 
   // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ PayPal Endpoints Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -7150,12 +8095,12 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   app.post('/api/paypal/create-order', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
-      const freshUser = getUserById(Number(user?.id || 0));
+      const freshUser = await getUserById(Number(user?.id || 0));
       if (!freshUser) return res.status(401).json({ error: 'Usuario nao encontrado' });
       if (freshUser.status !== 'ativo' && freshUser.status !== 'active') {
         return res.status(403).json({ error: 'Conta inativa' });
       }
-      if (resolveEmailVerificationRequired() && !freshUser.email_verified_at) {
+      if ((await resolveEmailVerificationRequired()) && !freshUser.email_verified_at) {
         return res.status(403).json({ error: 'Confirme seu e-mail para finalizar compras.', code: 'EMAIL_NOT_VERIFIED' });
       }
 
@@ -7164,9 +8109,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Carrinho vazio' });
       }
 
-      const lgpd = resolveLgpdSettings();
+      const lgpd = await resolveLgpdSettings();
       if (lgpd.enabled) {
-        const lgpdCompliance = ensureUserLgpdCompliance(Number(freshUser.id));
+        const lgpdCompliance = await ensureUserLgpdCompliance(Number(freshUser.id));
         if (!lgpdCompliance.ok) {
           return res.status(403).json({
             error: 'Aceite as polÃƒÂ­ticas de privacidade e termos para concluir a compra.',
@@ -7183,7 +8128,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         }
 
         if (parseBooleanSetting(checkout_data_processing_accepted, false)) {
-          upsertUserConsent({
+          await upsertUserConsent({
             userId: Number(freshUser.id),
             consentKey: 'checkout_data_processing',
             granted: true,
@@ -7194,7 +8139,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         }
       }
 
-      const cfg = getPayPalConfig();
+      const cfg = await getPayPalConfig();
       if (!cfg.enabled) return res.status(400).json({ error: 'PayPal nÃƒÂ£o estÃƒÂ¡ habilitado' });
       if (!cfg.clientId || !cfg.clientSecret) return res.status(400).json({ error: 'Credenciais PayPal nÃƒÂ£o configuradas' });
 
@@ -7202,7 +8147,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       let totalBrl = 0;
       const validatedItems: any[] = [];
       for (const item of items) {
-        const product = db.get('SELECT id, name, price, sale_price, status FROM products WHERE id = ?', item.product_id) as any;
+        const product = await dbAsync.get('SELECT id, name, price, sale_price, status FROM products WHERE id = ?', item.product_id) as any;
         if (!product || product.status !== 'active') {
           return res.status(400).json({ error: `Produto ID ${item.product_id} nÃƒÂ£o encontrado ou inativo` });
         }
@@ -7211,21 +8156,45 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         validatedItems.push({ product_id: product.id, product_name: product.name, price });
       }
 
-      const totalUsd = convertBrlToUsd(totalBrl, cfg.rate);
+      const convertedTotal = convertBrlToCurrency(totalBrl, cfg.currency, cfg.usdRate, cfg.eurRate);
       const baseUrl = getPayPalBaseUrl(cfg.mode);
       const appUrl = process.env.APP_URL || loadSettingsMap(['app_url']).app_url || 'https://digitalbordados.com.br';
 
       // Create internal order
-      const orderResult = db.run(`
+      const orderResult = await dbAsync.run(`
         INSERT INTO orders (user_id, total, status, payment_method, payment_provider, currency,
           original_total_brl, converted_total_usd, exchange_rate, customer_email, customer_name)
         VALUES (?, ?, 'pending', 'paypal', 'paypal', ?, ?, ?, ?, ?, ?)
-      `, user.id, totalBrl, cfg.currency, totalBrl, totalUsd, cfg.rate,
+      `, user.id, totalBrl, cfg.currency, totalBrl, convertedTotal, cfg.currency === 'EUR' ? cfg.eurRate : cfg.usdRate,
          user.email || '', user.name || '');
       const orderId = Number(orderResult.lastInsertRowid);
 
+      const customerProfile = await dbAsync.get('SELECT * FROM customers WHERE user_id = ? LIMIT 1', Number(user.id)) as any;
+      const userNameParts = String(user.name || '').trim().split(/\s+/).filter(Boolean);
+      const firstName = String(customerProfile?.first_name || userNameParts[0] || '');
+      const lastName = String(customerProfile?.last_name || userNameParts.slice(1).join(' ') || '');
+      await dbAsync.run(`
+        INSERT INTO order_customer_details
+          (order_id, first_name, last_name, cpf, email, phone, city, state, postal_code, address_line, number, neighborhood, complement)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+        orderId,
+        firstName || null,
+        lastName || null,
+        String(customerProfile?.cpf || '').trim() || null,
+        String(user.email || '').trim().toLowerCase() || null,
+        String(customerProfile?.phone || '').trim() || null,
+        String(customerProfile?.billing_city || customerProfile?.city || '').trim() || null,
+        String(customerProfile?.billing_state || customerProfile?.state || '').trim() || null,
+        String(customerProfile?.billing_zip || customerProfile?.zip || '').trim() || null,
+        String(customerProfile?.billing_address || customerProfile?.address || '').trim() || null,
+        String(customerProfile?.billing_number || customerProfile?.number || '').trim() || null,
+        String(customerProfile?.billing_neighborhood || customerProfile?.neighborhood || '').trim() || null,
+        String(customerProfile?.billing_complement || customerProfile?.complement || '').trim() || null,
+      );
+
       for (const it of validatedItems) {
-        db.run('INSERT INTO order_items (order_id, product_id, product_name, price, quantity) VALUES (?, ?, ?, ?, 1)',
+        await dbAsync.run('INSERT INTO order_items (order_id, product_id, product_name, price, quantity) VALUES (?, ?, ?, ?, 1)',
           orderId, it.product_id, it.product_name, it.price);
       }
 
@@ -7238,7 +8207,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           reference_id: String(orderId),
           amount: {
             currency_code: cfg.currency,
-            value: totalUsd.toFixed(2),
+            value: convertedTotal.toFixed(2),
           },
           description: `Digital Bordados - Pedido #${orderId}`,
         }],
@@ -7257,9 +8226,26 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const paypalOrderId = ppRes.data.id as string;
       const approvalLink = (ppRes.data.links as any[]).find((l: any) => l.rel === 'approve')?.href || '';
 
-      db.run('UPDATE orders SET paypal_order_id = ?, paypal_status = ? WHERE id = ?', paypalOrderId, 'CREATED', orderId);
+      await dbAsync.run('UPDATE orders SET paypal_order_id = ?, paypal_status = ? WHERE id = ?', paypalOrderId, 'CREATED', orderId);
 
-      db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+      const createdEmailPayload = await buildOrderEmailPayload(orderId, 'paypal', 'created', appUrl);
+      if (createdEmailPayload?.customerEmail) {
+        sendEmail({
+          to: createdEmailPayload.customerEmail,
+          templateKey: 'order_created',
+          variables: createdEmailPayload.variables,
+        }).catch((err) => console.error('Failed to send PayPal order_created email:', err));
+      }
+      const orderNotificationEmail = await getOrderNotificationEmail();
+      if (orderNotificationEmail && createdEmailPayload) {
+        sendEmail({
+          to: orderNotificationEmail,
+          templateKey: 'order_created',
+          variables: createdEmailPayload.adminVariables,
+        }).catch((err) => console.error('Failed to send PayPal order_created team email:', err));
+      }
+
+      await dbAsync.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
         'paypal', orderId, paypalOrderId, 'created', 'PayPal order created');
 
       return res.json({
@@ -7268,13 +8254,29 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         paypal_order_id: paypalOrderId,
         approval_url: approvalLink,
         total_brl: totalBrl,
-        total_usd: totalUsd,
-        exchange_rate: cfg.rate,
+        converted_total: convertedTotal,
+        exchange_rate: cfg.currency === 'EUR' ? cfg.eurRate : cfg.usdRate,
         currency: cfg.currency,
       });
     } catch (error: any) {
-      console.error('PayPal create-order error:', error?.response?.data || error?.message || error);
-      return res.status(500).json({ error: 'Erro ao criar pedido PayPal' });
+      const providerError = error?.response?.data || {};
+      const issue = providerError?.details?.[0]?.issue || '';
+      const description = providerError?.details?.[0]?.description || providerError?.message || '';
+      const friendlyError =
+        issue === 'CURRENCY_NOT_SUPPORTED'
+          ? 'Sua conta PayPal não aceita esta moeda. Habilite a moeda na conta PayPal ou altere a moeda padrão do recebimento.'
+          : 'Erro ao criar pedido PayPal';
+      console.error('PayPal create-order error:', providerError || error?.message || error);
+      await dbAsync.run(
+        'INSERT INTO payment_logs (provider, order_id, external_id, status, message, payload_json) VALUES (?, ?, ?, ?, ?, ?)',
+        'paypal',
+        null,
+        null,
+        'error',
+        `create-order: ${issue || 'unknown'} ${description || ''}`.trim(),
+        JSON.stringify(providerError || { message: error?.message || 'unknown_error' }),
+      );
+      return res.status(500).json({ error: friendlyError });
     }
   });
 
@@ -7285,13 +8287,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const { paypal_order_id } = req.body || {};
       if (!paypal_order_id) return res.status(400).json({ error: 'paypal_order_id ÃƒÂ© obrigatÃƒÂ³rio' });
 
-      const order = db.get('SELECT * FROM orders WHERE paypal_order_id = ?', paypal_order_id) as any;
+      const order = await dbAsync.get('SELECT * FROM orders WHERE paypal_order_id = ?', paypal_order_id) as any;
       if (!order) return res.status(404).json({ error: 'Pedido nao encontrado' });
       if (Number(order.user_id) !== Number(user?.id)) {
         return res.status(403).json({ error: 'Pedido nao pertence ao usuario autenticado' });
       }
 
-      const cfg = getPayPalConfig();
+      const cfg = await getPayPalConfig();
       const baseUrl = getPayPalBaseUrl(cfg.mode);
       const accessToken = await getPayPalAccessToken(cfg.clientId, cfg.clientSecret, baseUrl);
       const axios = (await import('axios')).default;
@@ -7309,14 +8311,39 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const payerEmail = captureData?.payer?.email_address || '';
 
       if (captureStatus === 'COMPLETED') {
-        db.run(`UPDATE orders SET status = 'paid', paypal_status = 'COMPLETED', paypal_capture_id = ?,
+        await dbAsync.run(`UPDATE orders SET status = 'paid', paypal_status = 'COMPLETED', paypal_capture_id = ?,
           paypal_payer_email = ?, paid_at = NOW() WHERE id = ?`, captureId, payerEmail, order.id);
-        db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+        await dbAsync.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
           'paypal', order.id, captureId, 'completed', 'Pagamento capturado com sucesso');
+
+        const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+        const paidEmailPayload = await buildOrderEmailPayload(Number(order.id), 'paypal', 'paid', appUrl);
+        if (paidEmailPayload?.customerEmail) {
+          sendEmail({
+            to: paidEmailPayload.customerEmail,
+            templateKey: 'order_paid',
+            variables: {
+              ...paidEmailPayload.variables,
+              downloads_url: `${appUrl}/conta`,
+            },
+          }).catch((err) => console.error('Failed to send PayPal order_paid email:', err));
+        }
+        const orderNotificationEmail = await getOrderNotificationEmail();
+        if (orderNotificationEmail && paidEmailPayload) {
+          sendEmail({
+            to: orderNotificationEmail,
+            templateKey: 'order_paid',
+            variables: {
+              ...paidEmailPayload.adminVariables,
+              downloads_url: `${appUrl}/admin/pedidos`,
+            },
+          }).catch((err) => console.error('Failed to send PayPal order_paid team email:', err));
+        }
+
         return res.json({ success: true, status: 'paid', order_id: order.id, capture_id: captureId });
       } else {
-        db.run("UPDATE orders SET paypal_status = ? WHERE id = ?", captureStatus, order.id);
-        db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+        await dbAsync.run("UPDATE orders SET paypal_status = ? WHERE id = ?", captureStatus, order.id);
+        await dbAsync.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
           'paypal', order.id, captureId || paypal_order_id, captureStatus, `Captura com status: ${captureStatus}`);
         return res.status(400).json({ success: false, status: captureStatus, error: 'Pagamento nÃƒÂ£o foi completado' });
       }
@@ -7337,40 +8364,64 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       if (!eventId) {
         return res.status(400).json({ received: false, error: 'missing_event_id' });
       }
-      if (isWebhookAlreadyProcessed('paypal', String(eventId))) {
+      if (await isWebhookAlreadyProcessed('paypal', String(eventId))) {
         return res.status(200).json({ received: true, duplicated: true });
       }
 
       const signatureCheck = await verifyPayPalWebhookSignature(req, payload);
       if (!signatureCheck.ok) {
-        db.run(`INSERT INTO paypal_webhook_logs (event_id, event_type, resource_id, payload_json, verification_status)
+        await dbAsync.run(`INSERT INTO paypal_webhook_logs (event_id, event_type, resource_id, payload_json, verification_status)
           VALUES (?, ?, ?, ?, ?)`, String(eventId), String(eventType), String(resourceId), JSON.stringify(payload), `invalid:${signatureCheck.reason}`);
         return res.status(401).json({ received: false, error: 'invalid_signature' });
       }
 
-      db.run(`INSERT INTO paypal_webhook_logs (event_id, event_type, resource_id, payload_json, verification_status)
+      await dbAsync.run(`INSERT INTO paypal_webhook_logs (event_id, event_type, resource_id, payload_json, verification_status)
         VALUES (?, ?, ?, ?, 'verified')`, eventId, eventType, resourceId, JSON.stringify(payload));
 
       if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
         const captureId = resourceId;
-        const order = db.get('SELECT * FROM orders WHERE paypal_capture_id = ? OR paypal_order_id = ?',
+        const order = await dbAsync.get('SELECT * FROM orders WHERE paypal_capture_id = ? OR paypal_order_id = ?',
           captureId, payload?.resource?.supplementary_data?.related_ids?.order_id || '') as any;
         if (order && order.status !== 'paid') {
-          db.run("UPDATE orders SET status = 'paid', paypal_status = 'COMPLETED', paid_at = NOW() WHERE id = ?", order.id);
-          db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+          await dbAsync.run("UPDATE orders SET status = 'paid', paypal_status = 'COMPLETED', paid_at = NOW() WHERE id = ?", order.id);
+          await dbAsync.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
             'paypal', order.id, captureId, 'webhook_completed', 'Pago via webhook PAYMENT.CAPTURE.COMPLETED');
+
+          const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+          const paidEmailPayload = await buildOrderEmailPayload(Number(order.id), 'paypal', 'paid', appUrl);
+          if (paidEmailPayload?.customerEmail) {
+            sendEmail({
+              to: paidEmailPayload.customerEmail,
+              templateKey: 'order_paid',
+              variables: {
+                ...paidEmailPayload.variables,
+                downloads_url: `${appUrl}/conta`,
+              },
+            }).catch((err) => console.error('Failed to send PayPal webhook order_paid email:', err));
+          }
+          const orderNotificationEmail = await getOrderNotificationEmail();
+          if (orderNotificationEmail && paidEmailPayload) {
+            sendEmail({
+              to: orderNotificationEmail,
+              templateKey: 'order_paid',
+              variables: {
+                ...paidEmailPayload.adminVariables,
+                downloads_url: `${appUrl}/admin/pedidos`,
+              },
+            }).catch((err) => console.error('Failed to send PayPal webhook order_paid team email:', err));
+          }
         }
       } else if (eventType === 'PAYMENT.CAPTURE.DENIED') {
         const captureId = resourceId;
-        const order = db.get('SELECT * FROM orders WHERE paypal_capture_id = ?', captureId) as any;
+        const order = await dbAsync.get('SELECT * FROM orders WHERE paypal_capture_id = ?', captureId) as any;
         if (order) {
-          db.run("UPDATE orders SET status = 'failed', paypal_status = 'DENIED' WHERE id = ?", order.id);
-          db.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
+          await dbAsync.run("UPDATE orders SET status = 'failed', paypal_status = 'DENIED' WHERE id = ?", order.id);
+          await dbAsync.run('INSERT INTO payment_logs (provider, order_id, external_id, status, message) VALUES (?, ?, ?, ?, ?)',
             'paypal', order.id, captureId, 'denied', 'Captura negada via webhook PAYMENT.CAPTURE.DENIED');
         }
       }
 
-      markWebhookProcessed('paypal', String(eventId), String(resourceId || ''));
+      await markWebhookProcessed('paypal', String(eventId), String(resourceId || ''));
       return res.status(200).json({ received: true });
     } catch (error) {
       console.error('PayPal webhook error:', error);
@@ -7381,7 +8432,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   // GET /api/admin/paypal/test
   app.get('/api/admin/paypal/test', authenticate, isAdmin, async (req, res) => {
     try {
-      const cfg = getPayPalConfig();
+      const cfg = await getPayPalConfig();
       if (!cfg.clientId || !cfg.clientSecret) {
         return res.status(400).json({ ok: false, error: 'Credenciais PayPal nÃƒÂ£o configuradas no painel' });
       }
@@ -7398,9 +8449,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   });
 
   // GET /api/admin/paypal/webhook-logs
-  app.get('/api/admin/paypal/webhook-logs', authenticate, isAdmin, (req, res) => {
+  app.get('/api/admin/paypal/webhook-logs', authenticate, isAdmin, async (req, res) => {
     try {
-      const logs = db.all('SELECT id, event_id, event_type, resource_id, verification_status, created_at FROM paypal_webhook_logs ORDER BY created_at DESC LIMIT 100');
+      const logs = await dbAsync.all('SELECT id, event_id, event_type, resource_id, verification_status, created_at FROM paypal_webhook_logs ORDER BY created_at DESC LIMIT 100');
       return res.json(logs);
     } catch (error) {
       console.error('PayPal webhook-logs error:', error);
@@ -7409,15 +8460,17 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   });
 
   // GET /api/checkout/paypal/config (pÃƒÂºblico - retorna apenas client_id e modo)
-  app.get('/api/checkout/paypal/config', (req, res) => {
+  app.get('/api/checkout/paypal/config', async (req, res) => {
     try {
-      const cfg = getPayPalConfig();
+      const cfg = await getPayPalConfig();
       return res.json({
         enabled: cfg.enabled,
         mode: cfg.mode,
         client_id: cfg.clientId,
         currency: cfg.currency,
-        brl_usd_rate: cfg.rate,
+        brl_usd_rate: cfg.usdRate,
+        brl_eur_rate: cfg.eurRate,
+        supported_currencies: ['BRL', 'USD', 'EUR'],
       });
     } catch (error) {
       return res.status(500).json({ error: 'Erro ao buscar config PayPal' });
@@ -7446,11 +8499,11 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   }
 
   // Cron Job: Pending PIX Reminder (Runs every 30 minutes)
-  setInterval(() => {
+  setInterval(async () => {
     try {
       console.log('[Cron] Checking for pending PIX payments...');
       
-      const pendingOrders = db.all(`
+      const pendingOrders = await dbAsync.all(`
         SELECT * FROM orders 
         WHERE status = 'pending' 
         AND payment_method = 'pix'
@@ -7458,13 +8511,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
       `) as any[];
 
-      const notifiedLogs = db.all(`SELECT subject FROM email_logs WHERE template_key = 'payment_pending_pix'`) as any[];
+      const notifiedLogs = await dbAsync.all(`SELECT subject FROM email_logs WHERE template_key = 'payment_pending_pix'`) as any[];
       const notifiedOrderIds = notifiedLogs.map(log => {
         const match = log.subject.match(/#(\d+)/);
         return match ? Number(match[1]) : null;
       }).filter(Boolean);
 
-      const _settings = (db.all('SELECT * FROM settings LIMIT 1') as any[])[0] || null;
+      const _settings = (await dbAsync.all('SELECT * FROM settings LIMIT 1') as any[])[0] || null;
       const appUrl = process.env.APP_URL || _settings?.app_url || `https://digitalbordados.com.br`;
 
       pendingOrders.forEach(order => {

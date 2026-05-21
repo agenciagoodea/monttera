@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Palette, 
   Mail, 
@@ -28,9 +28,11 @@ import {
   Database,
   Users,
   FileCheck2,
+  Globe2,
 } from 'lucide-react';
 import AdminEmailTemplates from './AdminEmailTemplates';
 import AdminEmailLogs from './AdminEmailLogs';
+import AdminBudgetEmailLogs from './AdminBudgetEmailLogs';
 
 type MpConnectionInfo = {
   nickname: string;
@@ -98,6 +100,11 @@ export default function AdminSettings() {
   const [showPayPalSandboxSecret, setShowPayPalSandboxSecret] = useState(false);
   const [showPayPalProdSecret, setShowPayPalProdSecret] = useState(false);
   const [copiedPaypalWebhook, setCopiedPaypalWebhook] = useState(false);
+  const [backups, setBackups] = useState<any[]>([]);
+  const [loadingBackups, setLoadingBackups] = useState(false);
+  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [backupMode, setBackupMode] = useState<'full' | 'incremental'>('full');
+  const [backupActionId, setBackupActionId] = useState<number | null>(null);
 
   const [settings, setSettings] = useState({
     // Home/Info
@@ -113,6 +120,39 @@ export default function AdminSettings() {
     contact_whatsapp: '',
     new_badge_days: '10',
     redirect_to_checkout_after_add_to_cart: 'false',
+    top_bar_enabled: 'true',
+    top_bar_message: 'Faça seu cadastro e baixe suas matrizes no painel ao lado. Aproveite!',
+    home_company_enabled: 'true',
+    home_company_title: 'Nossa Empresa',
+    home_company_subtitle: 'Qualidade e confiança em matrizes de bordado digital',
+    home_company_text: 'Criamos experiências em bordado com curadoria técnica, produção consistente e atendimento especializado para quem vive do bordado.',
+    home_company_mission: 'Entregar matrizes de alta qualidade com agilidade e suporte humano.',
+    home_company_vision: 'Ser referência nacional em matrizes para bordado profissional.',
+    home_company_values: 'Qualidade, Transparência, Agilidade, Inovação e Respeito ao cliente.',
+    home_company_image_main: '',
+    home_company_image_secondary: '',
+    home_company_cta_text: 'Conheça nossa coleção',
+    home_company_cta_link: '/loja',
+    home_company_bg_color: '#0f172a',
+    home_company_text_color: '#f8fafc',
+    home_company_icons: '["shield","sparkles","award"]',
+    seo_meta_title: 'Digital Bordados',
+    seo_meta_description: 'Matrizes de bordado digital com qualidade profissional.',
+    seo_keywords: 'matriz de bordado, bordado computadorizado, matriz pes, dst, jef',
+    seo_robots_index: 'true',
+    seo_robots_follow: 'true',
+    seo_og_image: '/uploads/seo-default-share.jpg',
+    seo_twitter_card: 'summary_large_image',
+    seo_facebook_url: '',
+    seo_instagram_url: '',
+    seo_twitter_url: '',
+    seo_organization_name: 'Digital Bordados',
+    seo_organization_logo: '',
+    seo_enable_product_schema: 'true',
+    seo_enable_organization_schema: 'true',
+    seo_enable_breadcrumb_schema: 'true',
+    seo_sitemap_enabled: 'true',
+    seo_robots_custom_rules: '',
     // Suporte ao Cliente
     support_whatsapp: '',
     support_email: '',
@@ -138,6 +178,7 @@ export default function AdminSettings() {
     paypal_production_client_secret: '',
     paypal_default_currency: 'USD',
     paypal_brl_usd_rate: '5.20',
+    paypal_brl_eur_rate: '6.00',
     paypal_webhook_id: '',
 
     // Email Config
@@ -172,6 +213,12 @@ export default function AdminSettings() {
   useEffect(() => {
     fetchSettings();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'backup') {
+      fetchBackups();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     const toRgb = (hex: string) => {
@@ -220,7 +267,9 @@ export default function AdminSettings() {
           paypal_sandbox_client_secret: data.paypal_sandbox_client_secret ?? prev.paypal_sandbox_client_secret,
           paypal_production_client_id: data.paypal_production_client_id ?? prev.paypal_production_client_id,
           paypal_production_client_secret: data.paypal_production_client_secret ?? prev.paypal_production_client_secret,
+          paypal_default_currency: data.paypal_default_currency ?? prev.paypal_default_currency,
           paypal_brl_usd_rate: data.paypal_brl_usd_rate ?? prev.paypal_brl_usd_rate,
+          paypal_brl_eur_rate: data.paypal_brl_eur_rate ?? prev.paypal_brl_eur_rate,
           paypal_webhook_id: data.paypal_webhook_id ?? prev.paypal_webhook_id,
         }));
       }
@@ -446,10 +495,93 @@ export default function AdminSettings() {
     }
   };
 
+  const uploadCompanyImage = async (file: File, target: 'home_company_image_main' | 'home_company_image_secondary') => {
+    const formData = new FormData();
+    formData.append('logo', file);
+    const res = await fetch('/api/admin/upload-logo', { method: 'POST', body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.url) throw new Error(data?.error || 'Erro ao fazer upload da imagem');
+    setSettings(prev => ({ ...prev, [target]: data.url }));
+  };
+
+  const fetchBackups = async () => {
+    setLoadingBackups(true);
+    try {
+      const res = await fetch('/api/admin/backups');
+      const data = await res.json().catch(() => []);
+      if (!res.ok) throw new Error(data?.error || 'Erro ao carregar backups');
+      setBackups(Array.isArray(data) ? data : []);
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error?.message || 'Erro ao carregar backups.' });
+    } finally {
+      setLoadingBackups(false);
+    }
+  };
+
+  const createBackup = async () => {
+    setCreatingBackup(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/admin/backups/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: backupMode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Erro ao criar backup');
+      setMessage({ type: 'success', text: 'Backup gerado com sucesso.' });
+      fetchBackups();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error?.message || 'Falha ao criar backup.' });
+    } finally {
+      setCreatingBackup(false);
+    }
+  };
+
+  const downloadBackup = (id: number) => {
+    window.open('/api/admin/backups/download/' + id, '_blank');
+  };
+
+  const restoreBackup = async (id: number) => {
+    if (!window.confirm('Confirma restaurar este backup? Esta opera??o substitui dados atuais do sistema.')) return;
+    setBackupActionId(id);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/admin/backups/restore/' + id, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Erro ao restaurar backup');
+      setMessage({ type: 'success', text: 'Restaura??o conclu?da com sucesso.' });
+      fetchBackups();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error?.message || 'Falha ao restaurar backup.' });
+    } finally {
+      setBackupActionId(null);
+    }
+  };
+
+  const deleteBackup = async (id: number) => {
+    if (!window.confirm('Confirma excluir este backup?')) return;
+    setBackupActionId(id);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/admin/backups/' + id, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Erro ao excluir backup');
+      setMessage({ type: 'success', text: 'Backup exclu?do com sucesso.' });
+      fetchBackups();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: error?.message || 'Falha ao excluir backup.' });
+    } finally {
+      setBackupActionId(null);
+    }
+  };
+
   const tabs = [
     { id: 'home', label: 'Aparência & Home', icon: Layout },
     { id: 'email', label: 'Configuração de E-mail', icon: Mail },
+    { id: 'seo', label: 'SEO', icon: Globe2 },
     { id: 'payment', label: 'Meios de Pagamento', icon: CreditCard },
+    { id: 'backup', label: 'Backup', icon: Database },
     { id: 'lgpd', label: 'LGPD', icon: ShieldCheck },
   ];
 
@@ -903,6 +1035,34 @@ export default function AdminSettings() {
                 <div className="space-y-8">
                   <div>
                     <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Informações Institucionais</h3>
+                    
+                    <div className="mb-8 p-6 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-6">
+                      <div className="flex items-center gap-4">
+                        <button
+                          type="button"
+                          onClick={() => setSettings({ ...settings, top_bar_enabled: settings.top_bar_enabled === 'true' ? 'false' : 'true' })}
+                          className={`w-12 h-6 rounded-full transition-colors relative ${settings.top_bar_enabled === 'true' ? 'bg-blue-600' : 'bg-slate-300'}`}
+                        >
+                          <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${settings.top_bar_enabled === 'true' ? 'left-7' : 'left-1'}`} />
+                        </button>
+                        <div>
+                          <label className="text-[10px] font-black text-slate-700 uppercase tracking-widest block cursor-pointer" onClick={() => setSettings({ ...settings, top_bar_enabled: settings.top_bar_enabled === 'true' ? 'false' : 'true' })}>Exibir Barra Superior</label>
+                          <p className="text-[9px] font-bold text-slate-400 mt-0.5">Ativa ou desativa a barra de avisos no topo do site.</p>
+                        </div>
+                      </div>
+                      
+                      <div className={`space-y-2 transition-all ${settings.top_bar_enabled === 'true' ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Mensagem da Barra Superior</label>
+                        <input 
+                          type="text" 
+                          className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                          value={settings.top_bar_message}
+                          onChange={e => setSettings({...settings, top_bar_message: e.target.value})}
+                          placeholder="Ex: Faça seu cadastro e baixe suas matrizes..."
+                        />
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nome do Site</label>
@@ -1034,6 +1194,113 @@ export default function AdminSettings() {
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
                           Quando ativado, o cliente será enviado direto para o checkout ao clicar em comprar.
                         </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Seção Nossa Empresa</h3>
+                    <div className="rounded-[2rem] border border-slate-100 bg-slate-50 p-6 space-y-6">
+                      <div className="flex items-center gap-4">
+                        <button
+                          type="button"
+                          onClick={() => setSettings({ ...settings, home_company_enabled: settings.home_company_enabled === 'true' ? 'false' : 'true' })}
+                          className={`w-12 h-6 rounded-full transition-colors relative ${settings.home_company_enabled === 'true' ? 'bg-blue-600' : 'bg-slate-300'}`}
+                        >
+                          <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${settings.home_company_enabled === 'true' ? 'left-7' : 'left-1'}`} />
+                        </button>
+                        <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Exibir seção na Home</span>
+                      </div>
+
+                      <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${settings.home_company_enabled === 'true' ? '' : 'opacity-50 pointer-events-none'}`}>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Título</label>
+                          <input type="text" className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-xs font-bold" value={settings.home_company_title} onChange={e => setSettings({ ...settings, home_company_title: e.target.value })} />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Subtítulo</label>
+                          <input type="text" className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-xs font-bold" value={settings.home_company_subtitle} onChange={e => setSettings({ ...settings, home_company_subtitle: e.target.value })} />
+                        </div>
+                        <div className="md:col-span-2 space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Texto institucional</label>
+                          <textarea rows={4} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-xs font-semibold" value={settings.home_company_text} onChange={e => setSettings({ ...settings, home_company_text: e.target.value })} />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Missão</label>
+                          <textarea rows={3} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-xs font-semibold" value={settings.home_company_mission} onChange={e => setSettings({ ...settings, home_company_mission: e.target.value })} />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Visão</label>
+                          <textarea rows={3} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-xs font-semibold" value={settings.home_company_vision} onChange={e => setSettings({ ...settings, home_company_vision: e.target.value })} />
+                        </div>
+                        <div className="md:col-span-2 space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Valores</label>
+                          <textarea rows={3} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-xs font-semibold" value={settings.home_company_values} onChange={e => setSettings({ ...settings, home_company_values: e.target.value })} />
+                        </div>
+
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Imagem principal</label>
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                            {settings.home_company_image_main ? <img src={settings.home_company_image_main} className="w-full h-28 object-cover rounded-xl" /> : <div className="w-full h-28 rounded-xl bg-slate-100" />}
+                            <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest cursor-pointer">
+                              Upload
+                              <input type="file" className="hidden" accept="image/*" onChange={async (e) => {
+                                const f = e.target.files?.[0];
+                                if (!f) return;
+                                try {
+                                  await uploadCompanyImage(f, 'home_company_image_main');
+                                  setMessage({ text: 'Imagem principal carregada. Salve para aplicar.', type: 'success' });
+                                } catch (err: any) {
+                                  setMessage({ text: err?.message || 'Erro no upload da imagem principal.', type: 'error' });
+                                } finally {
+                                  e.currentTarget.value = '';
+                                }
+                              }} />
+                            </label>
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Imagem secundária</label>
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                            {settings.home_company_image_secondary ? <img src={settings.home_company_image_secondary} className="w-full h-28 object-cover rounded-xl" /> : <div className="w-full h-28 rounded-xl bg-slate-100" />}
+                            <label className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest cursor-pointer">
+                              Upload
+                              <input type="file" className="hidden" accept="image/*" onChange={async (e) => {
+                                const f = e.target.files?.[0];
+                                if (!f) return;
+                                try {
+                                  await uploadCompanyImage(f, 'home_company_image_secondary');
+                                  setMessage({ text: 'Imagem secundária carregada. Salve para aplicar.', type: 'success' });
+                                } catch (err: any) {
+                                  setMessage({ text: err?.message || 'Erro no upload da imagem secundária.', type: 'error' });
+                                } finally {
+                                  e.currentTarget.value = '';
+                                }
+                              }} />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Botão CTA</label>
+                          <input type="text" className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-xs font-bold" value={settings.home_company_cta_text} onChange={e => setSettings({ ...settings, home_company_cta_text: e.target.value })} />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Link CTA</label>
+                          <input type="text" className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-xs font-bold" value={settings.home_company_cta_link} onChange={e => setSettings({ ...settings, home_company_cta_link: e.target.value })} />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Cor do fundo</label>
+                          <input type="color" className="w-full h-12 rounded-xl bg-white border border-slate-200 p-1" value={settings.home_company_bg_color} onChange={e => setSettings({ ...settings, home_company_bg_color: e.target.value })} />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Cor do texto</label>
+                          <input type="color" className="w-full h-12 rounded-xl bg-white border border-slate-200 p-1" value={settings.home_company_text_color} onChange={e => setSettings({ ...settings, home_company_text_color: e.target.value })} />
+                        </div>
+                        <div className="md:col-span-2 space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Ícones (JSON)</label>
+                          <input type="text" className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-xs font-bold" value={settings.home_company_icons} onChange={e => setSettings({ ...settings, home_company_icons: e.target.value })} placeholder='["shield","sparkles","award"]' />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1455,7 +1722,12 @@ export default function AdminSettings() {
                   )}
 
                   {emailSubTab === 'templates' && <AdminEmailTemplates />}
-                  {emailSubTab === 'logs' && <AdminEmailLogs />}
+                  {emailSubTab === 'logs' && (
+                    <div className="space-y-6">
+                      <AdminEmailLogs />
+                      <AdminBudgetEmailLogs />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2094,6 +2366,166 @@ export default function AdminSettings() {
                 </div>
               )}
 
+              {/* Tab: SEO */}
+              {activeTab === 'seo' && (
+                <div className="space-y-6">
+                  <div className="rounded-[2rem] border border-slate-200 p-6 md:p-8 space-y-6">
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Configurações Globais de SEO</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Meta Title Global</label>
+                        <input value={settings.seo_meta_title || ''} onChange={e => setSettings({ ...settings, seo_meta_title: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Meta Description Global</label>
+                        <textarea rows={3} value={settings.seo_meta_description || ''} onChange={e => setSettings({ ...settings, seo_meta_description: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold resize-none" />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Keywords</label>
+                        <input value={settings.seo_keywords || ''} onChange={e => setSettings({ ...settings, seo_keywords: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Indexação</label>
+                        <select value={settings.seo_robots_index || 'true'} onChange={e => setSettings({ ...settings, seo_robots_index: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold">
+                          <option value="true">index</option>
+                          <option value="false">noindex</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Follow</label>
+                        <select value={settings.seo_robots_follow || 'true'} onChange={e => setSettings({ ...settings, seo_robots_follow: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold">
+                          <option value="true">follow</option>
+                          <option value="false">nofollow</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Sitemap XML</label>
+                        <select value={settings.seo_sitemap_enabled || 'true'} onChange={e => setSettings({ ...settings, seo_sitemap_enabled: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold">
+                          <option value="true">Ativo</option>
+                          <option value="false">Desativado</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Twitter Card</label>
+                        <select value={settings.seo_twitter_card || 'summary_large_image'} onChange={e => setSettings({ ...settings, seo_twitter_card: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold">
+                          <option value="summary_large_image">summary_large_image</option>
+                          <option value="summary">summary</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Open Graph Image</label>
+                        <input value={settings.seo_og_image || ''} onChange={e => setSettings({ ...settings, seo_og_image: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Schema Produto</label>
+                        <select value={settings.seo_enable_product_schema || 'true'} onChange={e => setSettings({ ...settings, seo_enable_product_schema: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"><option value="true">Ativo</option><option value="false">Desativado</option></select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Schema Organização</label>
+                        <select value={settings.seo_enable_organization_schema || 'true'} onChange={e => setSettings({ ...settings, seo_enable_organization_schema: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"><option value="true">Ativo</option><option value="false">Desativado</option></select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Schema Breadcrumb</label>
+                        <select value={settings.seo_enable_breadcrumb_schema || 'true'} onChange={e => setSettings({ ...settings, seo_enable_breadcrumb_schema: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"><option value="true">Ativo</option><option value="false">Desativado</option></select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nome da Organização</label>
+                        <input value={settings.seo_organization_name || ''} onChange={e => setSettings({ ...settings, seo_organization_name: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Regras customizadas de robots.txt</label>
+                        <textarea rows={4} value={settings.seo_robots_custom_rules || ''} onChange={e => setSettings({ ...settings, seo_robots_custom_rules: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold resize-y" placeholder="Ex.: Disallow: /admin" />
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-[11px] text-blue-800 font-semibold">
+                      Endpoints: <code>/robots.txt</code> e <code>/sitemap.xml</code> são gerados dinamicamente com essas configurações.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+
+              {activeTab === 'backup' && (
+                <div className="space-y-6">
+                  <div className="rounded-[2rem] border border-slate-200 p-6 md:p-8 space-y-5">
+                    <div className="flex flex-col md:flex-row md:items-center gap-3">
+                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Backup do Sistema</h3>
+                      <div className="md:ml-auto flex items-center gap-2">
+                        <select
+                          value={backupMode}
+                          onChange={(e) => setBackupMode(e.target.value as 'full' | 'incremental')}
+                          className="px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[10px] font-black uppercase tracking-widest"
+                        >
+                          <option value="full">Completo</option>
+                          <option value="incremental">Incremental</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={createBackup}
+                          disabled={creatingBackup}
+                          className="px-4 py-2.5 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                        >
+                          {creatingBackup ? 'Gerando...' : 'Gerar Backup'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={fetchBackups}
+                          disabled={loadingBackups}
+                          className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                        >
+                          Atualizar
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-[11px] text-blue-800 font-semibold">
+                      O backup inclui snapshot de banco de dados e pasta <code>public/uploads</code>. Utilize restaura??o apenas em ambiente controlado.
+                    </div>
+
+                    <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                      <table className="min-w-full text-xs">
+                        <thead className="bg-slate-50 text-slate-500 uppercase tracking-widest text-[10px]">
+                          <tr>
+                            <th className="px-4 py-3 text-left">Data</th>
+                            <th className="px-4 py-3 text-left">Chave</th>
+                            <th className="px-4 py-3 text-left">Modo</th>
+                            <th className="px-4 py-3 text-left">Status</th>
+                            <th className="px-4 py-3 text-left">Tamanho</th>
+                            <th className="px-4 py-3 text-right">A??es</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {loadingBackups ? (
+                            <tr><td className="px-4 py-4 text-slate-500" colSpan={6}>Carregando backups...</td></tr>
+                          ) : backups.length === 0 ? (
+                            <tr><td className="px-4 py-4 text-slate-500" colSpan={6}>Nenhum backup encontrado.</td></tr>
+                          ) : backups.map((backup) => (
+                            <tr key={backup.id} className="border-t border-slate-100">
+                              <td className="px-4 py-3 font-semibold text-slate-700 whitespace-nowrap">{new Date(backup.created_at).toLocaleString('pt-BR')}</td>
+                              <td className="px-4 py-3 font-bold text-slate-900">{backup.backup_key}</td>
+                              <td className="px-4 py-3 font-bold text-slate-700 uppercase">{backup.mode}</td>
+                              <td className="px-4 py-3 font-bold">
+                                <span className={"px-2 py-1 rounded-lg text-[10px] uppercase " + (backup.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700')}>
+                                  {backup.status}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-slate-700">{Number(backup.size_bytes || 0).toLocaleString('pt-BR')} bytes</td>
+                              <td className="px-4 py-3">
+                                <div className="flex justify-end gap-2">
+                                  <button type="button" onClick={() => downloadBackup(Number(backup.id))} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-[10px] font-black uppercase">Download</button>
+                                  <button type="button" onClick={() => restoreBackup(Number(backup.id))} disabled={backupActionId === Number(backup.id)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Restaurar</button>
+                                  <button type="button" onClick={() => deleteBackup(Number(backup.id))} disabled={backupActionId === Number(backup.id)} className="px-3 py-1.5 rounded-lg bg-red-50 text-red-700 text-[10px] font-black uppercase disabled:opacity-50">Excluir</button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Tab: Payment */}
               {activeTab === 'payment' && (
                 <div className="space-y-8">
@@ -2296,9 +2728,21 @@ export default function AdminSettings() {
                           </select>
                         </div>
 
-                        {/* Currency + Rate */}
+                        {/* Currency + Rates */}
                         <div className="space-y-2">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Taxa BRL → USD</label>
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Moeda padr?o do recebimento</label>
+                          <select
+                            className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                            value={settings.paypal_default_currency}
+                            onChange={e => setSettings({ ...settings, paypal_default_currency: e.target.value })}
+                          >
+                            <option value="BRL">BRL (Real)</option>
+                            <option value="USD">USD (D?lar)</option>
+                            <option value="EUR">EUR (Euro)</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Taxa BRL ? USD</label>
                           <input
                             type="number"
                             step="0.01"
@@ -2309,6 +2753,22 @@ export default function AdminSettings() {
                             placeholder="5.20"
                           />
                           <p className="text-[10px] font-bold text-slate-400 ml-1">Ex: 5.20 significa 1 USD = R$ 5,20</p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Taxa BRL ? EUR</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="1"
+                            className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                            value={settings.paypal_brl_eur_rate}
+                            onChange={e => setSettings({ ...settings, paypal_brl_eur_rate: e.target.value })}
+                            placeholder="6.00"
+                          />
+                          <p className="text-[10px] font-bold text-slate-400 ml-1">Ex: 6.00 significa 1 EUR = R$ 6,00</p>
+                        </div>
+                        <div className="md:col-span-2 rounded-xl border border-blue-100 bg-blue-50 p-3 text-[11px] font-semibold text-blue-800">
+                          Contas PayPal pessoais podem receber pagamentos internacionais desde que a moeda esteja habilitada na conta PayPal.
                         </div>
 
                         {/* Sandbox credentials */}

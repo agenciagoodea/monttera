@@ -11,6 +11,8 @@ export default function Header() {
   const { totalItems, totalPrice } = useCart();
   const { totalFavorites } = useFavorites();
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [topBarEnabled, setTopBarEnabled] = useState(true);
+  const [topBarMessage, setTopBarMessage] = useState('Faça seu cadastro e baixe suas matrizes no painel ao lado. Aproveite!');
   const [search, setSearch] = useState(searchParams.get('q') || '');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -28,7 +30,11 @@ export default function Header() {
       try {
         const res = await fetch('/api/settings');
         const data = await res.json();
-        if (data && data.logo_url) setLogoUrl(data.logo_url);
+        if (data) {
+          if (data.logo_url) setLogoUrl(data.logo_url);
+          if (data.top_bar_enabled !== undefined) setTopBarEnabled(data.top_bar_enabled === 'true');
+          if (data.top_bar_message !== undefined) setTopBarMessage(data.top_bar_message);
+        }
       } catch (err) {
         console.error('Failed to fetch logo:', err);
       }
@@ -121,9 +127,34 @@ export default function Header() {
   return (
     <header className="w-full">
       {/* Top Bar */}
-      <div className="bg-primary text-white py-1.5 text-center text-[10px] font-bold tracking-widest uppercase">
-        Novas Matrizes Semanais • Ganhe 10% de desconto com o cupom: BEMVINDO
-      </div>
+      {topBarEnabled && topBarMessage && (
+        <div className="bg-primary text-white py-2.5 px-4 md:px-10">
+          <div className="max-w-[1440px] mx-auto flex items-center justify-between">
+            <div className="text-[10px] font-bold tracking-widest uppercase truncate flex-1 text-left">
+              {topBarMessage}
+            </div>
+            <div className="flex items-center gap-3 ml-4">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 50" width="28" height="19" className="rounded-sm shadow-sm opacity-90 hover:opacity-100 transition-opacity cursor-default" title="Brasil">
+                <rect width="72" height="50" fill="#009B3A"/>
+                <polygon points="36,4 68,25 36,46 4,25" fill="#FEDF00"/>
+                <circle cx="36" cy="25" r="14" fill="#002776"/>
+                <path d="M 23 28 Q 36 15 49 28 L 49 29 Q 36 16 23 29 Z" fill="#fff"/>
+              </svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="28" height="19" className="rounded-sm shadow-sm opacity-90 hover:opacity-100 transition-opacity cursor-default" title="Portugal">
+                <rect width="240" height="400" fill="#006600"/>
+                <rect x="240" width="360" height="400" fill="#ff0000"/>
+                <circle cx="240" cy="200" r="85" fill="#ffcc00"/>
+                <path d="M 190 150 L 290 150 L 290 220 Q 290 280 240 280 Q 190 280 190 220 Z" fill="#ffffff" stroke="#000000" strokeWidth="2"/>
+                <circle cx="240" cy="200" r="10" fill="#0000ff"/>
+                <circle cx="215" cy="200" r="10" fill="#0000ff"/>
+                <circle cx="265" cy="200" r="10" fill="#0000ff"/>
+                <circle cx="240" cy="175" r="10" fill="#0000ff"/>
+                <circle cx="240" cy="225" r="10" fill="#0000ff"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Header */}
       <div className="bg-white border-b border-blue-50 py-4 px-6 md:px-10 shadow-sm">
@@ -162,8 +193,8 @@ export default function Header() {
              <form onSubmit={handleSearch} className="relative flex-1 group">
                 <input 
                   type="text" 
-                  placeholder="Buscar matrizes (ex: Flor, Urso, Logotipo)..." 
-                  className="w-full pl-6 pr-14 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-300 transition-all font-medium"
+                  placeholder="Pesquise por uma palavra curta (ex.: policia, veterinária, enfermagem, carro, coleção) ..."
+                  className="w-full pl-5 sm:pl-6 pr-14 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] sm:text-sm focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-300 transition-all font-medium placeholder:text-[9px] min-[420px]:placeholder:text-[10px] sm:placeholder:text-sm placeholder:tracking-tight"
                   value={search}
                   onChange={(e) => {
                     setSearch(e.target.value);
@@ -331,3 +362,4 @@ export default function Header() {
     </header>
   );
 }
+

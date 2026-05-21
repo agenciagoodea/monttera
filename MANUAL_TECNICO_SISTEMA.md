@@ -1,369 +1,440 @@
-﻿# Manual Técnico — Digital Bordados
+﻿# Manual Tecnico do Sistema - Digital Bordados
 
-> Última atualização: 2026-05-19
+> Ultima atualizacao: 2026-05-20
 
----
+## 1. Visao geral
 
-## 1. Visão geral do sistema
+O sistema Digital Bordados e uma plataforma de e-commerce para venda de matrizes de bordado digital com:
 
-Digital Bordados é uma plataforma de e-commerce especializada em bordados digitais, com:
-
-- Catálogo de produtos para venda/download
-- Gestão administrativa completa (backoffice)
-- Área de clientes com histórico de pedidos e downloads
-- Integração com Mercado Pago e PayPal
-- Sistema de autenticação por JWT via cookie HTTP-only
-- Suporte a LGPD (consentimentos, anonimização, direito ao esquecimento)
-
----
-
-## 2. Stack tecnológica
-
-| Camada         | Tecnologia                              |
-|----------------|-----------------------------------------|
-| Frontend       | React 19 + Vite 6 + TypeScript          |
-| Backend        | Node.js 20 + Express + TypeScript (tsx) |
-| Banco de dados | MySQL 8 (driver mysql2)                 |
-| Autenticação   | JWT + cookie HTTP-only (auth_token)     |
-| Pagamentos     | Mercado Pago SDK + PayPal REST          |
-| E-mail         | Nodemailer + SMTP configurável          |
-| Estilização    | Tailwind CSS v4                         |
-| Deploy         | DirectAdmin / Phusion Passenger         |
+- Loja publica (catalogo, busca, categorias, detalhe de produto)
+- Area do cliente (conta, pedidos, downloads, privacidade/LGPD)
+- Painel administrativo completo
+- Checkout com Mercado Pago e PayPal
+- Gerenciamento de arquivos de produto e uploads
+- Sistema de e-mails transacionais com templates
+- Recursos LGPD (politicas, consentimentos, solicitacoes, exportacao)
+- Rotina de backup/restauracao via painel
 
 ---
 
-## 3. Estrutura de arquivos
+## 2. Stack tecnologica
 
-```
+- Frontend: React 19 + React Router 7 + TypeScript + Vite 6
+- Backend: Node.js 20 + Express + TypeScript (tsx em dev)
+- Banco: MySQL 8 (mysql2 async + sync-mysql2 para bootstrap/migracoes)
+- Auth: JWT em cookie HTTP-only (`auth_token`)
+- Uploads: multer
+- Pagamentos: Mercado Pago SDK + PayPal REST
+- E-mail: Nodemailer + Handlebars templates
+- Estilo: Tailwind CSS v4
+- Deploy alvo: DirectAdmin / Phusion Passenger
+
+---
+
+## 3. Estrutura principal de arquivos
+
+```txt
 digitalbordados/
 ├── src/
-│   ├── server/
-│   │   ├── db.ts           # Conexão MySQL e criação de schema (migrations)
-│   │   └── auth.ts         # Hash/senha, JWT e middlewares
-│   ├── components/         # Header, Footer, Banner, Sidebar, ProductCard
-│   ├── contexts/           # AuthContext, CartContext
-│   ├── layouts/            # AdminLayout (guard de área admin)
-│   ├── pages/              # Telas públicas e de cliente
-│   ├── pages/admin/        # Telas administrativas
-│   ├── lib/utils.ts        # Utilitários (formatCurrency, cn)
-│   ├── types.ts            # Contratos/types compartilhados no frontend
-│   └── index.css           # Estilos globais e tema
-├── server.ts               # Bootstrap, rotas e integrações
-├── app.js                  # Entrypoint Phusion Passenger (produção)
+│   ├── components/
+│   ├── contexts/
+│   ├── layouts/
+│   ├── lib/
+│   ├── pages/
+│   │   └── admin/
+│   └── server/
+│       ├── auth.ts
+│       ├── db.ts
+│       ├── dbAsync.ts
+│       └── mailer.ts
+├── public/
+│   └── uploads/
 ├── scripts/
-│   ├── doctor.mjs          # Diagnóstico de ambiente
-│   ├── build-client.mjs    # Build do frontend
-│   ├── postbuild-server.mjs
-│   └── prepare-deploy.mjs  # Empacotamento para deploy
-├── public/uploads/         # Imagens e arquivos enviados
-├── dist/                   # Build de produção gerado
-├── .env                    # Variáveis de ambiente (não versionar)
-├── .env.example            # Exemplo de variáveis
+├── server.ts
+├── app.js
+├── package.json
+├── .env.example
 └── MANUAL_TECNICO_SISTEMA.md
 ```
 
 ---
 
-## 4. Banco de dados
+## 4. Modulos e responsabilidades
 
-### 4.1 Tecnologia em uso
+- `server.ts`: bootstrap do Express, middlewares, rotas API, webhooks, checkout, admin.
+- `src/server/db.ts`: criacao/migracao de schema e dados padrao (settings/templates).
+- `src/server/dbAsync.ts`: camada async de acesso ao MySQL para operacoes de runtime.
+- `src/server/auth.ts`: hash de senha, JWT, middlewares `authenticate` e `isAdmin`.
+- `src/App.tsx`: roteamento SPA (publico, cliente, admin) e SEO por rota.
+- `src/layouts/AdminLayout.tsx`: guard da area admin no frontend.
 
-O sistema utiliza MySQL como único banco de dados oficial.
+---
 
-- Driver: mysql2 (pool de conexões assíncronas com sync-mysql2 para operações síncronas no bootstrap)
-- Host de produção: configurado via variável MYSQL_HOST
-- Banco: digitalbordados_novo
-- Engine: InnoDB / charset utf8mb4
+## 5. Banco de dados
 
-> NOTA: O arquivo database.sqlite que existia na raiz foi removido em 2026-05-19.
-> Ele era um artefato histórico e nunca foi utilizado pela aplicação.
+### 5.1 Tabelas principais
 
-### 4.2 Variáveis de conexão (obrigatórias)
+- `users`, `customers`
+- `products`, `product_categories`, `product_tags`
+- `product_category_relations`, `product_tag_relations`
+- `product_images`, `product_files`
+- `orders`, `order_items`, `order_customer_details`
+- `favorites`, `reviews`
+- `settings`
+- `email_templates`, `email_logs`
+- `password_reset_tokens`, `email_verification_tokens`, `login_attempts`
+- `download_tokens`, `download_logs`
+- `webhook_logs`, `paypal_webhook_logs`, `processed_webhooks`, `payment_logs`
+- `import_logs`
+- `matrix_requests`, `matrix_request_email_logs`
+- `mercadopago_product_sync_logs`
+- `system_backups`
+- `lgpd_policies`, `lgpd_user_acceptances`, `lgpd_consents`, `lgpd_requests`, `lgpd_logs`, `lgpd_cookie_consents`
 
-```
-MYSQL_HOST=<ip-do-servidor>
+### 5.2 Observacoes do schema
+
+- O sistema aplica `CREATE TABLE IF NOT EXISTS` e `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` no bootstrap.
+- Existe migracao de taxonomia legada: `categories/tags` -> `product_categories/product_tags`.
+- Existem indices para busca e auditoria (produtos, pedidos, tokens, logs, LGPD, downloads).
+
+---
+
+## 6. Autenticacao, sessao e perfis
+
+- Token JWT assinado com `JWT_SECRET`, expiracao de 7 dias.
+- Cookie de sessao: `auth_token`.
+- Cookie com `httpOnly`, `sameSite=lax`, `secure` dinamico em producao/HTTPS.
+- Perfis:
+- `admin`: acesso total ao painel e `/api/admin/*`
+- `customer`: compra, pedidos, downloads, area de conta
+
+### 6.1 Rate limit e seguranca de login
+
+- Rate limit em:
+- `/api/auth/register`
+- `/api/auth/login`
+- `/api/auth/forgot-password`
+- Janela/tentativas configuradas por:
+- `LOGIN_ATTEMPT_WINDOW_MINUTES`
+- `LOGIN_ATTEMPT_MAX_FAILS`
+
+### 6.2 Seeds de usuarios
+
+No startup, o sistema garante usuarios de teste/admin (incluindo `admin@digitalbordados.com` e `contato@agenciagoodea.com`).
+
+Recomendacao obrigatoria de producao: trocar credenciais e revisar necessidade desses seeds.
+
+---
+
+## 7. Frontend - rotas ativas
+
+### 7.1 Publicas
+
+- `/`
+- `/loja`
+- `/orcamento`
+- `/contato`
+- `/produto/:slug`
+- `/favoritos`
+- `/login`
+- `/cadastro`
+- `/esqueci-senha`
+- `/redefinir-senha`
+- `/checkout/paypal/success`
+- `/checkout/paypal/cancel`
+- `/obrigado-compra`
+- `/politica`
+- `/ajuda`
+
+### 7.2 Cliente
+
+- `/carrinho` (com requisito de usuario registrado)
+- `/minha-conta`
+- `/minha-conta/pedidos`
+- `/minha-conta/downloads`
+- `/minha-conta/enderecos`
+- `/minha-conta/perfil`
+- `/minha-conta/privacidade`
+- `/minha-conta/lista-de-desejos`
+
+### 7.3 Admin
+
+- `/admin/`
+- `/admin/produtos`
+- `/admin/produtos/novo`
+- `/admin/produtos/editar/:id`
+- `/admin/categorias`
+- `/admin/tags`
+- `/admin/pedidos`
+- `/admin/clientes`
+- `/admin/relatorios`
+- `/admin/configuracoes`
+
+---
+
+## 8. Backend - mapa de APIs
+
+### 8.1 Sistema e autenticacao
+
+- `GET /api/health`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+- `POST /api/auth/resend-verification`
+- `GET /api/auth/verify-email`
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/reset-password`
+
+### 8.2 Catalogo e conteudo publico
+
+- `GET /api/settings`
+- `GET /api/categories`
+- `GET /api/products`
+- `GET /api/products/search`
+- `GET /api/products/:slug`
+- `GET /api/products/:slug/reviews`
+
+### 8.3 Cliente autenticado
+
+- `GET /api/favorites`
+- `POST /api/favorites/:productId`
+- `DELETE /api/favorites/:productId`
+- `GET /api/customer/account`
+- `GET /api/customer/orders`
+- `GET /api/customer/orders/:id`
+- `GET /api/customer/downloads`
+- `GET /api/customer/download-file`
+- `PUT /api/customer/profile`
+- `PUT /api/customer/password`
+- `PUT /api/customer/addresses`
+- `POST /api/customer/avatar`
+- `GET /api/customer/privacy`
+- `PUT /api/customer/privacy/consents`
+- `POST /api/customer/privacy/request`
+- `GET /api/customer/privacy/export`
+
+### 8.4 Checkout e pagamentos
+
+- `POST /api/checkout`
+- `GET /api/checkout/config`
+- `GET /api/payments/:payment_id/status`
+- `POST /api/paypal/create-order`
+- `POST /api/paypal/capture-order`
+- `GET /api/checkout/paypal/config`
+- `POST /api/webhooks/mercadopago`
+- `POST /api/webhooks/paypal`
+
+### 8.5 Admin
+
+Produtos:
+- `GET /api/admin/products`
+- `POST /api/admin/products`
+- `GET /api/admin/products/:id`
+- `PUT /api/admin/products/:id`
+- `DELETE /api/admin/products/:id`
+- `POST /api/admin/products/:id/duplicate`
+- `POST /api/admin/products/:id/sync-mercadopago`
+- `GET /api/admin/products/:id/sync-mercadopago/logs`
+
+Categorias e tags:
+- `GET /api/admin/categories`
+- `POST /api/admin/categories`
+- `PUT /api/admin/categories/:id`
+- `DELETE /api/admin/categories/:id`
+- `POST /api/admin/categories/bulk-delete`
+- `GET /api/admin/tags`
+- `GET /api/admin/tags/most-used`
+- `POST /api/admin/tags`
+- `DELETE /api/admin/tags/:id`
+
+Pedidos e relatorios:
+- `GET /api/admin/orders`
+- `GET /api/admin/orders/:id`
+- `PUT /api/admin/orders/:id/status`
+- `POST /api/admin/orders/import`
+- `GET /api/admin/reports`
+- `GET /api/admin/dashboard/stats`
+
+Usuarios:
+- `GET /api/admin/users`
+- `POST /api/admin/users`
+- `POST /api/admin/users/import`
+- `PUT /api/admin/users/:id`
+- `POST /api/admin/users/:id/update`
+- `PUT /api/admin/users/:id/role`
+- `DELETE /api/admin/users/:id`
+- `GET /api/admin/users/export`
+
+Configuracoes e integracoes:
+- `GET /api/admin/settings`
+- `POST /api/admin/settings`
+- `POST /api/admin/payments/test-connection`
+- `GET /api/admin/paypal/test`
+- `GET /api/admin/paypal/webhook-logs`
+
+E-mail:
+- `GET /api/admin/email-templates`
+- `GET /api/admin/email-templates/:key`
+- `PUT /api/admin/email-templates/:key`
+- `POST /api/admin/email-templates/seed`
+- `POST /api/admin/email/test-connection`
+- `POST /api/admin/email/send-test`
+- `GET /api/admin/email-logs`
+- `GET /api/admin/email/budget-logs`
+- `POST /api/admin/email/budget-logs/:id/retry`
+
+Backups:
+- `GET /api/admin/backups`
+- `POST /api/admin/backups/create`
+- `GET /api/admin/backups/download/:id`
+- `DELETE /api/admin/backups/:id`
+- `POST /api/admin/backups/restore/:id`
+
+LGPD admin:
+- `GET /api/admin/lgpd/policies`
+- `GET /api/admin/lgpd/policies/diff`
+- `POST /api/admin/lgpd/policies`
+- `PUT /api/admin/lgpd/policies/:id`
+- `DELETE /api/admin/lgpd/policies/:id`
+- `POST /api/admin/lgpd/policies/:id/activate`
+- `GET /api/admin/lgpd/consents`
+- `PUT /api/admin/lgpd/consents/:id`
+- `GET /api/admin/lgpd/requests`
+- `PUT /api/admin/lgpd/requests/:id`
+- `GET /api/admin/lgpd/logs`
+- `GET /api/admin/lgpd/export/user/:id`
+
+### 8.6 Outras rotas
+
+- `POST /api/matrix-requests`
+- `POST /api/admin/upload-logo`
+- `GET /robots.txt`
+- `GET /sitemap.xml`
+
+### 8.7 Rota de desenvolvimento (uso controlado)
+
+- `POST /api/dev/approve-order/:id`
+
+---
+
+## 9. LGPD e privacidade
+
+Implementacoes disponiveis:
+
+- Politicas versionadas e ativacao de versao
+- Consentimentos por chave (`consent_key`) com trilha de auditoria
+- Registro de aceite por usuario/politica
+- Solicitacoes LGPD (exportacao, atualizacao, exclusao etc.)
+- Logs administrativos de operacoes LGPD
+- Consentimento de cookies separado (`lgpd_cookie_consents`)
+
+---
+
+## 10. E-mails e templates
+
+- Templates persistidos em `email_templates` (com seed automatico)
+- Registro de envios em `email_logs`
+- SMTP configuravel por variaveis e/ou settings
+- Tipos de templates incluem: boas-vindas, confirmacoes de pedido/pagamento, redefinicao de senha, verificacao de e-mail, fluxo LGPD e solicitacoes de matriz
+
+---
+
+## 11. Uploads e arquivos
+
+- Assets publicos: `public/uploads`
+- Arquivos de producao/protegidos podem usar `uploads/arquivos` (dependendo do fluxo)
+- Download de arquivos de pedidos via token temporario (`download_tokens`)
+- Auditoria de download em `download_logs`
+
+---
+
+## 12. Backups
+
+Fluxo via API admin:
+
+- Criacao de snapshot (dados + `public/uploads`)
+- Gera pacote `.tar.gz` em `storage/backups`
+- Registro de metadados em `system_backups`
+- Download, exclusao e restauracao por ID de backup
+
+---
+
+## 13. Variaveis de ambiente
+
+Base operacional (conforme codigo e `.env.example`):
+
+```env
+NODE_ENV=production
+APP_URL=https://digitalbordados.com.br
+APP_DOMAIN=digitalbordados.com.br
+
+MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3306
 MYSQL_DATABASE=digitalbordados_novo
-MYSQL_USER=digitalbordados_novo
-MYSQL_PASSWORD=<senha>
-```
-
-### 4.3 Schema — tabelas principais
-
-| Tabela                      | Descrição                                       |
-|-----------------------------|-------------------------------------------------|
-| users                       | Usuários admin e clientes                       |
-| customers                   | Dados complementares de clientes                |
-| categories                  | Categorias com hierarquia por parent_id         |
-| tags                        | Tags de produtos                                |
-| products                    | Catálogo de produtos                            |
-| product_images              | Imagens de galeria                              |
-| product_files               | Arquivos para download                          |
-| product_tags                | Relação N:N produto x tag                       |
-| product_categories          | Relação N:N produto x categoria                 |
-| orders                      | Pedidos (suporta MP e PayPal)                   |
-| order_items                 | Itens de cada pedido                            |
-| settings                    | Configurações globais da plataforma             |
-| webhook_logs                | Logs de webhooks recebidos (Mercado Pago)       |
-| paypal_webhook_logs         | Logs de webhooks recebidos (PayPal)             |
-| payment_logs                | Log unificado de eventos de pagamento           |
-| download_tokens             | Tokens de download com expiração                |
-| download_logs               | Auditoria de downloads realizados               |
-| email_logs                  | Histórico de e-mails enviados                   |
-| email_templates             | Templates de e-mail customizáveis               |
-| import_logs                 | Logs de importações (ex: migração WooCommerce)  |
-| favorites                   | Produtos favoritados por clientes               |
-| reviews                     | Avaliações de produtos                          |
-| lgpd_requests               | Solicitações LGPD                               |
-| lgpd_consents               | Consentimentos ativos                           |
-| lgpd_user_acceptances       | Histórico de aceite de termos por usuario       |
-| login_parent_attempts       | Auditoria de tentativas de login                |
-| email_verification_tokens   | Tokens de verificacão de e-mail                 |
-
----
-
-�## 5. Controle de acesso e perfis
-
-### 5.1 Perfis implementados
-
-- admin: acesso total ao painel /admin/* e APIs /api/admin/*
-- customer: acesso a compra, pedidos e downloads do proprio usuário
-
-O frontend usa user.type para decidir a área:
-- type = 'user'     => área admin
-- type = 'customer' => área cliente
-
-### 5.2 Sessão e autenticação
-
-- Cookie: auth_token
-- Tipo: HTTP-only
-- Validade: 7 dias
-- JWT secret: variável JWT_SECRET
-
-### 5.3 Usuários seed (acessos iniciais)
-
-Criados/atualizados automaticamente na inicializacão:
-- Admin: contato@agenciagoodea.com / 04039866
-- Admin: admin@digitalbordados.com / 123456
-- Cliente: cliente@teste.com / 123456
-
-ATENCÃO: Remover seed de credenciais fixas antes de produção.
-Trocar todas as senhas imediatamente.
-Definir JWT_SECRET forte no ambiente.
-
----
-
-## 6. Rotas frontend
-
-### 6.1 Públicas
-
-- /                 => Home
-- /carrinho         => Carrinho e checkout
-- /minha-conta      => Conta do cliente
-- /login            => Autenticacão
-- /cadastro         => Registro
-
-### 6.2 Administrativas
-
-- /admin                         => Dashboard
-- /admin/produtos
-- /admin/produtos/novo
-- /admin/produtos/editar/:id
-- /admin/categorias
-- /admin/tags
-- /admin/pedidos
-- /admin/clientes
-- /admin/relatorios
-- /admin/configuracoes
-
----
-
-## 7. APIs backend (mapa completo)
-
-### 7.1 Sistema e autenticacão
-
-- GET  /api/health              — Pública
-- POST /api/auth/register       — Pública
-- POST /api/auth/login          — Pública
-- POST /api/auth/logout         — Auth
-- GET  /api/auth/me             — Pública
-
-### 7.2 Catálogo público
-
-- GET /api/settings             — Pública
-- GET /api/categories           — Pública
-- GET /api/products             — Pública
-- GET /api/products/:slug       — Pública
-
-### 7.3 Checkout e cliente
-
-- POST /api/checkout                     — Auth
-- POST /api/webhooks/mercadopago         — Pública
-- POST /api/webhooks/paypal              — Pública
-- GET  /api/customer/orders              — Auth
-- GET  /api/customer/downloads           — Auth
-
-### 7.4 Admin — produtos / categorias / tags
-
-- GET    /api/admin/products             — Admin
-- POST   /api/admin/products             — Admin
-- GET    /api/admin/products/:id         — Admin
-- PUT    /api/admin/products/:id         — Admin
-- DELETE /api/admin/products/:id         — Admin
-
-### 7.5 Admin — pedidos, relatórios, usuários, configurações
-
-- GET /api/admin/orders                  — Admin
-- GET /api/admin/orders/:id              — Admin
-- PUT /api/admin/orders/:id/status       — Admin
-- GET /api/admin/reports                 — Admin
-- GET /api/admin/users                   — Admin
-- PUT /api/admin/users/:id/role          — Admin
-- DELETE /api/admin/users/:id            — Admin
-- GET /api/admin/settings                — Admin
-- POST /api/admin/settings               — Admin
-
----
-
-## 8. Fluxos funcionais
-
-### 8.1 Cadastro e login
-
-1. Usuário registra em /cadastro
-2. Backend cria users (role customer) + customers
-3. Backend gera JWT e grava cookie auth_token
-4. Front usa /api/auth/me para restaurar sessão
-
-### 8.2 Compra
-
-1. Carrinho é salvo no localStorage
-2. Checkout envia itens para POST /api/checkout
-3. Backend valida produtos, cria orders e order_items
-4. Backend gera preferência Mercado Pago ou PayPal e retorna URL
-5. Front redireciona para pagamento
-
-### 8.3 Pós-pagamento
-
-- Webhook MP registra em webhook_logs e atualiza status
-- Webhook PayPal registra em paypal_webhook_logs e atualiza status
-- Todos os eventos consolidados em payment_logs
-- Em dev existe aprovacão manual (/api/dev/approve-order/:id)
-
-### 8.4 Downloads
-
-- Cliente só visualiza arquivos de pedidos com status='paid'
-- Download protegido por token com expiracão (download_tokens)
-- Todas as tentativas auditadas em download_logs
-
----
-
-## 9. Configurações e ambiente
-
-### 9.1 Variáveis de ambiente completas
-
-```
-# Banco de dados MySQL (obrigatório)
-MYSQL_HOST=
-MYSQL_PORT=3306
-MYSQL_DATABASE=
-MYSQL_USER=
+MYSQL_USER=root
 MYSQL_PASSWORD=
 
-# Seguranca
 JWT_SECRET=
 
-# Mercado Pago
+MERCADOPAGO_PUBLIC_KEY=
 MERCADOPAGO_ACCESS_TOKEN=
+MERCADOPAGO_WEBHOOK_SECRET=
 
-# PayPal
-PAYPAL_MODE=sandbox|production
+PAYPAL_MODE=sandbox
 PAYPAL_SANDBOX_CLIENT_ID=
 PAYPAL_SANDBOX_CLIENT_SECRET=
 PAYPAL_PRODUCTION_CLIENT_ID=
 PAYPAL_PRODUCTION_CLIENT_SECRET=
-PAYPAL_DEFAULT_CURRENCY=BRL
+PAYPAL_DEFAULT_CURRENCY=USD
 PAYPAL_BRL_USD_RATE=5.20
+PAYPAL_BRL_EUR_RATE=6.00
 PAYPAL_WEBHOOK_ID=
 
-# URL da aplicacão
-APP_URL=https://digitalbordados.com.br
+PAYPAL_CLIENT_ID=
+PAYPAL_CLIENT_SECRET=
+
+DOWNLOADS_BASE_DIR=./uploads
+WOO_UPLOADS_DIR=./wp-content/uploads/woocommerce_uploads
+
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM_NAME=Digital Bordados
+SMTP_FROM_EMAIL=contato@digitalbordados.com.br
+
+EMAIL_VERIFICATION_TOKEN_TTL_HOURS=24
+LOGIN_ATTEMPT_WINDOW_MINUTES=15
+LOGIN_ATTEMPT_MAX_FAILS=7
 ```
 
----
-
-## 10. Integrações externas
-
-### 10.1 Mercado Pago
-
-- SDK oficial (mercadopago v2)
-- Webhook: POST /api/webhooks/mercadopago
-- notification_url deve apontar para o dominio de producão
-
-### 10.2 PayPal
-
-- API REST (OAuth2)
-- Webhook: POST /api/webhooks/paypal
-- Suporte a conversão BRL -> USD via PAYPAL_BRL_USD_RATE
+Observacao: algumas configuracoes tambem podem ser persistidas na tabela `settings` e sobrepoem defaults de runtime.
 
 ---
 
-## 11. Operacão e manutencão
-
-### 11.1 Subir ambiente local
+## 14. Comandos operacionais
 
 ```bash
 npm install
-cp .env.example .env   # preencher todas as variáveis
-npm run dev            # http://localhost:3000
-```
-
-### 11.2 Diagnóstico
-
-```bash
-npm run doctor            # verificacão padrão
-npm run doctor:strict     # falha se houver qualquer aviso
-npm run doctor:startup    # simula startup de producão
-```
-
-### 11.3 Build e deploy para DirectAdmin
-
-```bash
+npm run dev
+npm run lint
+npm run build
+npm run start
+npm run doctor
+npm run doctor:strict
+npm run doctor:startup
+npm run doctor:startup:strict
 npm run prepare:deploy
-# Faz: doctor:strict -> build -> doctor:startup:strict -> empacota bundle
 ```
 
 ---
 
-## 12. Pontos de atencão técnica
+## 15. Pontos de atencao para producao
 
-1. ATENCÃO: Credenciais seed hardcoded — remover antes de producão
-2. ATENCÃO: Rota /api/dev/approve-order/:id deve ser removida em producão
-3. ATENCÃO: notification_url do Mercado Pago deve apontar para dominio real
-4. ATENCÃO: Cookie sem secure/sameSite explicito — ajustar para HTTPS
-5. OK: database.sqlite removido — sistema opera 100% sobre MySQL
-
----
-
-## 13. Matriz de acesso
-
-| Perfil             | Permissões                                                    |
-|--------------------|---------------------------------------------------------------|
-| Visitante          | Ver produtos/categorias, cadastrar, login                     |
-| Cliente autenticado | Checkout, pedidos próprios, downloads de pedidos pagos       |
-| Admin              | CRUD produtos/categorias/tags, pedidos, relatórios, usuários |
-
----
-
-## 14. Arquivos-chave para referência
-
-| Arquivo                         | Responsabilidade                              |
-|---------------------------------|-----------------------------------------------|
-| server.ts                       | Bootstrap, rotas e integrações                |
-| src/server/auth.ts              | JWT e middlewares de autenticacão             |
-| src/server/db.ts                | Conexão MySQL e schema (migrations)           |
-| src/App.tsx                     | Roteamento da SPA                             |
-| src/layouts/AdminLayout.tsx     | Guard da área admin                           |
-| src/contexts/AuthContext.tsx    | Sessão no frontend                            |
-| src/pages/admin/*               | Operacão do backoffice                        |
-| scripts/doctor.mjs              | Diagnóstico de ambiente e pré-deploy          |
-| app.js                          | Entrypoint Phusion Passenger (producão)       |
+- Revisar/remover usuarios seed e senhas padrao.
+- Restringir/remover rota de desenvolvimento `/api/dev/approve-order/:id`.
+- Definir `JWT_SECRET` forte e exclusivo por ambiente.
+- Garantir HTTPS para cookie `secure` e operacao de webhooks.
+- Validar credenciais reais de Mercado Pago/PayPal/SMTP antes do go-live.
+- Manter politica de backup periodico e teste de restauracao.

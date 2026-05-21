@@ -449,7 +449,6 @@ export default function MyAccount() {
     { key: 'downloads', label: 'Matrizes Compradas', icon: Download },
     { key: 'address', label: 'Endereço', icon: MapPinHouse },
     { key: 'profile', label: 'Perfil', icon: UserRound },
-    { key: 'privacy', label: 'Privacidade e Dados', icon: ShieldCheck },
     { key: 'wishlist', label: 'Favoritos', icon: Heart },
     { key: 'logout', label: 'Sair', icon: LogOut },
   ];

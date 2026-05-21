@@ -6,6 +6,7 @@ import {
   MoreHorizontal, 
   Trash2, 
   Edit3, 
+  Copy,
   Eye,
   CheckCircle2,
   XCircle,
@@ -92,6 +93,23 @@ export default function AdminProductList() {
       }
     } catch (error) {
       alert('Erro ao excluir produto');
+    }
+  };
+
+  const handleDuplicate = async (id: number) => {
+    try {
+      const res = await fetch(`/api/admin/products/${id}/duplicate`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const payload = await res.json().catch(() => ({} as any));
+      if (!res.ok || !payload?.id) {
+        alert(payload?.error || 'Erro ao duplicar produto');
+        return;
+      }
+      window.location.href = `/admin/produtos/editar/${payload.id}`;
+    } catch (error) {
+      alert('Erro ao duplicar produto');
     }
   };
 
@@ -228,6 +246,13 @@ export default function AdminProductList() {
                       >
                         <Edit3 className="w-5 h-5" />
                       </Link>
+                      <button
+                        onClick={() => handleDuplicate(product.id)}
+                        className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                        title="Duplicar"
+                      >
+                        <Copy className="w-5 h-5" />
+                      </button>
                       <button 
                         onClick={() => handleDelete(product.id)}
                         className="p-2.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"

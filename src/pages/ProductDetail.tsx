@@ -206,6 +206,10 @@ export default function ProductDetail() {
     }
   }, [activeImageIndex, galleryImages]);
 
+  const discount = product?.sale_price && product?.price ? Math.round((1 - product.sale_price / product.price) * 100) : 0;
+  const gallery = galleryImages;
+  const displayedImage = activeImage || gallery[activeImageIndex] || product?.image;
+
   useEffect(() => {
     if (!product) return;
     const siteName = String(settings.site_name || 'Digital Bordados').trim();
@@ -243,15 +247,34 @@ export default function ProductDetail() {
       },
     };
 
+    const shouldRenderProductSchema = String(settings.seo_enable_product_schema || 'true').toLowerCase() === 'true';
+    const shouldRenderBreadcrumbSchema = String(settings.seo_enable_breadcrumb_schema || 'true').toLowerCase() === 'true';
+    const breadcrumbSchema = {
+      '@context': 'https://schema.org',
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Início', item: buildAbsoluteUrl('/') },
+        { '@type': 'ListItem', position: 2, name: 'Loja', item: buildAbsoluteUrl('/loja') },
+        { '@type': 'ListItem', position: 3, name: product.name, item: offerUrl },
+      ],
+    };
+
+    const combinedSchemas = [
+      ...(shouldRenderProductSchema ? [schemaProduct] : []),
+      ...(shouldRenderBreadcrumbSchema ? [breadcrumbSchema] : []),
+    ];
+
     applySeo({
       title: productTitle,
       description: productDescription,
       canonical,
       image: imageForSeo,
       siteName,
-      robots: 'index,follow',
+      robots: Number((product as any)?.noindex || 0) === 1 ? 'noindex,nofollow' : 'index,follow',
+      twitterCard: String(settings.seo_twitter_card || 'summary_large_image'),
+      ogType: 'product',
       keywords: String(product.seo_keywords || product.tags || settings.seo_keywords || ''),
-      jsonLd: schemaProduct,
+      jsonLd: combinedSchemas.length > 0 ? combinedSchemas : undefined,
     });
   }, [product, displayedImage, settings]);
 
@@ -296,9 +319,6 @@ export default function ProductDetail() {
   const isProductFavorite = isFavorite(product.id);
   const isAdminUser = user?.type === 'user';
   const currentPrice = product.sale_price || product.price;
-  const discount = product.sale_price ? Math.round((1 - product.sale_price / product.price) * 100) : 0;
-  const gallery = galleryImages;
-  const displayedImage = activeImage || gallery[activeImageIndex] || product.image;
   const openLightbox = (index: number) => {
     setActiveImageIndex(index >= 0 ? index : 0);
     setIsLightboxOpen(true);
