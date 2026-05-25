@@ -25,7 +25,7 @@ import { fileURLToPath } from 'url';
 // Shim para __dirname funcionar tanto em CommonJS (compilado) quanto em ESM (dev/tsx)
 const _dirname = typeof __dirname !== 'undefined'
   ? __dirname
-  : path.dirname(fileURLToPath(import.meta.url));
+  : path.dirname(fileURLToPath(eval('import.meta.url')));
 
 const isProduction = process.env.NODE_ENV === 'production';
 const EMAIL_VERIFICATION_TOKEN_TTL_HOURS = Number(process.env.EMAIL_VERIFICATION_TOKEN_TTL_HOURS || '24');
