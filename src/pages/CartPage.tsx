@@ -103,6 +103,15 @@ export default function CartPage() {
   });
 
   const cardFormRef = useRef<any>(null);
+  const mpInstanceRef = useRef<any>(null);   // instância única do MercadoPago
+  const sdkMountedRef = useRef(false);       // guard: evita remount
+  // Refs para capturar valores mais recentes nos callbacks do SDK sem recriar o CardForm
+  const payerRef = useRef(payer);
+  const itemsRef = useRef(items);
+  const checkoutConsentRef = useRef(checkoutConsent);
+  const checkoutMethodRef = useRef<CheckoutMethod>(checkoutMethod);
+  const clearCartRef = useRef(clearCart);
+  const navigateRef = useRef(navigate);
   const [securityImageSrc, setSecurityImageSrc] = useState('/uploads/seguranca');
 
   const canSubmitPayer = useMemo(() => {
@@ -128,6 +137,14 @@ export default function CartPage() {
     email: !isValidEmail(payer.email) ? 'E-mail inválido' : '',
     cpf: !isValidCPF(payer.cpf) ? 'CPF inválido' : '',
   };
+
+  // Atualiza refs sincronamente a cada render (não causa re-render)
+  payerRef.current = payer;
+  itemsRef.current = items;
+  checkoutConsentRef.current = checkoutConsent;
+  checkoutMethodRef.current = checkoutMethod;
+  clearCartRef.current = clearCart;
+  navigateRef.current = navigate;
 
   const inputClassName = (field: keyof typeof payer) => {
     if (!payerTouched[field as string]) return 'px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold';
@@ -219,91 +236,115 @@ export default function CartPage() {
     loadPayPalConfig();
   }, []);
 
+  // SDK do MercadoPago: monta EXATAMENTE UMA VEZ quando o método de cartão é selecionado.
+  // Não desmonta ao trocar entre crédito e débito — apenas oculta via CSS.
   useEffect(() => {
-    if (checkoutMethod === 'pix' || !publicKey) return;
-    if (!(window as any).MercadoPago) return;
+    if (!publicKey || !(window as any).MercadoPago) return;
+    if (checkoutMethod === 'pix' || checkoutMethod === 'paypal') return;
+    if (sdkMountedRef.current) return; // guard: já montado, não remonta
 
-    const mp = new (window as any).MercadoPago(publicKey, { locale: 'pt-BR' });
-    const amount = String(totalPrice.toFixed(2));
+    sdkMountedRef.current = true;
+    try {
+      const mp = new (window as any).MercadoPago(publicKey, { locale: 'pt-BR' });
+      mpInstanceRef.current = mp;
 
-    cardFormRef.current = mp.cardForm({
-      amount,
-      autoMount: true,
-      form: {
-        id: 'form-checkout',
-        cardNumber: { id: 'form-checkout__cardNumber', placeholder: 'Número do cartão' },
-        expirationDate: { id: 'form-checkout__expirationDate', placeholder: 'MM/AA' },
-        securityCode: { id: 'form-checkout__securityCode', placeholder: 'CVV' },
-        cardholderName: { id: 'form-checkout__cardholderName', placeholder: 'Nome no cartão' },
-        installments: { id: 'form-checkout__installments' },
-        identificationType: { id: 'form-checkout__identificationType' },
-        identificationNumber: { id: 'form-checkout__identificationNumber', placeholder: 'CPF' },
-        cardholderEmail: { id: 'form-checkout__email', placeholder: 'E-mail' },
-      },
-      callbacks: {
-        onFormMounted: (error: any) => {
-          if (error) console.warn('Form mounted handling error:', error);
+      cardFormRef.current = mp.cardForm({
+        amount: String(totalPrice.toFixed(2)),
+        autoMount: true,
+        form: {
+          id: 'form-checkout',
+          cardNumber: { id: 'form-checkout__cardNumber', placeholder: 'Número do cartão' },
+          expirationDate: { id: 'form-checkout__expirationDate', placeholder: 'MM/AA' },
+          securityCode: { id: 'form-checkout__securityCode', placeholder: 'CVV' },
+          cardholderName: { id: 'form-checkout__cardholderName', placeholder: 'Nome no cartão' },
+          issuer: { id: 'form-checkout__issuer' },
+          installments: { id: 'form-checkout__installments' },
+          identificationType: { id: 'form-checkout__identificationType' },
+          identificationNumber: { id: 'form-checkout__identificationNumber', placeholder: 'CPF' },
+          cardholderEmail: { id: 'form-checkout__email', placeholder: 'E-mail' },
         },
-        onSubmit: async (event: Event) => {
-          event.preventDefault();
-          if (!cardFormRef.current) return;
-          setLoadingCheckout(true);
-          setStatusMessage('');
-          try {
-            const cardData = cardFormRef.current.getCardFormData();
-            const cardPayerEmail = cardData?.cardholderEmail || payer.email;
-            const cardPayerCpf = cardData?.identificationNumber || payer.cpf;
-            if (!isValidEmail(cardPayerEmail) || !isValidCPF(cardPayerCpf)) {
-              setStatusMessage('E-mail ou CPF inválido para pagamento com cartão.');
-              return;
+        callbacks: {
+          onFormMounted: (error: any) => {
+            if (error) console.warn('CardForm montado com aviso:', error);
+          },
+          onSubmit: async (event: Event) => {
+            event.preventDefault();
+            if (!cardFormRef.current) return;
+            const currentPayer = payerRef.current;
+            const currentItems = itemsRef.current;
+            const currentMethod = checkoutMethodRef.current;
+            const currentConsent = checkoutConsentRef.current;
+            setLoadingCheckout(true);
+            setStatusMessage('');
+            try {
+              const cardData = cardFormRef.current.getCardFormData();
+              const cardPayerEmail = cardData?.cardholderEmail || currentPayer.email;
+              const cardPayerCpf = cardData?.identificationNumber || currentPayer.cpf;
+              if (!isValidEmail(cardPayerEmail) || !isValidCPF(cardPayerCpf)) {
+                setStatusMessage('E-mail ou CPF inválido para pagamento com cartão.');
+                return;
+              }
+              const cardHolderName = cardData?.cardholderName || `${currentPayer.first_name} ${currentPayer.last_name}`;
+              const [firstName, ...restName] = String(cardHolderName).trim().split(' ');
+              const lastName = restName.join(' ') || currentPayer.last_name;
+              const res = await fetch('/api/checkout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  items: currentItems,
+                  payment_method: currentMethod,
+                  checkout_data_processing_accepted: currentConsent,
+                  payer: {
+                    email: cardPayerEmail,
+                    first_name: firstName || currentPayer.first_name,
+                    last_name: lastName || currentPayer.last_name,
+                    cpf: cardPayerCpf,
+                  },
+                  card_token: cardData?.token,
+                  installments: currentMethod === 'debit_card' ? 1 : Number(cardData?.installments || 1),
+                  issuer_id: cardData?.issuerId || null,
+                  payment_method_id: cardData?.paymentMethodId || undefined,
+                }),
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                setStatusMessage(data?.error || 'Falha ao processar pagamento');
+                return;
+              }
+              setCheckoutResult(data);
+              if (data.status === 'approved') {
+                clearCartRef.current();
+                navigateRef.current(`/obrigado-compra?order_id=${encodeURIComponent(String(data.order_id || ''))}&payment_method=${encodeURIComponent(currentMethod)}`);
+                return;
+              } else {
+                setStatusMessage(`Pagamento em status: ${data.status}`);
+              }
+            } catch {
+              setStatusMessage('Erro ao processar pagamento com cartão');
+            } finally {
+              setLoadingCheckout(false);
             }
-            const cardHolderName = cardData?.cardholderName || `${payer.first_name} ${payer.last_name}`;
-            const [firstName, ...restName] = String(cardHolderName).trim().split(' ');
-            const lastName = restName.join(' ') || payer.last_name;
-
-            const res = await fetch('/api/checkout', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                items,
-                payment_method: checkoutMethod,
-                checkout_data_processing_accepted: checkoutConsent,
-                payer: {
-                  email: cardPayerEmail,
-                  first_name: firstName || payer.first_name,
-                  last_name: lastName || payer.last_name,
-                  cpf: cardPayerCpf,
-                },
-                card_token: cardData?.token,
-                installments: checkoutMethod === 'debit_card' ? 1 : Number(cardData?.installments || 1),
-                issuer_id: cardData?.issuerId || null,
-                payment_method_id: cardData?.paymentMethodId || undefined,
-              }),
-            });
-
-            const data = await res.json();
-            if (!res.ok) {
-              setStatusMessage(data?.error || 'Falha ao processar pagamento');
-              return;
-            }
-
-            setCheckoutResult(data);
-            if (data.status === 'approved') {
-              clearCart();
-              navigate(`/obrigado-compra?order_id=${encodeURIComponent(String(data.order_id || ''))}&payment_method=${encodeURIComponent(checkoutMethod)}`);
-              return;
-            } else {
-              setStatusMessage(`Pagamento em status: ${data.status}`);
-            }
-          } catch (error) {
-            setStatusMessage('Erro ao processar pagamento com cartão');
-          } finally {
-            setLoadingCheckout(false);
-          }
+          },
         },
-      },
-    });
-  }, [checkoutMethod, publicKey, totalPrice, payer, items, clearCart, navigate, checkoutConsent]);
+      });
+    } catch (e) {
+      console.error('Erro ao inicializar CardForm:', e);
+      sdkMountedRef.current = false; // permitir nova tentativa
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutMethod, publicKey]); // só dispara quando método muda de pix/paypal para cartão
+
+  // Desmonta SDK apenas quando o componente SAIR DA TELA (não ao trocar crédito/débito)
+  useEffect(() => {
+    return () => {
+      try {
+        if (cardFormRef.current?.unmount) cardFormRef.current.unmount();
+      } catch (e) { /* ignorar */ }
+      cardFormRef.current = null;
+      mpInstanceRef.current = null;
+      sdkMountedRef.current = false;
+    };
+  }, []); // vazio = apenas no unmount real do componente
 
   useEffect(() => {
     if (!checkoutResult?.payment_id || checkoutResult.payment_method !== 'pix') return;
@@ -654,29 +695,31 @@ export default function CartPage() {
               )}
             </div>
 
-            {checkoutMethod === 'pix' ? (
-              <>
-                {requireCheckoutConsent && (
-                  <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={checkoutConsent}
-                      onChange={(e) => setCheckoutConsent(e.target.checked)}
-                      className="mt-0.5"
-                    />
-                    <span>Autorizo o processamento dos meus dados para concluir esta compra.</span>
-                  </label>
-                )}
-                <button
-                  onClick={handlePixCheckout}
-                  disabled={loadingCheckout || !canSubmitPayer || (requireCheckoutConsent && !checkoutConsent)}
-                  className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50"
-                >
-                  {loadingCheckout ? 'Gerando PIX...' : 'Gerar PIX'}
-                </button>
-              </>
-            ) : checkoutMethod === 'paypal' ? (
-              <div className="space-y-4">
+            {/* PIX UI - visível apenas quando método = pix */}
+            <div className={checkoutMethod === 'pix' ? '' : 'hidden'}>
+              {requireCheckoutConsent && (
+                <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={checkoutConsent}
+                    onChange={(e) => setCheckoutConsent(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>Autorizo o processamento dos meus dados para concluir esta compra.</span>
+                </label>
+              )}
+              <button
+                onClick={handlePixCheckout}
+                disabled={loadingCheckout || !canSubmitPayer || (requireCheckoutConsent && !checkoutConsent)}
+                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50"
+              >
+                {loadingCheckout ? 'Gerando PIX...' : 'Gerar PIX'}
+              </button>
+            </div>
+
+            {/* PayPal UI - visível apenas quando método = paypal */}
+            {paypalConfig?.enabled && (
+              <div className={checkoutMethod === 'paypal' ? 'space-y-4' : 'hidden'}>
                 {requireCheckoutConsent && (
                   <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
                     <input
@@ -731,62 +774,80 @@ export default function CartPage() {
                   {loadingCheckout ? 'Redirecionando...' : 'Pagar com PayPal →'}
                 </button>
               </div>
-            ) : (
-              <form id="form-checkout" className="space-y-3">
-                {requireCheckoutConsent && (
-                  <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={checkoutConsent}
-                      onChange={(e) => setCheckoutConsent(e.target.checked)}
-                      className="mt-0.5"
-                    />
-                    <span>Autorizo o processamento dos meus dados para concluir esta compra.</span>
-                  </label>
-                )}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1 col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Número do Cartão</label>
-                    <input id="form-checkout__cardNumber" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Vencimento</label>
-                    <input id="form-checkout__expirationDate" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">CVV</label>
-                    <input id="form-checkout__securityCode" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  </div>
-                  <div className="space-y-1 col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Nome no Cartão</label>
-                    <input id="form-checkout__cardholderName" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  </div>
-
-                  {checkoutMethod === 'credit_card' && (
-                    <div className="space-y-1 col-span-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Parcelamento</label>
-                      <select id="form-checkout__installments" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                    </div>
-                  )}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Tipo Doc.</label>
-                    <select id="form-checkout__identificationType" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Número Doc.</label>
-                    <input id="form-checkout__identificationNumber" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  </div>
-                  <div className="space-y-1 col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">E-mail de Cobrança</label>
-                    <input id="form-checkout__email" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  </div>
-                </div>
-                <button type="submit" disabled={loadingCheckout || !canSubmitPayer || (requireCheckoutConsent && !checkoutConsent)} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 inline-flex items-center justify-center gap-2">
-                  <CreditCard className="w-4 h-4" />
-                  {loadingCheckout ? 'Processando...' : checkoutMethod === 'debit_card' ? 'Pagar com débito' : 'Pagar com cartão'}
-                </button>
-              </form>
             )}
+
+            {/*
+              Formulário de cartão (crédito e débito).
+              IMPORTANTE: este form SEMPRE permanece no DOM para que o SDK do Mercado Pago
+              encontre os elementos que precisa. Apenas o visibilidade é controlada via CSS.
+            */}
+            <form
+              id="form-checkout"
+              onSubmit={(e) => e.preventDefault()}
+              className={`space-y-3 ${checkoutMethod !== 'credit_card' && checkoutMethod !== 'debit_card' ? 'hidden' : ''}`}
+            >
+              {requireCheckoutConsent && (
+                <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={checkoutConsent}
+                    onChange={(e) => setCheckoutConsent(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>Autorizo o processamento dos meus dados para concluir esta compra.</span>
+                </label>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1 col-span-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Número do Cartão</label>
+                  <input id="form-checkout__cardNumber" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Vencimento</label>
+                  <input id="form-checkout__expirationDate" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">CVV</label>
+                  <input id="form-checkout__securityCode" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Nome no Cartão</label>
+                  <input id="form-checkout__cardholderName" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                </div>
+
+                {/* Campos ocultos que o SDK SEMPRE precisa encontrar no DOM */}
+                <select
+                  id="form-checkout__issuer"
+                  style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}
+                />
+
+                {/* Parcelamento: sempre no DOM, oculto no débito */}
+                <div
+                  className="space-y-1 col-span-2"
+                  style={checkoutMethod === 'debit_card' ? { position: 'absolute', opacity: 0, pointerEvents: 'none', zIndex: -100 } : {}}
+                >
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Parcelamento</label>
+                  <select id="form-checkout__installments" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Tipo Doc.</label>
+                  <select id="form-checkout__identificationType" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Número Doc.</label>
+                  <input id="form-checkout__identificationNumber" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">E-mail de Cobrança</label>
+                  <input id="form-checkout__email" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
+                </div>
+              </div>
+              <button type="submit" disabled={loadingCheckout || !canSubmitPayer || (requireCheckoutConsent && !checkoutConsent)} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 inline-flex items-center justify-center gap-2">
+                <CreditCard className="w-4 h-4" />
+                {loadingCheckout ? 'Processando...' : checkoutMethod === 'debit_card' ? 'Pagar com débito' : 'Pagar com cartão'}
+              </button>
+            </form>
 
             {checkoutResult?.payment_method === 'pix' && checkoutResult.payment_id && (
               <div className="p-4 rounded-2xl border border-blue-100 bg-blue-50 space-y-3">

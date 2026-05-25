@@ -3840,7 +3840,7 @@ async function startServer() {
               ...commonBody,
               token: card_token,
               installments: requestedInstallments,
-              payment_method_id: payment_method_id || (payment_method === 'credit_card' ? 'visa' : undefined),
+              payment_method_id: payment_method_id || undefined,
               issuer_id: issuer_id || undefined,
             },
           });
