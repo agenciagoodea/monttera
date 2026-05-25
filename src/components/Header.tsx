@@ -129,11 +129,11 @@ export default function Header() {
       {/* Top Bar */}
       {topBarEnabled && topBarMessage && (
         <div className="bg-primary text-white py-2.5 px-4 md:px-10">
-          <div className="max-w-[1440px] mx-auto flex items-center justify-between">
-            <div className="text-[10px] font-bold tracking-widest uppercase truncate flex-1 text-left">
+          <div className="max-w-[1440px] mx-auto relative flex items-center justify-center">
+            <div className="text-[10px] md:text-xs font-black tracking-[0.14em] uppercase text-center animate-pulse bg-white/15 border border-white/20 rounded-full px-4 py-1.5 shadow-lg shadow-black/10">
               {topBarMessage}
             </div>
-            <div className="flex items-center gap-3 ml-4">
+            <div className="hidden md:flex items-center gap-3 ml-4 absolute right-0 top-1/2 -translate-y-1/2">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 50" width="28" height="19" className="rounded-sm shadow-sm opacity-90 hover:opacity-100 transition-opacity cursor-default" title="Brasil">
                 <rect width="72" height="50" fill="#009B3A"/>
                 <polygon points="36,4 68,25 36,46 4,25" fill="#FEDF00"/>
@@ -157,13 +157,13 @@ export default function Header() {
       )}
 
       {/* Main Header */}
-      <div className="bg-white border-b border-blue-50 py-4 px-6 md:px-10 shadow-sm">
-        <div className="max-w-[1440px] mx-auto flex flex-col lg:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-10 w-full lg:w-auto justify-between">
+      <div className="bg-white border-b border-blue-50 py-3 px-4 md:px-8 shadow-sm">
+        <div className="max-w-[1440px] mx-auto flex flex-col xl:flex-row items-center xl:items-center justify-between gap-4">
+          <div className="flex items-center gap-6 w-full xl:w-auto justify-between">
             {/* Logo */}
-            <Link to="/" className="flex flex-col group">
+            <Link to="/" className="flex flex-col group shrink-0 min-w-[120px] xl:min-w-[130px]">
               {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="h-16 w-auto object-contain" />
+                <img src={logoUrl} alt="Logo" className="h-10 xl:h-11 w-auto object-contain" />
               ) : (
                 <>
                   <span className="text-4xl font-black text-primary leading-none tracking-tighter uppercase group-hover:text-blue-800 transition-colors">
@@ -174,9 +174,10 @@ export default function Header() {
               )}
             </Link>
 
-            <nav className="hidden xl:flex items-center gap-6 text-sm font-bold text-slate-600">
+            <nav className="hidden xl:flex items-center gap-5 text-sm font-bold text-slate-600 whitespace-nowrap">
               <Link to="/" className="hover:text-blue-600 transition-colors">Início</Link>
               <Link to="/loja" className="hover:text-blue-600 transition-colors">Loja</Link>
+              <Link to="/nossa-empresa" className="hover:text-blue-600 transition-colors">Nossa Empresa</Link>
               <Link to="/orcamento" className="hover:text-blue-600 transition-colors">Orçamento</Link>
               <Link to="/contato" className="hover:text-blue-600 transition-colors">Contato</Link>
             </nav>
@@ -189,7 +190,7 @@ export default function Header() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 w-full max-w-2xl relative" ref={searchRef}>
+          <div className="flex items-center gap-4 w-full xl:w-[480px] 2xl:w-[560px] relative" ref={searchRef}>
              <form onSubmit={handleSearch} className="relative flex-1 group">
                 <input 
                   type="text" 
@@ -362,4 +363,5 @@ export default function Header() {
     </header>
   );
 }
+
 

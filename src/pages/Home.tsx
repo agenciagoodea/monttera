@@ -4,8 +4,8 @@ import Banner from '../components/Banner';
 import ProductCard from '../components/ProductCard';
 import { Category, Product } from '../types';
 import { AnimatePresence, motion } from 'motion/react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { Award, ChevronLeft, ChevronRight, Search, Shield, Sparkles } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { useAppData } from '../contexts/AppDataContext';
 
 export default function Home() {
@@ -29,7 +29,7 @@ export default function Home() {
       try {
         const url = new URL('/api/products', window.location.origin);
         url.searchParams.append('page', pageParam.toString());
-        url.searchParams.append('limit', '12');
+        url.searchParams.append('limit', '20');
 
         if (selectedCategory) {
           const cat = categories.find(c => c.id === selectedCategory);
@@ -64,18 +64,6 @@ export default function Home() {
     setSearchParams(params);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-
-  const companyIcons = (() => {
-    const iconMap: Record<string, any> = { shield: Shield, sparkles: Sparkles, award: Award };
-    try {
-      const parsed = JSON.parse(String(settings.home_company_icons || '[]'));
-      if (!Array.isArray(parsed)) return [Shield, Sparkles, Award];
-      const mapped = parsed.map((k: string) => iconMap[String(k || '').toLowerCase()]).filter(Boolean);
-      return mapped.length ? mapped.slice(0, 6) : [Shield, Sparkles, Award];
-    } catch {
-      return [Shield, Sparkles, Award];
-    }
-  })();
 
   return (
     <main className="max-w-[1440px] mx-auto px-4 md:px-10 py-6 md:py-10">
@@ -195,73 +183,6 @@ export default function Home() {
         </div>
       </div>
 
-      {String(settings.home_company_enabled || 'true') === 'true' && (
-        <section
-          className="mt-20 rounded-[2.5rem] overflow-hidden shadow-2xl"
-          style={{ backgroundColor: settings.home_company_bg_color || '#0f172a', color: settings.home_company_text_color || '#f8fafc' }}
-        >
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 p-8 md:p-12">
-            <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.45 }}>
-              <p className="text-[10px] font-black uppercase tracking-[0.25em] opacity-80">Institucional</p>
-              <h3 className="mt-3 text-3xl md:text-4xl font-black leading-tight">{settings.home_company_title || 'Nossa Empresa'}</h3>
-              <p className="mt-2 text-sm md:text-base font-semibold opacity-90">{settings.home_company_subtitle || ''}</p>
-              <p className="mt-6 text-sm md:text-base leading-relaxed opacity-90">{settings.home_company_text || ''}</p>
-
-              <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="rounded-2xl bg-white/10 border border-white/20 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Missão</p>
-                  <p className="mt-2 text-sm font-semibold">{settings.home_company_mission || ''}</p>
-                </div>
-                <div className="rounded-2xl bg-white/10 border border-white/20 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Visão</p>
-                  <p className="mt-2 text-sm font-semibold">{settings.home_company_vision || ''}</p>
-                </div>
-                <div className="rounded-2xl bg-white/10 border border-white/20 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Valores</p>
-                  <p className="mt-2 text-sm font-semibold">{settings.home_company_values || ''}</p>
-                </div>
-              </div>
-
-              <div className="mt-6 flex flex-wrap gap-3">
-                {companyIcons.map((Icon: any, idx: number) => (
-                  <span key={idx} className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-white/15 border border-white/25">
-                    <Icon className="w-5 h-5" />
-                  </span>
-                ))}
-              </div>
-
-              <Link
-                to={settings.home_company_cta_link || '/loja'}
-                className="inline-flex mt-8 items-center gap-2 rounded-xl bg-white text-slate-900 px-6 py-3 text-[11px] font-black uppercase tracking-widest hover:scale-[1.02] transition-transform"
-              >
-                {settings.home_company_cta_text || 'Conheça nossa coleção'}
-              </Link>
-            </motion.div>
-
-            <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.45, delay: 0.08 }} className="grid grid-cols-2 gap-4">
-              <div className="col-span-2 rounded-[2rem] overflow-hidden border border-white/20 bg-black/10 min-h-[220px]">
-                {settings.home_company_image_main ? (
-                  <img src={settings.home_company_image_main} alt="Nossa Empresa" className="w-full h-full object-cover" loading="lazy" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-sm font-bold opacity-70">Imagem principal</div>
-                )}
-              </div>
-              <div className="rounded-[1.5rem] overflow-hidden border border-white/20 bg-black/10 min-h-[140px]">
-                {settings.home_company_image_secondary ? (
-                  <img src={settings.home_company_image_secondary} alt="Nossa Empresa" className="w-full h-full object-cover" loading="lazy" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-xs font-bold opacity-70">Imagem secundária</div>
-                )}
-              </div>
-              <div className="rounded-[1.5rem] border border-white/20 bg-white/10 p-5 flex flex-col justify-center">
-                <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Compromisso</p>
-                <p className="mt-2 text-sm font-semibold leading-relaxed">Experiência premium, arquivos protegidos e suporte próximo em cada etapa.</p>
-              </div>
-            </motion.div>
-          </div>
-        </section>
-      )}
-
       {/* Brand Logos Footer */}
       {(() => {
         let logos: string[] = [];
@@ -320,3 +241,4 @@ export default function Home() {
     </main>
   );
 }
+

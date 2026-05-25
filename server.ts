@@ -20,6 +20,12 @@ import { sendEmail } from './src/server/mailer';
 import nodemailer from 'nodemailer';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
 import axios from 'axios';
+import { fileURLToPath } from 'url';
+
+// Shim para __dirname funcionar tanto em CommonJS (compilado) quanto em ESM (dev/tsx)
+const _dirname = typeof __dirname !== 'undefined'
+  ? __dirname
+  : path.dirname(fileURLToPath(import.meta.url));
 
 const isProduction = process.env.NODE_ENV === 'production';
 const EMAIL_VERIFICATION_TOKEN_TTL_HOURS = Number(process.env.EMAIL_VERIFICATION_TOKEN_TTL_HOURS || '24');
@@ -8479,7 +8485,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
   // Vite Integration
   const isProdEnv = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
-  const hasDistIndex = fs.existsSync(path.join(process.cwd(), 'dist', 'index.html')) || fs.existsSync(path.join(__dirname, 'index.html'));
+  const hasDistIndex = fs.existsSync(path.join(process.cwd(), 'dist', 'index.html')) || fs.existsSync(path.join(_dirname, 'index.html'));
   const isForceProduction = isProdEnv || process.env.VERCEL || hasDistIndex;
   if (!isForceProduction) {
     const { createServer: createViteServer } = await import('vite');
@@ -8493,9 +8499,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     console.log('Serving production build.');
     const distCandidates = [
       path.resolve(process.cwd(), 'dist'),
-      path.resolve(__dirname),
-      path.resolve(__dirname, 'dist'),
-      path.resolve(__dirname, '..', 'dist'),
+      path.resolve(_dirname),
+      path.resolve(_dirname, 'dist'),
+      path.resolve(_dirname, '..', 'dist'),
     ];
     const distPath = distCandidates.find((candidate) => fs.existsSync(path.join(candidate, 'index.html')));
     if (!distPath) {

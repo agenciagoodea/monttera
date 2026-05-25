@@ -8,6 +8,7 @@
     "npm": ">=10"
   },
   "scripts": {
+    "tunnel": "node scripts/tunnel.cjs",
     "dev": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs watch --clear-screen=false server.ts",
     "build": "npm run clean && npm run build:client && npm run build:server",
     "build:client": "node --max-old-space-size=2048 ./scripts/build-client.mjs",
@@ -55,8 +56,8 @@
     "slugify": "^1.6.9",
     "sync-mysql2": "^1.0.8",
     "tailwind-merge": "^3.5.0",
-    "typescript": "~5.8.2",
     "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "zod": "^4.3.6"
   },
@@ -67,7 +68,8 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
-    "tailwindcss": "^4.1.14"
+    "tailwindcss": "^4.1.14",
+    "tunnel-ssh": "^5.2.0"
   },
   "overrides": {
     "babel-runtime": {

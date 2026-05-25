@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AnimatePresence } from 'motion/react';
-import { ChevronLeft, ChevronRight, Search, SlidersHorizontal, Heart } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, SlidersHorizontal, Sparkles, ShoppingBag } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 import ProductCard from '../components/ProductCard';
 import { Category, Product } from '../types';
@@ -15,7 +15,7 @@ export default function ShopPage() {
   const searchQuery = searchParams.get('q') || '';
   const pageParam = Number(searchParams.get('page') || '1');
 
-  const { categories } = useAppData();
+  const { categories, settings } = useAppData();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
@@ -87,20 +87,56 @@ export default function ShopPage() {
       ? categories.find((c) => c.id === selectedCategory)?.name || 'Categoria'
       : 'Explore toda a colecao';
 
+  const normalizeHex = (hex?: string, fallback = '#2563eb') => {
+    const value = String(hex || '').trim();
+    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value) ? value : fallback;
+  };
+
+  const hexToRgb = (hex: string) => {
+    const raw = hex.replace('#', '');
+    const full = raw.length === 3 ? raw.split('').map((c) => `${c}${c}`).join('') : raw;
+    const int = Number.parseInt(full, 16);
+    return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
+  };
+
+  const withAlpha = (hex: string, alpha: number) => {
+    const { r, g, b } = hexToRgb(hex);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
+  const darken = (hex: string, amount = 0.2) => {
+    const { r, g, b } = hexToRgb(hex);
+    const f = (channel: number) => Math.max(0, Math.round(channel * (1 - amount)));
+    return `rgb(${f(r)}, ${f(g)}, ${f(b)})`;
+  };
+
+  const primary = normalizeHex(settings.primary_color, '#2563eb');
+  const secondary = normalizeHex(settings.secondary_color, '#1e293b');
+  const bannerStyle = useMemo(() => {
+    const deepPrimary = darken(primary, 0.22);
+    return {
+      backgroundImage: `
+        radial-gradient(1200px 280px at 10% 100%, ${withAlpha(primary, 0.28)} 0%, transparent 60%),
+        radial-gradient(700px 220px at 100% 0%, ${withAlpha(secondary, 0.28)} 0%, transparent 65%),
+        linear-gradient(135deg, ${deepPrimary} 0%, ${primary} 62%, ${withAlpha(primary, 0.88)} 100%)
+      `,
+    } as CSSProperties;
+  }, [primary, secondary]);
+
   return (
     <main className="max-w-[1440px] mx-auto px-4 md:px-10 py-6 md:py-10">
-      <section className="mb-10 rounded-[3rem] border border-white/10 bg-primary px-6 py-10 md:px-16 md:py-14 text-white shadow-2xl shadow-blue-900/20 relative overflow-hidden group">
-        <div className="relative z-10">
-          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-100">Loja oficial</p>
-          <div className="flex flex-col md:flex-row md:items-center gap-4 mt-4">
-            <h1 className="text-4xl md:text-6xl font-black tracking-[-0.03em]">Matrizes Profissionais</h1>
-            <Heart className="w-8 h-8 md:w-10 md:h-10 text-white/30 fill-current animate-pulse shrink-0" />
-          </div>
-          <p className="mt-4 max-w-2xl text-sm md:text-lg text-blue-50/80 font-bold uppercase tracking-wide">{subtitle}</p>
+      <section
+        style={bannerStyle}
+        className="mb-10 relative overflow-hidden rounded-[2.25rem] border border-white/20 px-8 py-10 md:px-12 md:py-12 text-white shadow-2xl"
+      >
+        <div className="absolute right-8 top-8 hidden md:flex items-center justify-center w-16 h-16 rounded-2xl bg-white/15 backdrop-blur-md border border-white/25">
+          <ShoppingBag className="w-8 h-8 text-white" />
         </div>
-        
-        {/* Decorative Background Icon */}
-        <Heart className="absolute -bottom-10 -right-10 w-64 h-64 text-white/5 rotate-12 pointer-events-none group-hover:scale-110 transition-transform duration-700" />
+        <p className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em]">
+          <Sparkles className="h-3.5 w-3.5" /> Loja oficial
+        </p>
+        <h1 className="mt-4 text-3xl md:text-5xl font-black tracking-[-0.03em] max-w-4xl">Matrizes Profissionais</h1>
+        <p className="mt-4 max-w-3xl text-sm md:text-base text-blue-100/95 font-semibold">{subtitle}</p>
       </section>
 
       <div className="flex flex-col lg:flex-row gap-10">
@@ -211,4 +247,3 @@ export default function ShopPage() {
     </main>
   );
 }
-

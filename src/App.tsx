@@ -23,6 +23,7 @@ const PayPalCancel = lazy(() => import('./pages/PayPalCancel'));
 const ThankYouPage = lazy(() => import('./pages/ThankYouPage'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
+const CompanyPage = lazy(() => import('./pages/CompanyPage'));
 
 // Admin Pages (Lazy)
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
@@ -79,6 +80,7 @@ function RouteSeoDefaults() {
       { match: /^\/loja/, title: `Loja | ${siteName}`, description: 'Explore nossa vitrine de matrizes de bordado digitais.' },
       { match: /^\/orcamento/, title: `Orçamento | ${siteName}`, description: 'Solicite orçamento para desenvolvimento profissional de matrizes de bordado.' },
       { match: /^\/contato/, title: `Contato | ${siteName}`, description: `Fale com a equipe da ${siteName}.` },
+      { match: /^\/nossa-empresa/, title: `Nossa Empresa | ${siteName}`, description: `Conheca a historia, missao e valores da ${siteName}.` },
       { match: /^\/produto\//, title: `${siteName} | Produto`, description: baseDescription },
       { match: /^\/favoritos/, title: `Favoritos | ${siteName}`, description: 'Lista de produtos favoritados.' },
       { match: /^\/carrinho/, title: `Carrinho | ${siteName}`, description: 'Confira os itens adicionados ao carrinho.' },
@@ -164,6 +166,7 @@ export default function App() {
                   <Route path="/loja" element={<ShopPage />} />
                   <Route path="/orcamento" element={<BudgetPage />} />
                   <Route path="/contato" element={<ContactPage />} />
+                  <Route path="/nossa-empresa" element={<CompanyPage />} />
                   <Route path="/produto/:slug" element={<ProductDetail />} />
                   <Route
                     path="/carrinho"
