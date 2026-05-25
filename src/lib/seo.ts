@@ -8,6 +8,7 @@ type SeoInput = {
   siteName?: string;
   twitterCard?: string;
   ogType?: string;
+  favicon?: string;
   jsonLd?: Record<string, unknown> | Record<string, unknown>[];
 };
 
@@ -43,6 +44,16 @@ function upsertCanonical(url: string) {
   node.setAttribute('href', url);
 }
 
+function upsertFavicon(url: string) {
+  let node = document.querySelector('link[rel="icon"]') as HTMLLinkElement | null;
+  if (!node) {
+    node = document.createElement('link');
+    node.setAttribute('rel', 'icon');
+    document.head.appendChild(node);
+  }
+  node.setAttribute('href', url);
+}
+
 function upsertJsonLd(payload: Record<string, unknown> | Record<string, unknown>[]) {
   let node = document.querySelector('script[data-seo-jsonld="true"]') as HTMLScriptElement | null;
   if (!node) {
@@ -72,6 +83,7 @@ export function applySeo(input: SeoInput) {
   const keywords = String(input.keywords || '').trim();
   const twitterCard = String(input.twitterCard || 'summary_large_image').trim();
   const ogType = String(input.ogType || 'website').trim();
+  const favicon = buildAbsoluteUrl(input.favicon || '/favicon.ico');
 
   document.title = title;
   upsertMetaByName('description', description);
@@ -91,5 +103,6 @@ export function applySeo(input: SeoInput) {
   upsertMetaByName('twitter:image', image);
 
   upsertCanonical(canonical);
+  upsertFavicon(favicon);
   if (input.jsonLd) upsertJsonLd(input.jsonLd);
 }

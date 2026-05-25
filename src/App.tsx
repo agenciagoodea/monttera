@@ -115,11 +115,31 @@ function RouteSeoDefaults() {
       canonical: `${path}${location.search || ''}`,
       siteName,
       image: String(settings.seo_og_image || settings.logo_url || '/uploads/seo-default-share.jpg'),
+      favicon: String((settings as any).favicon_url || '/favicon.ico'),
       twitterCard: String(settings.seo_twitter_card || 'summary_large_image'),
       keywords: String(settings.seo_keywords || ''),
       jsonLd: organizationSchema,
     });
   }, [location.pathname, location.search, settings]);
+
+  return null;
+}
+
+function GlobalFaviconSync() {
+  const { settings } = useAppData();
+
+  useEffect(() => {
+    const raw = String((settings as any).favicon_url || '/favicon.ico').trim();
+    if (!raw) return;
+    const href = raw.startsWith('http') ? raw : `${window.location.origin}${raw.startsWith('/') ? '' : '/'}${raw}`;
+    let node = document.querySelector('link[rel="icon"]') as HTMLLinkElement | null;
+    if (!node) {
+      node = document.createElement('link');
+      node.setAttribute('rel', 'icon');
+      document.head.appendChild(node);
+    }
+    node.setAttribute('href', href);
+  }, [settings]);
 
   return null;
 }
@@ -132,6 +152,7 @@ export default function App() {
         <AppDataProvider>
           <FavoritesProvider>
             <CartProvider>
+              <GlobalFaviconSync />
               <Suspense fallback={<PageLoader />}>
               <Routes>
           {/* Admin Routes */}
@@ -209,3 +230,4 @@ export default function App() {
     </Router>
   );
 }
+

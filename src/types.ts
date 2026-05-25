@@ -18,6 +18,7 @@ export interface Product {
   price: number;
   sale_price?: number | null;
   image: string;
+  image_alt?: string | null;
   production_sheet?: string | null;
   category_id: number;
   category_name?: string;
@@ -45,6 +46,7 @@ export interface ProductGalleryImage {
   product_id: number;
   url: string;
   full_url: string;
+  alt_text?: string;
   is_featured?: number | boolean;
   created_at?: string | null;
   file_type?: string | null;

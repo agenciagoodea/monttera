@@ -294,7 +294,7 @@ async function fetchMercadoPagoAccountInfo(accessToken: string) {
 }
 
 // ConfiguraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o do Multer para Uploads
-const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.svg', '.ico']);
 const ZIP_EXTENSIONS = new Set(['.zip', '.rar', '.7z']);
 const EMBROIDERY_EXTENSIONS = new Set(['.pes', '.jef', '.dst', '.exp', '.xxx', '.vp3', '.hus']);
 const PDF_EXTENSIONS = new Set(['.pdf']);
@@ -304,6 +304,12 @@ function isAllowedUpload(fieldName: string, extension: string, mimeType: string)
   const mime = String(mimeType || '').toLowerCase();
 
   if (fieldName === 'image' || fieldName === 'gallery' || fieldName === 'avatar' || fieldName === 'logo') {
+    if (ext === '.ico') {
+      return mime === 'image/x-icon' || mime === 'image/vnd.microsoft.icon' || mime === 'application/octet-stream';
+    }
+    if (ext === '.svg') {
+      return mime === 'image/svg+xml' || mime === 'text/plain' || mime === 'application/octet-stream';
+    }
     return IMAGE_EXTENSIONS.has(ext) && mime.startsWith('image/');
   }
 
@@ -1819,6 +1825,7 @@ async function initSettings() {
     seo_robots_index: 'true',
     seo_robots_follow: 'true',
     seo_og_image: '/uploads/seo-default-share.jpg',
+    favicon_url: '/favicon.ico',
     seo_twitter_card: 'summary_large_image',
     seo_facebook_url: '',
     seo_instagram_url: '',
@@ -2656,7 +2663,7 @@ async function startServer() {
     const { 
       name, slug, description, short_description, price, sale_price, promotional_price, production_sheet,
       category_id, category_ids, stitch_count, colors, is_featured, is_new,
-      seo_title, seo_description, seo_keywords, canonical_url, noindex, tags, tag_ids, downloadable_files, gallery_urls
+      seo_title, seo_description, seo_keywords, canonical_url, noindex, tags, tag_ids, downloadable_files, gallery_urls, image_alt, gallery_alts_existing, gallery_alts_new
     } = req.body;
 
     const parseIdArray = (rawValue: any): number[] => {
@@ -2674,6 +2681,21 @@ async function startServer() {
           if (Array.isArray(parsed)) return normalize(parsed);
         } catch {
           return normalize(trimmed.split(',').map((part) => part.trim()).filter(Boolean));
+        }
+      }
+      return [];
+    };
+    const parseStringArray = (rawValue: any): string[] => {
+      if (rawValue === undefined || rawValue === null || rawValue === '') return [];
+      if (Array.isArray(rawValue)) return rawValue.map((value) => String(value || '').trim());
+      if (typeof rawValue === 'string') {
+        const trimmed = rawValue.trim();
+        if (!trimmed) return [];
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) return parsed.map((value) => String(value || '').trim());
+        } catch {
+          return trimmed.split(',').map((value) => String(value || '').trim());
         }
       }
       return [];
@@ -2714,10 +2736,10 @@ async function startServer() {
       const result = await dbAsync.run(`
         INSERT INTO products (
           name, slug, description, short_description, price, sale_price, 
-          image, production_sheet, category_id, stitch_count, colors, is_featured, is_new,
+          image, image_alt, production_sheet, category_id, stitch_count, colors, is_featured, is_new,
           seo_title, seo_description, seo_keywords, canonical_url, noindex
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, normalizedName, uniqueSlug, description || null, short_description || null, finalPrice, finalSalePrice, null, null, normalizedCategoryId, normalizedStitchCount, colors || null, is_featured === 'true' || is_featured === '1' ? 1 : 0, is_new === 'true' || is_new === '1' ? 1 : 0, seo_title || null, seo_description || null, seo_keywords || null, canonical_url || null, noindex === 'true' || noindex === '1' ? 1 : 0);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, normalizedName, uniqueSlug, description || null, short_description || null, finalPrice, finalSalePrice, null, String(image_alt || '').trim() || null, null, normalizedCategoryId, normalizedStitchCount, colors || null, is_featured === 'true' || is_featured === '1' ? 1 : 0, is_new === 'true' || is_new === '1' ? 1 : 0, seo_title || null, seo_description || null, seo_keywords || null, canonical_url || null, noindex === 'true' || noindex === '1' ? 1 : 0);
 
       const productId = result.lastInsertRowid;
       const productIdNumber = Number(productId);
@@ -2755,12 +2777,15 @@ async function startServer() {
       }
 
       // Galeria
+      const parsedGalleryAltsExisting = parseStringArray(gallery_alts_existing);
+      const parsedGalleryAltsNew = parseStringArray(gallery_alts_new);
+
       if (files['gallery']) {
         for (const [index, f] of files['gallery'].entries()) {
           const ext = path.extname(f.originalname || f.filename || '').toLowerCase() || '.jpg';
           const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext, `g${index + 1}`);
           moveUploadedFileToFinalPath(f, publicUploadsDir, finalName);
-          await dbAsync.run('INSERT IGNORE INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${finalName}`, 'gallery');
+          await dbAsync.run('INSERT IGNORE INTO product_images (product_id, url, alt_text, file_type) VALUES (?, ?, ?, ?)', productId, `/uploads/${finalName}`, parsedGalleryAltsNew[index] || null, 'gallery');
         }
       }
 
@@ -2782,8 +2807,8 @@ async function startServer() {
           }
         }
 
-        for (const url of parsedGalleryUrls) {
-          await dbAsync.run('INSERT IGNORE INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, url, 'gallery');
+        for (const [index, url] of parsedGalleryUrls.entries()) {
+          await dbAsync.run('INSERT IGNORE INTO product_images (product_id, url, alt_text, file_type) VALUES (?, ?, ?, ?)', productId, url, parsedGalleryAltsExisting[index] || null, 'gallery');
         }
       }
 
@@ -2884,7 +2909,10 @@ async function startServer() {
       tags,
       tag_ids,
       downloadable_files,
-      gallery_urls
+      gallery_urls,
+      image_alt,
+      gallery_alts_existing,
+      gallery_alts_new
     } = req.body;
 
     const parseIdArray = (rawValue: any): number[] => {
@@ -2911,6 +2939,21 @@ async function startServer() {
         return normalize(trimmed.split(',').map((part) => part.trim()).filter(Boolean));
       }
 
+      return [];
+    };
+    const parseStringArray = (rawValue: any): string[] => {
+      if (rawValue === undefined || rawValue === null || rawValue === '') return [];
+      if (Array.isArray(rawValue)) return rawValue.map((value) => String(value || '').trim());
+      if (typeof rawValue === 'string') {
+        const trimmed = rawValue.trim();
+        if (!trimmed) return [];
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) return parsed.map((value) => String(value || '').trim());
+        } catch {
+          return trimmed.split(',').map((value) => String(value || '').trim());
+        }
+      }
       return [];
     };
 
@@ -2940,6 +2983,7 @@ async function startServer() {
     const nextSeoDescription = seo_description !== undefined ? (String(seo_description || '').trim() || null) : existingProduct.seo_description;
     const nextSeoKeywords = seo_keywords !== undefined ? (String(seo_keywords || '').trim() || null) : existingProduct.seo_keywords;
     const nextCanonicalUrl = canonical_url !== undefined ? (String(canonical_url || '').trim() || null) : existingProduct.canonical_url;
+    const nextImageAlt = image_alt !== undefined ? (String(image_alt || '').trim() || null) : existingProduct.image_alt;
     const nextNoindex = noindex !== undefined
       ? (String(noindex) === 'true' || String(noindex) === '1' ? 1 : 0)
       : Number(existingProduct.noindex || 0);
@@ -2990,6 +3034,7 @@ async function startServer() {
           stitch_count = ?,
           colors = ?,
           image = ?,
+          image_alt = ?,
           production_sheet = ?,
           seo_title = ?,
           seo_description = ?,
@@ -2998,7 +3043,7 @@ async function startServer() {
           noindex = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextProductionSheet, nextSeoTitle, nextSeoDescription, nextSeoKeywords, nextCanonicalUrl, nextNoindex, productId);
+      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextImageAlt, nextProductionSheet, nextSeoTitle, nextSeoDescription, nextSeoKeywords, nextCanonicalUrl, nextNoindex, productId);
 
       if (files['image']?.[0] && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.includes('/uploads/')) {
         const oldImageRelative = existingProduct.image.replace(/^https?:\/\/[^/]+/i, '');
@@ -3052,6 +3097,8 @@ async function startServer() {
 
       const hasNewGalleryFiles = Array.isArray(files['gallery']) && files['gallery'].length > 0;
       const hasGalleryUrlsPayload = gallery_urls !== undefined;
+      const parsedGalleryAltsExisting = parseStringArray(gallery_alts_existing);
+      const parsedGalleryAltsNew = parseStringArray(gallery_alts_new);
       if (hasNewGalleryFiles || hasGalleryUrlsPayload) {
         await dbAsync.run(`
           DELETE FROM product_images
@@ -3072,8 +3119,8 @@ async function startServer() {
             }
           }
 
-          for (const url of parsedGalleryUrls) {
-            await dbAsync.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, url, 'gallery');
+          for (const [index, url] of parsedGalleryUrls.entries()) {
+            await dbAsync.run('INSERT INTO product_images (product_id, url, alt_text, file_type) VALUES (?, ?, ?, ?)', productId, url, parsedGalleryAltsExisting[index] || null, 'gallery');
           }
         }
 
@@ -3082,7 +3129,7 @@ async function startServer() {
             const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.jpg';
             const finalName = buildProductMediaName(nextSlug, productId, ext, `g${index + 1}`);
             moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
-            await dbAsync.run('INSERT INTO product_images (product_id, url, file_type) VALUES (?, ?, ?)', productId, `/uploads/${finalName}`, 'gallery');
+            await dbAsync.run('INSERT INTO product_images (product_id, url, alt_text, file_type) VALUES (?, ?, ?, ?)', productId, `/uploads/${finalName}`, parsedGalleryAltsNew[index] || null, 'gallery');
           }
         }
       }
@@ -3160,7 +3207,7 @@ async function startServer() {
     if (!product) return res.status(404).json({ error: 'Produto nÃƒÆ’Ã‚Â£o encontrado' });
 
     const images = (await dbAsync.all(`
-      SELECT id, product_id, url, is_featured, created_at, file_type
+      SELECT id, product_id, url, alt_text, is_featured, created_at, file_type
       FROM product_images
       WHERE product_id = ?
       ORDER BY id ASC
@@ -3168,6 +3215,7 @@ async function startServer() {
       id: image.id,
       product_id: image.product_id,
       url: String(image?.url || '').trim(),
+      alt_text: String(image?.alt_text || '').trim(),
       full_url: normalizePublicMediaUrl(image?.url),
       is_featured: image?.is_featured ?? 0,
       created_at: image?.created_at ?? null,
@@ -7568,7 +7616,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const cached = apiCache.get('public_settings');
       if (cached) return res.json(cached);
 
-      const rows = await dbAsync.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "redirect_to_checkout_after_add_to_cart", "brand_logos", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies", "top_bar_message", "top_bar_enabled", "home_company_enabled", "home_company_title", "home_company_subtitle", "home_company_text", "home_company_mission", "home_company_vision", "home_company_values", "home_company_image_main", "home_company_image_secondary", "home_company_cta_text", "home_company_cta_link", "home_company_bg_color", "home_company_text_color", "home_company_icons", "seo_meta_title", "seo_meta_description", "seo_keywords", "seo_robots_index", "seo_robots_follow", "seo_og_image", "seo_twitter_card", "seo_facebook_url", "seo_instagram_url", "seo_twitter_url", "seo_organization_name", "seo_organization_logo", "seo_enable_product_schema", "seo_enable_organization_schema", "seo_enable_breadcrumb_schema", "seo_sitemap_enabled", "seo_robots_custom_rules")') as any[];
+      const rows = await dbAsync.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "redirect_to_checkout_after_add_to_cart", "brand_logos", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies", "top_bar_message", "top_bar_enabled", "home_company_enabled", "home_company_title", "home_company_subtitle", "home_company_text", "home_company_mission", "home_company_vision", "home_company_values", "home_company_image_main", "home_company_image_secondary", "home_company_cta_text", "home_company_cta_link", "home_company_bg_color", "home_company_text_color", "home_company_icons", "seo_meta_title", "seo_meta_description", "seo_keywords", "seo_robots_index", "seo_robots_follow", "seo_og_image", "favicon_url", "seo_twitter_card", "seo_facebook_url", "seo_instagram_url", "seo_twitter_url", "seo_organization_name", "seo_organization_logo", "seo_enable_product_schema", "seo_enable_organization_schema", "seo_enable_breadcrumb_schema", "seo_sitemap_enabled", "seo_robots_custom_rules")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);
@@ -7940,7 +7988,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       // Gallery images
       const galleryRows = await dbAsync.all(`
-        SELECT id, product_id, url, is_featured, created_at, file_type
+        SELECT id, product_id, url, alt_text, is_featured, created_at, file_type
         FROM product_images
         WHERE product_id = ?
           AND (
@@ -7954,6 +8002,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         id: row.id,
         product_id: row.product_id,
         url: String(row?.url || '').trim(),
+        alt_text: String(row?.alt_text || '').trim(),
         full_url: normalizePublicMediaUrl(row?.url),
         is_featured: row?.is_featured ?? 0,
         created_at: row?.created_at ?? null,

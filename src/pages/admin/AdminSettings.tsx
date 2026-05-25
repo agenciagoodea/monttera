@@ -142,6 +142,7 @@ export default function AdminSettings() {
     seo_robots_index: 'true',
     seo_robots_follow: 'true',
     seo_og_image: '/uploads/seo-default-share.jpg',
+    favicon_url: '/favicon.ico',
     seo_twitter_card: 'summary_large_image',
     seo_facebook_url: '',
     seo_instagram_url: '',
@@ -502,6 +503,16 @@ export default function AdminSettings() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data?.url) throw new Error(data?.error || 'Erro ao fazer upload da imagem');
     setSettings(prev => ({ ...prev, [target]: data.url }));
+  };
+
+  const uploadSeoAsset = async (file: File, target: 'seo_og_image' | 'favicon_url') => {
+    const formData = new FormData();
+    formData.append('logo', file);
+    const res = await fetch('/api/admin/upload-logo', { method: 'POST', body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.url) throw new Error(data?.error || 'Erro ao fazer upload do arquivo');
+    setSettings(prev => ({ ...prev, [target]: data.url }));
+    return String(data.url);
   };
 
   const fetchBackups = async () => {
@@ -2412,9 +2423,94 @@ export default function AdminSettings() {
                           <option value="summary">summary</option>
                         </select>
                       </div>
-                      <div className="space-y-2 md:col-span-2">
+                      <div className="space-y-3 md:col-span-2">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Open Graph Image</label>
-                        <input value={settings.seo_og_image || ''} onChange={e => setSettings({ ...settings, seo_og_image: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" />
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                          Imagem usada quando seu link Ã© compartilhado no WhatsApp, Facebook, Instagram, LinkedIn e X.
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-4">
+                          <div className="space-y-2">
+                            <input value={settings.seo_og_image || ''} onChange={e => setSettings({ ...settings, seo_og_image: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" />
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                              Formatos: JPG, JPEG, PNG, WEBP | Recomendado: 1200x630 px
+                            </p>
+                            <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 text-blue-700 text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-blue-100 transition-colors">
+                              <Plus className="w-3.5 h-3.5" /> Enviar imagem Open Graph
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept="image/jpeg,image/jpg,image/png,image/webp"
+                                onChange={async (e) => {
+                                  const f = e.target.files?.[0];
+                                  if (!f) return;
+                                  try {
+                                    setSaving(true);
+                                    await uploadSeoAsset(f, 'seo_og_image');
+                                    setMessage({ text: 'Open Graph Image enviada! Salve para aplicar.', type: 'success' });
+                                  } catch (err: any) {
+                                    setMessage({ text: err?.message || 'Erro ao enviar Open Graph Image.', type: 'error' });
+                                  } finally {
+                                    setSaving(false);
+                                    e.target.value = '';
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Miniatura</p>
+                            <div className="aspect-[1200/630] rounded-xl bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center">
+                              {settings.seo_og_image ? (
+                                <img src={String(settings.seo_og_image)} alt="Preview Open Graph" className="w-full h-full object-cover" />
+                              ) : (
+                                <span className="text-[10px] font-bold text-slate-400">Sem imagem</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-3 md:col-span-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Favicon</label>
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_140px] gap-4">
+                          <div className="space-y-2">
+                            <input value={(settings as any).favicon_url || ''} onChange={e => setSettings({ ...settings, favicon_url: e.target.value } as any)} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold" />
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                              Formatos: ICO, PNG, SVG | Recomendado: 32x32 ou 48x48 px
+                            </p>
+                            <label className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 text-blue-700 text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-blue-100 transition-colors">
+                              <Plus className="w-3.5 h-3.5" /> Enviar favicon
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept=".ico,image/png,image/svg+xml"
+                                onChange={async (e) => {
+                                  const f = e.target.files?.[0];
+                                  if (!f) return;
+                                  try {
+                                    setSaving(true);
+                                    await uploadSeoAsset(f, 'favicon_url');
+                                    setMessage({ text: 'Favicon enviado! Salve para aplicar.', type: 'success' });
+                                  } catch (err: any) {
+                                    setMessage({ text: err?.message || 'Erro ao enviar favicon.', type: 'error' });
+                                  } finally {
+                                    setSaving(false);
+                                    e.target.value = '';
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Miniatura</p>
+                            <div className="h-16 rounded-xl bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center">
+                              {(settings as any).favicon_url ? (
+                                <img src={String((settings as any).favicon_url)} alt="Preview favicon" className="w-8 h-8 object-contain" />
+                              ) : (
+                                <span className="text-[10px] font-bold text-slate-400">Sem Ã­cone</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Schema Produto</label>

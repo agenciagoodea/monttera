@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ArrowLeft, 
@@ -37,6 +37,8 @@ interface DownloadableFile {
   file_type?: string;
 }
 
+type SeoFieldKey = 'seo_title' | 'seo_description' | 'seo_keywords' | 'canonical_url' | 'main_image_alt' | 'gallery_alt';
+
 export default function AdminProductForm() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -58,7 +60,13 @@ export default function AdminProductForm() {
   const [syncLogs, setSyncLogs] = useState<any[]>([]);
   const [loadingSyncLogs, setLoadingSyncLogs] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState('');
-  
+  const [activeSeoField, setActiveSeoField] = useState<SeoFieldKey>('seo_title');
+  const seoTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const seoDescriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const seoKeywordsInputRef = useRef<HTMLInputElement | null>(null);
+  const canonicalInputRef = useRef<HTMLInputElement | null>(null);
+  const mainImageAltInputRef = useRef<HTMLInputElement | null>(null);
+  const [activeGalleryAltIndex, setActiveGalleryAltIndex] = useState<number | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     slug: '',
@@ -79,7 +87,10 @@ export default function AdminProductForm() {
   });
 
   const [mainImage, setMainImage] = useState<File | null>(null);
+  const [mainImageAlt, setMainImageAlt] = useState('');
   const [gallery, setGallery] = useState<File[]>([]);
+  const [existingGalleryAlts, setExistingGalleryAlts] = useState<string[]>([]);
+  const [newGalleryAlts, setNewGalleryAlts] = useState<string[]>([]);
   const [productionFiles, setProductionFiles] = useState<File[]>([]);
   const [productionSheetUrl, setProductionSheetUrl] = useState('');
   const [productionSheetFile, setProductionSheetFile] = useState<File | null>(null);
@@ -183,8 +194,14 @@ export default function AdminProductForm() {
               .map((img: any) => getPublicAssetUrl(img?.full_url || img?.url || ''))
               .filter(Boolean)
           : [];
+        const loadedExistingGalleryAlts = Array.isArray(prod.images)
+          ? prod.images.map((img: any) => String(img?.alt_text || '').trim())
+          : [];
         if (normalizedMainImage) setPreviews(p => ({ ...p, main: normalizedMainImage }));
+        setMainImageAlt(String(prod.image_alt || '').trim());
         setExistingGalleryUrls(normalizedGallery);
+        setExistingGalleryAlts(loadedExistingGalleryAlts);
+        setNewGalleryAlts([]);
         setPreviews(p => ({ ...p, gallery: [...normalizedGallery] }));
         if (import.meta.env.DEV) {
           console.debug('[AdminProductForm] production_sheet db/raw:', prod.production_sheet);
@@ -228,6 +245,7 @@ export default function AdminProductForm() {
     if (e.target.files) {
       const files = Array.from(e.target.files);
       setGallery(prev => [...prev, ...files]);
+      setNewGalleryAlts(prev => [...prev, ...files.map(() => '')]);
       const newPreviews = files.map(f => URL.createObjectURL(f as File));
       setPreviews(prev => ({ ...prev, gallery: [...prev.gallery, ...newPreviews] }));
     }
@@ -237,26 +255,126 @@ export default function AdminProductForm() {
     const existingCount = existingGalleryUrls.length;
     if (index < existingCount) {
       setExistingGalleryUrls(prev => prev.filter((_, i) => i !== index));
+      setExistingGalleryAlts(prev => prev.filter((_, i) => i !== index));
       setPreviews(prev => ({ ...prev, gallery: prev.gallery.filter((_, i) => i !== index) }));
       return;
     }
 
     const newFileIndex = index - existingCount;
     setGallery(prev => prev.filter((_, i) => i !== newFileIndex));
+    setNewGalleryAlts(prev => prev.filter((_, i) => i !== newFileIndex));
     setPreviews(prev => ({ ...prev, gallery: prev.gallery.filter((_, i) => i !== index) }));
   };
 
   const selectedTags = availableTags.filter((tag) => selectedTagIds.includes(tag.id));
   const stripHtml = (value: string) => String(value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-  const seoKeyword = String(formData.seo_keywords || '').split(',')[0]?.trim().toLowerCase() || '';
-  const seoTitlePreview = String(formData.seo_title || formData.name || '').trim();
-  const seoDescriptionPreview = String(formData.seo_description || stripHtml(formData.short_description || formData.description || '')).trim();
+  const seoTemplateMap = useMemo(
+    () => ({
+      '{{nome_produto}}': formData.name || 'Nome do produto',
+      '{{slug_produto}}': formData.slug || 'slug-do-produto',
+      '{{preco}}': formData.price || '0.00',
+      '{{preco_promocional}}': formData.sale_price || formData.price || '0.00',
+      '{{pontos}}': formData.stitch_count || '0',
+      '{{cores}}': formData.colors || '0',
+      '{{categoria_principal}}':
+        categories.find((category) => category.id === Number(formData.category_id))?.name || 'Categoria',
+      '{{site_nome}}': 'Digital Bordados',
+    }),
+    [formData, categories],
+  );
+  const seoTemplateVars = useMemo(
+    () => [
+      { key: '{{nome_produto}}', label: 'Nome do produto' },
+      { key: '{{slug_produto}}', label: 'Slug do produto' },
+      { key: '{{preco}}', label: 'Preço normal' },
+      { key: '{{preco_promocional}}', label: 'Preço promocional' },
+      { key: '{{pontos}}', label: 'Pontos' },
+      { key: '{{cores}}', label: 'Cores' },
+      { key: '{{categoria_principal}}', label: 'Categoria principal' },
+      { key: '{{site_nome}}', label: 'Nome do site' },
+    ],
+    [],
+  );
+  const resolveSeoTemplate = (value: string) =>
+    String(value || '').replace(/{{[a-z_]+}}/gi, (token) => {
+      const normalized = token.toLowerCase();
+      return seoTemplateMap[normalized as keyof typeof seoTemplateMap] ?? token;
+    });
+  const getSeoFieldRef = (field: SeoFieldKey) => {
+    if (field === 'seo_title') return seoTitleInputRef;
+    if (field === 'seo_description') return seoDescriptionInputRef;
+    if (field === 'seo_keywords') return seoKeywordsInputRef;
+    if (field === 'main_image_alt') return mainImageAltInputRef;
+    return canonicalInputRef;
+  };
+  const insertSeoToken = (token: string) => {
+    const field = activeSeoField;
+    if (field === 'gallery_alt') {
+      if (activeGalleryAltIndex === null) return;
+      if (activeGalleryAltIndex < existingGalleryUrls.length) {
+        setExistingGalleryAlts((prev) => prev.map((value, idx) => (idx === activeGalleryAltIndex ? `${value || ''}${token}` : value)));
+      } else {
+        const newIndex = activeGalleryAltIndex - existingGalleryUrls.length;
+        setNewGalleryAlts((prev) => prev.map((value, idx) => (idx === newIndex ? `${value || ''}${token}` : value)));
+      }
+      return;
+    }
+    const ref = getSeoFieldRef(field).current;
+    const currentValue = field === 'main_image_alt' ? String(mainImageAlt || '') : String(formData[field as keyof typeof formData] || '');
+
+    if (!ref) {
+      if (field === 'main_image_alt') {
+        setMainImageAlt((prev) => `${String(prev || '')}${token}`);
+      } else {
+        setFormData((prev) => ({ ...prev, [field]: `${String(prev[field as keyof typeof prev] || '')}${token}` }));
+      }
+      return;
+    }
+
+    const start = ref.selectionStart ?? currentValue.length;
+    const end = ref.selectionEnd ?? start;
+    const nextValue = `${currentValue.slice(0, start)}${token}${currentValue.slice(end)}`;
+
+    if (field === 'main_image_alt') {
+      setMainImageAlt(nextValue);
+    } else {
+      setFormData((prev) => ({ ...prev, [field]: nextValue }));
+    }
+    requestAnimationFrame(() => {
+      ref.focus();
+      const cursor = start + token.length;
+      ref.setSelectionRange(cursor, cursor);
+    });
+  };
+  const addHeadingToDescription = () => {
+    const headingText = (formData.seo_title || formData.name || 'Detalhes do produto').trim();
+    const safeHeading = headingText || 'Detalhes do produto';
+    const nextDescription = `<h2>${safeHeading}</h2>\n${formData.description || ''}`.trim();
+    setFormData((prev) => ({ ...prev, description: nextDescription }));
+  };
+  const addAltToDescriptionImages = () => {
+    const altText = (formData.seo_title || formData.name || 'Imagem do produto').trim();
+    const nextDescription = String(formData.description || '').replace(
+      /<img(?![^>]*\balt=)([^>]*?)>/gi,
+      `<img alt="${altText.replace(/"/g, '&quot;')}"$1>`,
+    );
+    setFormData((prev) => ({ ...prev, description: nextDescription }));
+  };
+  const contentImageCount = (String(formData.description || '').match(/<img\b/gi) || []).length;
+  const seoKeywordsResolved = resolveSeoTemplate(formData.seo_keywords || '');
+  const seoKeyword = String(seoKeywordsResolved || '').split(',')[0]?.trim().toLowerCase() || '';
+  const seoTitlePreview = String(resolveSeoTemplate(formData.seo_title || formData.name || '')).trim();
+  const seoDescriptionPreview = String(
+    resolveSeoTemplate(formData.seo_description || stripHtml(formData.short_description || formData.description || '')),
+  ).trim();
   const plainDescription = stripHtml(formData.description || '');
   const wordCount = plainDescription ? plainDescription.split(/\s+/).length : 0;
   const keywordMatches = seoKeyword ? (plainDescription.toLowerCase().match(new RegExp(`\\b${seoKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')) || []).length : 0;
   const keywordDensity = wordCount > 0 ? (keywordMatches / wordCount) * 100 : 0;
   const hasHeading = /<h[1-3][^>]*>.*?<\/h[1-3]>/i.test(formData.description || '');
-  const hasImageAlt = /<img[^>]+alt\s*=\s*['"][^'"]+['"][^>]*>/i.test(formData.description || '');
+  const hasImageAltInDescription = /<img[^>]+alt\s*=\s*['"][^'"]+['"][^>]*>/i.test(formData.description || '');
+  const hasImageAltInMedia = !!String(mainImageAlt || '').trim() || [...existingGalleryAlts, ...newGalleryAlts].some((alt) => String(alt || '').trim().length > 0);
+  const hasImageAlt = hasImageAltInDescription || hasImageAltInMedia;
   const seoScore = [
     seoTitlePreview.length >= 35 && seoTitlePreview.length <= 65 ? 20 : 0,
     seoDescriptionPreview.length >= 120 && seoDescriptionPreview.length <= 160 ? 20 : 0,
@@ -405,8 +523,11 @@ export default function AdminProductForm() {
     });
 
     if (mainImage) data.append('image', mainImage);
+    data.append('image_alt', mainImageAlt);
     gallery.forEach(f => data.append('gallery', f));
     data.append('gallery_urls', JSON.stringify(existingGalleryUrls));
+    data.append('gallery_alts_existing', JSON.stringify(existingGalleryAlts));
+    data.append('gallery_alts_new', JSON.stringify(newGalleryAlts));
     productionFiles.forEach(f => data.append('production_files', f));
     data.append('tags', JSON.stringify(selectedTagIds));
     data.append('promotional_price', payload.sale_price);
@@ -618,9 +739,9 @@ export default function AdminProductForm() {
           )}
         </div>
       )}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+      <div className="flex flex-col lg:flex-row gap-8 items-start">
         {/* Main Content */}
-        <div className="lg:col-span-2 space-y-8">
+        <div className="w-full lg:w-2/3 space-y-8">
           {/* Basic Info */}
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 md:p-10 space-y-8">
             <div className="flex items-center gap-3 border-b border-slate-50 pb-5">
@@ -676,72 +797,9 @@ export default function AdminProductForm() {
             </div>
           </div>
 
-          {/* Media & Gallery */}
+
+          {/* SEO Options */}
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 md:p-10 space-y-8">
-            <div className="flex items-center gap-3 border-b border-slate-50 pb-5">
-              <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center">
-                <ImageIcon className="w-4 h-4" />
-              </div>
-              <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Mídia e Galeria</h3>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="space-y-4">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Imagem Principal</label>
-                <div className="relative aspect-video rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 overflow-hidden flex items-center justify-center group cursor-pointer hover:border-blue-400 transition-all">
-                  {previews.main ? (
-                    <img src={previews.main} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 text-slate-400 group-hover:text-blue-500">
-                      <Upload className="w-8 h-8" />
-                      <span className="text-[10px] font-black uppercase tracking-widest">Enviar Capa</span>
-                    </div>
-                  )}
-                  <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleMainImageChange} accept="image/*" />
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Galeria de Fotos</label>
-                <div className="relative aspect-video rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 overflow-hidden flex items-center justify-center group cursor-pointer hover:border-blue-400 transition-all">
-                  <div className="flex flex-col items-center gap-2 text-slate-400 group-hover:text-blue-500">
-                    <Plus className="w-8 h-8" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Adicionar Fotos</span>
-                  </div>
-                  <input type="file" multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleGalleryChange} accept="image/*" />
-                </div>
-              </div>
-            </div>
-
-            {previews.gallery.length > 0 && (
-              <div className="grid grid-cols-4 md:grid-cols-6 gap-4 pt-4">
-                {previews.gallery.map((url, i) => (
-                  <div key={i} className="relative aspect-square rounded-2xl overflow-hidden border border-slate-100 group">
-                    <img
-                      src={url}
-                      onError={(event) => {
-                        if (import.meta.env.DEV) {
-                          console.debug('[AdminProductForm] gallery preview error:', (event.currentTarget as HTMLImageElement).src);
-                        }
-                      }}
-                      className="w-full h-full object-cover"
-                    />
-                    <button 
-                      onClick={() => removeGalleryItem(i)}
-                      className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* SEO Options + Tags */}
-          <div className="space-y-8">
-            {/* SEO Options */}
-            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 md:p-10 space-y-8">
               <div className="flex items-center gap-3 border-b border-slate-50 pb-5">
                 <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
                   <Globe className="w-4 h-4" />
@@ -753,9 +811,11 @@ export default function AdminProductForm() {
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Título SEO</label>
                   <input
+                    ref={seoTitleInputRef}
                     type="text"
                     value={formData.seo_title}
                     onChange={e => setFormData((prev) => ({ ...prev, seo_title: e.target.value }))}
+                    onFocus={() => setActiveSeoField('seo_title')}
                     className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
                     placeholder="Meta title para o Google"
                   />
@@ -763,18 +823,156 @@ export default function AdminProductForm() {
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Meta Descrição SEO</label>
                   <textarea
+                    ref={seoDescriptionInputRef}
                     rows={3}
                     value={formData.seo_description}
                     onChange={e => setFormData((prev) => ({ ...prev, seo_description: e.target.value }))}
+                    onFocus={() => setActiveSeoField('seo_description')}
                     className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold resize-none"
                     placeholder="Resumo para resultados de busca"
                   />
                 </div>
+                <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">Chaves dinâmicas SEO</p>
+                    <p className="text-[10px] font-semibold text-slate-500">
+                      Campo ativo: <span className="text-blue-700 uppercase">{activeSeoField === 'main_image_alt' ? 'ALT IMAGEM PRINCIPAL' : activeSeoField === 'gallery_alt' ? 'ALT GALERIA' : activeSeoField.replace('seo_', 'seo ')}</span>
+                    </p>
+                  </div>
+                  <p className="text-[11px] text-slate-600">
+                    Clique em uma chave para inserir no campo selecionado. Você também pode escrever texto livre junto com as chaves.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {seoTemplateVars.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => insertSeoToken(item.key)}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-blue-200 bg-white text-[10px] font-black text-blue-700 uppercase tracking-wide hover:bg-blue-100"
+                        title={`${item.label}: ${seoTemplateMap[item.key.toLowerCase() as keyof typeof seoTemplateMap]}`}
+                      >
+                        <span>{item.key}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-slate-600">
+                    {seoTemplateVars.map((item) => (
+                      <p key={`${item.key}-example`} className="truncate">
+                        <span className="font-black text-slate-700">{item.key}</span>: {seoTemplateMap[item.key.toLowerCase() as keyof typeof seoTemplateMap]}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Palavras-chave SEO</label>
+                    <input
+                      ref={seoKeywordsInputRef}
+                      type="text"
+                      value={formData.seo_keywords}
+                      onChange={e => setFormData((prev) => ({ ...prev, seo_keywords: e.target.value }))}
+                      onFocus={() => setActiveSeoField('seo_keywords')}
+                      className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
+                      placeholder="ex: policia militar, veterinaria, enfermagem"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Canonical URL</label>
+                    <input
+                      ref={canonicalInputRef}
+                      type="text"
+                      value={formData.canonical_url}
+                      onChange={e => setFormData((prev) => ({ ...prev, canonical_url: e.target.value }))}
+                      onFocus={() => setActiveSeoField('canonical_url')}
+                      className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
+                      placeholder="https://www.seudominio.com/produto/matriz-exemplo"
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Indexação</label>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={!formData.noindex}
+                      onClick={() => setFormData((prev) => ({ ...prev, noindex: !prev.noindex }))}
+                      className={`w-full px-4 py-4 rounded-2xl border text-xs font-black uppercase tracking-widest transition-colors ${
+                        formData.noindex
+                          ? 'bg-rose-50 border-rose-200 text-rose-700'
+                          : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      }`}
+                    >
+                      {formData.noindex ? 'Noindex / Nofollow' : 'Index / Follow'}
+                    </button>
+                  </div>
+                  <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 md:p-5 space-y-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Diagnostico e Preview SEO</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Analise SEO</p>
+                          <span className={`text-xs font-black ${seoScore >= 80 ? 'text-emerald-600' : seoScore >= 55 ? 'text-amber-600' : 'text-rose-600'}`}>{seoScore}/100</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                          <div className={`h-full ${seoScore >= 80 ? 'bg-emerald-500' : seoScore >= 55 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${Math.max(0, Math.min(100, seoScore))}%` }} />
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <div className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-[11px] font-semibold text-slate-600">
+                            <span>Título</span>
+                            <span>{seoTitlePreview.length} caracteres</span>
+                            <span>Descrição</span>
+                            <span>{seoDescriptionPreview.length} caracteres</span>
+                            <span>Densidade keyword</span>
+                            <span>{keywordDensity.toFixed(2)}%</span>
+                            <span>Legibilidade</span>
+                            <span>{wordCount < 80 ? 'baixa' : wordCount > 450 ? 'alta' : 'ok'}</span>
+                            <span>Heading no conteúdo</span>
+                            <span>{hasHeading ? 'ok' : 'falta'}</span>
+                            <span>Imagem com ALT</span>
+                            <span>{hasImageAlt ? 'ok' : 'falta'}</span>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          {!hasHeading && (
+                            <button
+                              type="button"
+                              onClick={addHeadingToDescription}
+                              className="w-full px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-[10px] font-black uppercase tracking-widest hover:bg-amber-100"
+                            >
+                              Corrigir: adicionar heading no conteudo
+                            </button>
+                          )}
+                          {!hasImageAlt && (
+                            <button
+                              type="button"
+                              onClick={addAltToDescriptionImages}
+                              className="w-full px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-[10px] font-black uppercase tracking-widest hover:bg-amber-100 disabled:opacity-50"
+                              disabled={contentImageCount === 0}
+                              title={contentImageCount === 0 ? 'Adicione imagens na descrição completa para aplicar ALT automaticamente.' : ''}
+                            >
+                              {contentImageCount === 0
+                                ? 'Sem imagem no conteudo para aplicar ALT'
+                                : 'Corrigir: adicionar ALT nas imagens do conteudo'}
+                            </button>
+                          )}
+                          <p className="text-[10px] text-slate-500 leading-relaxed">
+                            Densidade keyword = ocorrencias da palavra-chave principal no texto / total de palavras x 100. Faixa recomendada: 0.5% a 3%.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Preview Google</p>
+                        <p className="text-[10px] text-emerald-700 font-semibold truncate">{resolveSeoTemplate(formData.canonical_url) || `https://www.seudominio.com/produto/${formData.slug || 'slug-do-produto'}`}</p>
+                        <p className="text-base leading-tight text-blue-700 font-semibold">{seoTitlePreview || 'Titulo do produto para resultado de busca'}</p>
+                        <p className="text-xs text-slate-600 line-clamp-3">{seoDescriptionPreview || 'Descricao do produto otimizada para mecanismos de busca.'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
+          </div>
 
-            {/* Tags */}
-            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 md:p-10 space-y-6 relative">
+          {/* Tags */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 md:p-10 space-y-6 relative">
               <div className="flex items-center gap-3 border-b border-slate-50 pb-5">
                 <div className="w-8 h-8 bg-violet-50 text-violet-600 rounded-lg flex items-center justify-center">
                   <Tag className="w-4 h-4" />
@@ -869,12 +1067,11 @@ export default function AdminProductForm() {
                   )}
                 </div>
               </div>
-            </div>
           </div>
         </div>
 
         {/* Sidebar Settings */}
-        <div className="space-y-8">
+        <div className="w-full lg:w-1/3 space-y-8">
           {/* Price & Meta */}
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 space-y-8">
              <div className="flex items-center gap-3 border-b border-slate-50 pb-5">
@@ -886,7 +1083,7 @@ export default function AdminProductForm() {
 
             <div className="space-y-6">
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preço Normal (R$)</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preço normal (R$)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -898,7 +1095,7 @@ export default function AdminProductForm() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preço Promo (R$)</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preço promo (R$)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -1048,67 +1245,100 @@ export default function AdminProductForm() {
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Palavras-chave SEO</label>
-                  <input
-                    type="text"
-                    value={formData.seo_keywords}
-                    onChange={e => setFormData((prev) => ({ ...prev, seo_keywords: e.target.value }))}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
-                    placeholder="ex: policia militar, veterinaria, enfermagem"
-                  />
+              </div>
+            </div>
+          </div>
+
+          {/* Media & Gallery */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 md:p-10 space-y-8">
+            <div className="flex items-center gap-3 border-b border-slate-50 pb-5">
+              <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center">
+                <ImageIcon className="w-4 h-4" />
+              </div>
+              <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Mídia e Galeria</h3>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6">
+              <div className="space-y-4">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Imagem Principal</label>
+                <div className="relative aspect-video rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 overflow-hidden flex items-center justify-center group cursor-pointer hover:border-blue-400 transition-all">
+                  {previews.main ? (
+                    <img src={previews.main} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 text-slate-400 group-hover:text-blue-500">
+                      <Upload className="w-8 h-8" />
+                      <span className="text-[10px] font-black uppercase tracking-widest">Enviar Capa</span>
+                    </div>
+                  )}
+                  <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleMainImageChange} accept="image/*" />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Canonical URL</label>
-                  <input
-                    type="text"
-                    value={formData.canonical_url}
-                    onChange={e => setFormData((prev) => ({ ...prev, canonical_url: e.target.value }))}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
-                    placeholder="https://www.seudominio.com/produto/matriz-exemplo"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Indexação</label>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={!formData.noindex}
-                    onClick={() => setFormData((prev) => ({ ...prev, noindex: !prev.noindex }))}
-                    className={`w-full px-4 py-4 rounded-2xl border text-xs font-black uppercase tracking-widest transition-colors ${
-                      formData.noindex
-                        ? 'bg-rose-50 border-rose-200 text-rose-700'
-                        : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                    }`}
-                  >
-                    {formData.noindex ? 'Noindex / Nofollow' : 'Index / Follow'}
-                  </button>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Analise SEO</p>
-                    <span className={`text-xs font-black ${seoScore >= 80 ? 'text-emerald-600' : seoScore >= 55 ? 'text-amber-600' : 'text-rose-600'}`}>{seoScore}/100</span>
+                <input
+                  type="text"
+                  ref={mainImageAltInputRef}
+                  value={mainImageAlt}
+                  onChange={(event) => setMainImageAlt(event.target.value)}
+                  onFocus={() => setActiveSeoField('main_image_alt')}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                  placeholder="ALT da imagem principal (ex: Brasão Medicina FIMCA)"
+                />
+              </div>
+
+              <div className="space-y-4">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Galeria de Fotos</label>
+                <div className="relative aspect-video rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 overflow-hidden flex items-center justify-center group cursor-pointer hover:border-blue-400 transition-all">
+                  <div className="flex flex-col items-center gap-2 text-slate-400 group-hover:text-blue-500">
+                    <Plus className="w-8 h-8" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Adicionar Fotos</span>
                   </div>
-                  <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
-                    <div className={`h-full ${seoScore >= 80 ? 'bg-emerald-500' : seoScore >= 55 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${Math.max(0, Math.min(100, seoScore))}%` }} />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] font-semibold text-slate-600">
-                    <span>Titulo: {seoTitlePreview.length} caracteres</span>
-                    <span>Descricao: {seoDescriptionPreview.length} caracteres</span>
-                    <span>Densidade keyword: {keywordDensity.toFixed(2)}%</span>
-                    <span>Legibilidade: {wordCount < 80 ? 'baixa' : wordCount > 450 ? 'alta' : 'ok'}</span>
-                    <span>Heading no conteudo: {hasHeading ? 'ok' : 'falta'}</span>
-                    <span>Imagem com ALT: {hasImageAlt ? 'ok' : 'falta'}</span>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Preview Google</p>
-                  <p className="text-[10px] text-emerald-700 font-semibold truncate">{formData.canonical_url || `https://www.seudominio.com/produto/${formData.slug || 'slug-do-produto'}`}</p>
-                  <p className="text-base leading-tight text-blue-700 font-semibold">{seoTitlePreview || 'Titulo do produto para resultado de busca'}</p>
-                  <p className="text-xs text-slate-600 line-clamp-3">{seoDescriptionPreview || 'Descricao do produto otimizada para mecanismos de busca.'}</p>
+                  <input type="file" multiple className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleGalleryChange} accept="image/*" />
                 </div>
               </div>
             </div>
+
+            {previews.gallery.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-4">
+                {previews.gallery.map((url, i) => (
+                  <div key={i} className="space-y-2">
+                    <div className="relative aspect-square rounded-2xl overflow-hidden border border-slate-100 group">
+                      <img
+                        src={url}
+                        onError={(event) => {
+                          if (import.meta.env.DEV) {
+                            console.debug('[AdminProductForm] gallery preview error:', (event.currentTarget as HTMLImageElement).src);
+                          }
+                        }}
+                        className="w-full h-full object-cover"
+                      />
+                      <button
+                        onClick={() => removeGalleryItem(i)}
+                        className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={i < existingGalleryUrls.length ? (existingGalleryAlts[i] || '') : (newGalleryAlts[i - existingGalleryUrls.length] || '')}
+                      onFocus={() => {
+                        setActiveSeoField('gallery_alt');
+                        setActiveGalleryAltIndex(i);
+                      }}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        if (i < existingGalleryUrls.length) {
+                          setExistingGalleryAlts((prev) => prev.map((value, idx) => (idx === i ? next : value)));
+                        } else {
+                          const newIndex = i - existingGalleryUrls.length;
+                          setNewGalleryAlts((prev) => prev.map((value, idx) => (idx === newIndex ? next : value)));
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-[11px] font-semibold"
+                      placeholder={`ALT da imagem ${i + 1}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Production Files Upload */}
@@ -1233,3 +1463,6 @@ export default function AdminProductForm() {
     </div>
   );
 }
+
+
+

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, FileText, ShoppingCart, Zap, Check, Star, Info, Package, Hash, Palette, AlertTriangle, DownloadCloud, Heart, User, Send, Search, X } from 'lucide-react';
 import { Product, ProductGalleryImage } from '../types';
@@ -68,6 +68,7 @@ export default function ProductDetail() {
                   product_id: Number(img?.product_id || 0),
                   url: String(img?.url || '').trim(),
                   full_url: getPublicAssetUrl(String(img?.full_url || img?.url || '')),
+                  alt_text: String(img?.alt_text || '').trim(),
                   is_featured: img?.is_featured ?? 0,
                   created_at: img?.created_at ?? null,
                   file_type: img?.file_type ?? null,
@@ -209,13 +210,45 @@ export default function ProductDetail() {
   const discount = product?.sale_price && product?.price ? Math.round((1 - product.sale_price / product.price) * 100) : 0;
   const gallery = galleryImages;
   const displayedImage = activeImage || gallery[activeImageIndex] || product?.image;
+  const siteDisplayName = String(settings?.site_name || 'Digital Bordados').trim();
+  const resolveProductTemplate = (value: unknown) => {
+    const template = String(value ?? '');
+    const map: Record<string, string> = {
+      '{{nome_produto}}': String(product?.name || '').trim(),
+      '{{slug_produto}}': String(product?.slug || '').trim(),
+      '{{preco}}': String(product?.price ?? '').trim(),
+      '{{preco_promocional}}': String(product?.sale_price ?? product?.price ?? '').trim(),
+      '{{pontos}}': String(product?.stitch_count ?? '').trim(),
+      '{{cores}}': String(product?.colors || '').trim(),
+      '{{categoria_principal}}': String(product?.category_name || '').trim(),
+      '{{site_nome}}': siteDisplayName,
+      '{{site_name}}': siteDisplayName,
+    };
+    return template.replace(/{{[a-z_]+}}/gi, (token) => map[token.toLowerCase()] ?? token);
+  };
+  const resolveAltTemplate = (value: string) => resolveProductTemplate(value);
+  const galleryAltMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    (product?.gallery || []).forEach((image) => {
+      const normalizedUrl = getPublicAssetUrl(image?.full_url || image?.url || '');
+      if (normalizedUrl && image?.alt_text) {
+        map[normalizedUrl] = image.alt_text;
+      }
+    });
+    return map;
+  }, [product?.gallery]);
+  const getImageAlt = (url?: string | null) => {
+    const normalized = getPublicAssetUrl(String(url || ''));
+    const raw = (normalized && galleryAltMap[normalized]) || product?.image_alt || product?.name || 'Imagem do produto';
+    return resolveAltTemplate(String(raw || '').trim()) || product?.name || 'Imagem do produto';
+  };
 
   useEffect(() => {
     if (!product) return;
-    const siteName = String(settings.site_name || 'Digital Bordados').trim();
-    const productTitle = String(product.seo_title || `${product.name} | ${siteName}`).trim();
+    const siteName = siteDisplayName;
+    const productTitle = String(resolveProductTemplate(product.seo_title || `${product.name} | ${siteName}`)).trim();
     const productDescription = String(
-      product.seo_description ||
+      resolveProductTemplate(product.seo_description) ||
         product.short_description ||
         product.description ||
         `Compre ${product.name} na ${siteName}.`,
@@ -226,7 +259,8 @@ export default function ProductDetail() {
       .slice(0, 320);
 
     const imageForSeo = displayedImage || product.image || '/uploads/seo-default-share.jpg';
-    const canonical = `/produto/${product.slug}`;
+    const canonicalTemplate = String(resolveProductTemplate(product.canonical_url || '')).trim();
+    const canonical = canonicalTemplate || `/produto/${product.slug}`;
 
     const offerUrl = buildAbsoluteUrl(canonical);
     const schemaProduct: Record<string, unknown> = {
@@ -273,10 +307,10 @@ export default function ProductDetail() {
       robots: Number((product as any)?.noindex || 0) === 1 ? 'noindex,nofollow' : 'index,follow',
       twitterCard: String(settings.seo_twitter_card || 'summary_large_image'),
       ogType: 'product',
-      keywords: String(product.seo_keywords || product.tags || settings.seo_keywords || ''),
+      keywords: String(resolveProductTemplate(product.seo_keywords || product.tags || settings.seo_keywords || '')),
       jsonLd: combinedSchemas.length > 0 ? combinedSchemas : undefined,
     });
-  }, [product, displayedImage, settings]);
+  }, [product, displayedImage, settings, siteDisplayName]);
 
   if (loading) {
     return (
@@ -360,8 +394,8 @@ export default function ProductDetail() {
     return firstCard.getBoundingClientRect().width + gap;
   };
 
-  const formatShortDescription = (html: string) => {
-    let formatted = html || '';
+  const formatShortDescription = (html: unknown) => {
+    let formatted = String(html || '');
     formatted = formatted.replace(/(Tamanhos?\s+dispon(?:[ií]vel(?:is)?|[ií]veis?)(?:\s+por\s+matriz)?\s*:\s*)/i, '$1<br/>');
     formatted = formatted.replace(/(►\s*Tamanhos?\s+dispon(?:[ií]vel(?:is)?|[ií]veis?)(?:\s+por\s+matriz)?\s*:\s*)(?=\d)/i, '$1<br/>');
     formatted = formatted.replace(/(\/Pontos:\s*\d+)\s+(?=\d{1,2}(?:[.,]\d+)?cm)/gi, '$1<br/>');
@@ -405,7 +439,7 @@ export default function ProductDetail() {
                   exit={{ opacity: 0, scale: 1.05 }}
                   transition={{ duration: 0.35, ease: 'easeOut' }}
                   src={displayedImage} 
-                  alt={product.name} 
+                  alt={getImageAlt(displayedImage)}
                   onError={(event) => {
                     const failedSrc = (event.currentTarget as HTMLImageElement).src;
                     setFailedImages((prev) => ({ ...prev, [failedSrc]: true }));
@@ -489,7 +523,7 @@ export default function ProductDetail() {
                   ) : (
                     <img
                       src={img}
-                      alt={`${product.name} - ${idx}`}
+                      alt={getImageAlt(img) || `${product.name} - ${idx}`}
                       loading="lazy"
                       onError={(event) => {
                         const failedSrc = (event.currentTarget as HTMLImageElement).src;
@@ -680,7 +714,7 @@ export default function ProductDetail() {
           </button>
           <img
             src={gallery[activeImageIndex]}
-            alt={`${product.name} - preview`}
+            alt={getImageAlt(gallery[activeImageIndex])}
             className="max-h-[90vh] max-w-[90vw] object-contain"
             onClick={(e) => e.stopPropagation()}
           />
