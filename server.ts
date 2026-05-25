@@ -1977,6 +1977,19 @@ async function startServer() {
   const PORT = Number(process.env.PORT || 3000);
   app.set('trust proxy', 1);
 
+  // Redireciona WWW para Não-WWW permanentemente (301) em produção para evitar conteúdo duplicado no SEO
+  app.use((req, res, next) => {
+    const host = String(req.headers.host || '').trim();
+    if (host.startsWith('www.')) {
+      const cleanHost = host.slice(4);
+      const targetUrl = `${req.protocol}://${cleanHost}${req.originalUrl}`;
+      console.log(`[Redirect] Redirecting ${host} to ${cleanHost} via 301`);
+      res.writeHead(301, { Location: targetUrl });
+      return res.end();
+    }
+    next();
+  });
+
   const settingsForCors = loadSettingsMap(['app_url']);
   const configuredAppUrl = String(process.env.APP_URL || settingsForCors.app_url || '').trim();
   const localOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
