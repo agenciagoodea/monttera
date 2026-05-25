@@ -7573,7 +7573,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
       const staticPaths = ['/', '/loja', '/contato', '/orcamento', '/login', '/cadastro'];
       const productSlugs = await dbAsync.all(`SELECT slug, updated_at, created_at FROM products WHERE status = 'active'`) as any[];
-      const categorySlugs = await dbAsync.all(`SELECT slug, updated_at, created_at FROM product_categories WHERE status = 'active'`) as any[];
+      const categorySlugs = await dbAsync.all(`SELECT slug, created_at FROM product_categories WHERE status = 'active'`) as any[];
 
       const xmlEscape = (v: string) =>
         String(v || '')
@@ -7586,7 +7586,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const urls: Array<{ loc: string; lastmod?: string; priority?: string }> = [];
       staticPaths.forEach((path) => urls.push({ loc: `${appUrl}${path}`, priority: path === '/' ? '1.0' : '0.8' }));
       productSlugs.forEach((row) => urls.push({ loc: `${appUrl}/produto/${row.slug}`, lastmod: String(row.updated_at || row.created_at || '').slice(0, 10), priority: '0.7' }));
-      categorySlugs.forEach((row) => urls.push({ loc: `${appUrl}/?category=${row.slug}`, lastmod: String(row.updated_at || row.created_at || '').slice(0, 10), priority: '0.6' }));
+      categorySlugs.forEach((row) => urls.push({ loc: `${appUrl}/?category=${row.slug}`, lastmod: String(row.created_at || '').slice(0, 10), priority: '0.6' }));
 
       const body = urls
         .map((u) => {
