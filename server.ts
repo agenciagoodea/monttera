@@ -3617,12 +3617,13 @@ async function startServer() {
     if (freshUser.status !== 'ativo' && freshUser.status !== 'active') {
       return res.status(403).json({ error: 'Conta inativa' });
     }
-    if ((await resolveEmailVerificationRequired()) && !freshUser.email_verified_at) {
-      return res.status(403).json({
-        error: 'Confirme seu e-mail para finalizar compras.',
-        code: 'EMAIL_NOT_VERIFIED',
-      });
-    }
+    // Bloqueio de e-mail verificado desabilitado na rota de pagamento
+    // if ((await resolveEmailVerificationRequired()) && !freshUser.email_verified_at) {
+    //   return res.status(403).json({
+    //     error: 'Confirme seu e-mail para finalizar compras.',
+    //     code: 'EMAIL_NOT_VERIFIED',
+    //   });
+    // }
 
     const lgpd = await resolveLgpdSettings();
     if (lgpd.enabled) {
@@ -8179,9 +8180,10 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       if (freshUser.status !== 'ativo' && freshUser.status !== 'active') {
         return res.status(403).json({ error: 'Conta inativa' });
       }
-      if ((await resolveEmailVerificationRequired()) && !freshUser.email_verified_at) {
-        return res.status(403).json({ error: 'Confirme seu e-mail para finalizar compras.', code: 'EMAIL_NOT_VERIFIED' });
-      }
+      // Bloqueio de e-mail verificado desabilitado na rota de pagamento
+      // if ((await resolveEmailVerificationRequired()) && !freshUser.email_verified_at) {
+      //   return res.status(403).json({ error: 'Confirme seu e-mail para finalizar compras.', code: 'EMAIL_NOT_VERIFIED' });
+      // }
 
       const { items, checkout_data_processing_accepted } = req.body || {};
       if (!items || !Array.isArray(items) || items.length === 0) {

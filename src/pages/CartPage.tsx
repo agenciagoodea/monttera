@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useCart } from '../contexts/CartContext';
 import { Trash2, ShoppingBag, ChevronLeft, Copy, CreditCard } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -235,7 +235,6 @@ export default function CartPage() {
         expirationDate: { id: 'form-checkout__expirationDate', placeholder: 'MM/AA' },
         securityCode: { id: 'form-checkout__securityCode', placeholder: 'CVV' },
         cardholderName: { id: 'form-checkout__cardholderName', placeholder: 'Nome no cartão' },
-        issuer: { id: 'form-checkout__issuer' },
         installments: { id: 'form-checkout__installments' },
         identificationType: { id: 'form-checkout__identificationType' },
         identificationNumber: { id: 'form-checkout__identificationNumber', placeholder: 'CPF' },
@@ -762,10 +761,7 @@ export default function CartPage() {
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Nome no Cartão</label>
                     <input id="form-checkout__cardholderName" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
                   </div>
-                  <div className="space-y-1 col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Banco Emissor</label>
-                    <select id="form-checkout__issuer" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold" />
-                  </div>
+
                   {checkoutMethod === 'credit_card' && (
                     <div className="space-y-1 col-span-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Parcelamento</label>
