@@ -29,6 +29,7 @@ import {
   Users,
   FileCheck2,
   Globe2,
+  Shield,
 } from 'lucide-react';
 import AdminEmailTemplates from './AdminEmailTemplates';
 import AdminEmailLogs from './AdminEmailLogs';
@@ -2533,9 +2534,90 @@ export default function AdminSettings() {
                         <textarea rows={4} value={settings.seo_robots_custom_rules || ''} onChange={e => setSettings({ ...settings, seo_robots_custom_rules: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold resize-y" placeholder="Ex.: Disallow: /admin" />
                       </div>
                     </div>
-                    <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-[11px] text-blue-800 font-semibold">
-                      Endpoints: <code>/robots.txt</code> e <code>/sitemap.xml</code> são gerados dinamicamente com essas configurações.
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ferramentas de SEO</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Sitemap */}
+                        <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 p-5 space-y-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-sm">
+                              <Globe2 className="w-4 h-4 text-white" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-black text-slate-800">Sitemap XML</p>
+                              <p className="text-[10px] font-bold text-slate-500">Indexação para motores de busca</p>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-slate-500 font-semibold">
+                            Gerado dinamicamente com todos os produtos, categorias e páginas estáticas do site.
+                          </p>
+                          <div className="flex gap-2 flex-wrap">
+                            <a
+                              href="/sitemap.xml"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-colors"
+                            >
+                              <Globe2 className="w-3 h-3" />
+                              Ver sitemap.xml
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(`${window.location.origin}/sitemap.xml`);
+                                setMessage({ text: 'URL do sitemap copiada!', type: 'success' });
+                              }}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-100 text-blue-700 text-[10px] font-black uppercase tracking-widest hover:bg-blue-200 transition-colors"
+                            >
+                              Copiar URL
+                            </button>
+                          </div>
+                          <p className="text-[9px] font-bold text-blue-400 font-mono">/sitemap.xml</p>
+                        </div>
+
+                        {/* Robots.txt */}
+                        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 p-5 space-y-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-slate-700 flex items-center justify-center shadow-sm">
+                              <Shield className="w-4 h-4 text-white" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-black text-slate-800">Robots.txt</p>
+                              <p className="text-[10px] font-bold text-slate-500">Diretivas para rastreadores</p>
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-slate-500 font-semibold">
+                            Gerado a partir das configurações de indexação, follow e regras customizadas acima.
+                          </p>
+                          <div className="flex gap-2 flex-wrap">
+                            <a
+                              href="/robots.txt"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-700 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-colors"
+                            >
+                              <Shield className="w-3 h-3" />
+                              Ver robots.txt
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(`${window.location.origin}/robots.txt`);
+                                setMessage({ text: 'URL do robots.txt copiada!', type: 'success' });
+                              }}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-200 text-slate-700 text-[10px] font-black uppercase tracking-widest hover:bg-slate-300 transition-colors"
+                            >
+                              Copiar URL
+                            </button>
+                          </div>
+                          <p className="text-[9px] font-bold text-slate-400 font-mono">/robots.txt</p>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-[11px] text-blue-800 font-semibold">
+                        💡 Salve as configurações SEO antes de visualizar para garantir que as últimas alterações estejam refletidas nos arquivos gerados.
+                      </div>
                     </div>
+
                   </div>
                 </div>
               )}
