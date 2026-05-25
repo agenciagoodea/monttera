@@ -7583,10 +7583,21 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           .replace(/"/g, '&quot;')
           .replace(/'/g, '&apos;');
 
+      const formatLastMod = (dateVal: any): string | undefined => {
+        if (!dateVal) return undefined;
+        try {
+          const d = new Date(dateVal);
+          if (isNaN(d.getTime())) return undefined;
+          return d.toISOString().slice(0, 10);
+        } catch {
+          return undefined;
+        }
+      };
+
       const urls: Array<{ loc: string; lastmod?: string; priority?: string }> = [];
       staticPaths.forEach((path) => urls.push({ loc: `${appUrl}${path}`, priority: path === '/' ? '1.0' : '0.8' }));
-      productSlugs.forEach((row) => urls.push({ loc: `${appUrl}/produto/${row.slug}`, lastmod: String(row.updated_at || row.created_at || '').slice(0, 10), priority: '0.7' }));
-      categorySlugs.forEach((row) => urls.push({ loc: `${appUrl}/?category=${row.slug}`, lastmod: String(row.created_at || '').slice(0, 10), priority: '0.6' }));
+      productSlugs.forEach((row) => urls.push({ loc: `${appUrl}/produto/${row.slug}`, lastmod: formatLastMod(row.updated_at || row.created_at), priority: '0.7' }));
+      categorySlugs.forEach((row) => urls.push({ loc: `${appUrl}/?category=${row.slug}`, lastmod: formatLastMod(row.created_at), priority: '0.6' }));
 
       const body = urls
         .map((u) => {
