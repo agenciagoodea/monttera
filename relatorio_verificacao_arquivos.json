@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-05-25T19:31:24.501Z",
+  "roots_scanned": [
+    "D:\\www\\digitalbordados\\digitalbordados\\uploads",
+    "D:\\www\\digitalbordados\\digitalbordados"
+  ],
+  "totals": {
+    "scanned": 937,
+    "found": 933,
+    "missing": 4,
+    "no_file_registered": 0
+  },
+  "missing_files": [
+    {
+      "id": 474,
+      "name": "Matriz Bordado Santíssima Trindade",
+      "slug": "matriz-bordado-santissima-trindade",
+      "status": "active",
+      "file_id": 1431,
+      "file_path": "/uploads/arquivos/folha-de-producao-474.pdf",
+      "file_name": "folha-de-producao-474.pdf"
+    },
+    {
+      "id": 753,
+      "name": "Matriz Bordado Univ. de Sorocaba UNISO",
+      "slug": "matriz-bordado-univ.-de-sorocaba-uniso",
+      "status": "active",
+      "file_id": 1158,
+      "file_path": "/uploads/arquivos/matriz-bordado-uniso-753.jpg",
+      "file_name": "matriz-bordado-uniso-753.jpg"
+    },
+    {
+      "id": 936,
+      "name": "Matriz Bordado Medicina Fimca",
+      "slug": "matriz-bordado-medicina-fimca",
+      "status": "active",
+      "file_id": 1631,
+      "file_path": "/uploads/arquivos/matriz-bordado-fimca-936.zip",
+      "file_name": "matriz-bordado-fimca-936.zip"
+    },
+    {
+      "id": 940,
+      "name": "Matriz Bordado Faculdade Fapan",
+      "slug": "matriz-bordado-fapan",
+      "status": "active",
+      "file_id": 1910,
+      "file_path": "/uploads/arquivos/matriz-bordado-fapan-940.zip",
+      "file_name": "matriz-bordado-fapan-940.zip"
+    }
+  ],
+  "products_without_files": []
+}
