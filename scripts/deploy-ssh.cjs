@@ -11,6 +11,8 @@ const SSH_PORT = parseInt(process.env.SSH_PORT || '22', 10);
 
 const commands = [
   'cd /home/digitalbordados/digitalbordados',
+  'mv uploads/arquivos/matriz-bordado-medicina1-205.jpg uploads/arquivos/matriz-bordado-medicina1-205.jpg.bak 2>/dev/null || true',
+  'mv uploads/arquivos/matriz-bordado-medicina1-eyqjxj.jpg uploads/arquivos/matriz-bordado-medicina1-eyqjxj.jpg.bak 2>/dev/null || true',
   'git pull',
   'npm install',
   'npm run build',

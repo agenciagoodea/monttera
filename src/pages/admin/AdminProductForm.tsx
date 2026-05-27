@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ArrowLeft, 
@@ -98,6 +98,9 @@ export default function AdminProductForm() {
   const [downloadableFiles, setDownloadableFiles] = useState<DownloadableFile[]>([]);
   const [previews, setPreviews] = useState<{main: string, gallery: string[]}>({ main: '', gallery: [] });
   const [existingGalleryUrls, setExistingGalleryUrls] = useState<string[]>([]);
+  const [isMainImageModalOpen, setIsMainImageModalOpen] = useState(false);
+  const [modalUploadLoading, setModalUploadLoading] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
   const productionSheetFileName = productionSheetFile?.name || (() => {
     const raw = (productionSheetUrl || '').trim();
     if (!raw) return '';
@@ -239,6 +242,85 @@ export default function AdminProductForm() {
       const file = e.target.files[0];
       setMainImage(file);
       setPreviews(prev => ({ ...prev, main: URL.createObjectURL(file) }));
+    }
+  };
+
+  const handleModalImageUpload = async (file: File) => {
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+    if (!allowedExts.includes(ext)) {
+      setModalError('Formato inválido. Apenas JPG, JPEG, PNG, WEBP e GIF são aceitos.');
+      return;
+    }
+
+    setModalError(null);
+
+    // Se o produto for NOVO (sem id), apenas guarda localmente no estado e atualiza previews
+    if (!id) {
+      setMainImage(file);
+      setPreviews(prev => ({ ...prev, main: URL.createObjectURL(file) }));
+      return;
+    }
+
+    // Se o produto já existe (Edição), enviar assincronamente para a nova API
+    setModalUploadLoading(true);
+    try {
+      const data = new FormData();
+      data.append('image', file);
+
+      const res = await fetch(`/api/admin/products/${id}/main-image`, {
+        method: 'POST',
+        credentials: 'include',
+        body: data
+      });
+
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'Erro ao gravar imagem física no servidor.');
+      }
+
+      // Atualiza previews e fecha modal
+      const newUrl = getPublicAssetUrl(payload.image || '');
+      setPreviews(prev => ({ ...prev, main: newUrl }));
+      setMainImage(null); // Limpa o estado temporário local de arquivo já enviado
+      setIsMainImageModalOpen(false);
+    } catch (err: any) {
+      setModalError(err.message || 'Falha ao gravar arquivo no servidor.');
+    } finally {
+      setModalUploadLoading(false);
+    }
+  };
+
+  const handleModalImageRemove = async () => {
+    setModalError(null);
+
+    // Se o produto for NOVO (sem id), apenas remove localmente
+    if (!id) {
+      setMainImage(null);
+      setPreviews(prev => ({ ...prev, main: '' }));
+      return;
+    }
+
+    // Se o produto já existe (Edição), chamar a API assíncrona DELETE
+    setModalUploadLoading(true);
+    try {
+      const res = await fetch(`/api/admin/products/${id}/main-image`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'Erro ao remover imagem do servidor.');
+      }
+
+      setPreviews(prev => ({ ...prev, main: '' }));
+      setMainImage(null);
+      setIsMainImageModalOpen(false);
+    } catch (err: any) {
+      setModalError(err.message || 'Falha ao remover arquivo.');
+    } finally {
+      setModalUploadLoading(false);
     }
   };
 
@@ -1273,16 +1355,18 @@ export default function AdminProductForm() {
             <div className="grid grid-cols-1 gap-6">
               <div className="space-y-4">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Imagem Principal</label>
-                <div className="relative aspect-video rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 overflow-hidden flex items-center justify-center group cursor-pointer hover:border-blue-400 transition-all">
+                <div 
+                  onClick={() => setIsMainImageModalOpen(true)}
+                  className="relative aspect-video rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 overflow-hidden flex items-center justify-center group cursor-pointer hover:border-blue-400 transition-all"
+                >
                   {previews.main ? (
                     <img src={previews.main} className="w-full h-full object-cover" />
                   ) : (
                     <div className="flex flex-col items-center gap-2 text-slate-400 group-hover:text-blue-500">
                       <Upload className="w-8 h-8" />
-                      <span className="text-[10px] font-black uppercase tracking-widest">Enviar Capa</span>
+                      <span className="text-[10px] font-black uppercase tracking-widest">Gerenciar Imagem Principal</span>
                     </div>
                   )}
-                  <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleMainImageChange} accept="image/*" />
                 </div>
                 <input
                   type="text"
@@ -1472,6 +1556,95 @@ export default function AdminProductForm() {
           </div>
         </div>
       </div>
+
+      {/* MODAL POPUP: GERENCIAR IMAGEM PRINCIPAL */}
+      {isMainImageModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2rem] border border-slate-100 p-6 md:p-8 max-w-lg w-full shadow-2xl space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-50 pb-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Imagem Principal</h3>
+                <p className="text-slate-400 text-xs font-semibold mt-1">Gerencie a imagem principal em destaque do produto.</p>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsMainImageModalOpen(false);
+                  setModalError(null);
+                }}
+                className="w-8 h-8 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {modalError && (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-xs font-black text-red-800 uppercase tracking-wider">
+                {modalError}
+              </div>
+            )}
+
+            <div className="flex flex-col items-center justify-center bg-slate-50 rounded-3xl p-6 min-h-[220px] relative border border-slate-100 overflow-hidden">
+              {previews.main ? (
+                <div className="space-y-4 w-full text-center">
+                  <div className="aspect-video w-full max-w-xs mx-auto rounded-2xl overflow-hidden border border-slate-200 shadow-md">
+                    <img src={previews.main} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="text-center text-[10px] font-bold text-slate-500 truncate max-w-full px-4">
+                    <span className="block text-slate-400 font-semibold uppercase tracking-wider">Caminho / URL Pública:</span>
+                    <span className="select-all font-mono">{previews.main.startsWith('blob:') ? 'Pré-visualização Local (Ainda não salvo)' : previews.main}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center space-y-3">
+                  <ImageIcon className="w-12 h-12 text-slate-300 mx-auto" />
+                  <p className="text-xs font-black text-slate-700 uppercase tracking-tight">
+                    Nenhuma imagem principal cadastrada para este produto.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMainImageModalOpen(false);
+                  setModalError(null);
+                }}
+                className="px-5 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs uppercase tracking-wider bg-white hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+              
+              {previews.main && (
+                <button
+                  type="button"
+                  disabled={modalUploadLoading}
+                  onClick={handleModalImageRemove}
+                  className="px-5 py-3 rounded-xl bg-red-600 text-white font-black text-xs uppercase tracking-widest shadow-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                  {modalUploadLoading ? 'Removendo...' : 'Remover Imagem'}
+                </button>
+              )}
+
+              <label className="relative cursor-pointer px-5 py-3 rounded-xl bg-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/10 hover:bg-blue-700 transition-all flex items-center justify-center disabled:opacity-50">
+                <span>{previews.main ? 'Substituir Imagem' : 'Enviar imagem principal'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={modalUploadLoading}
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      handleModalImageUpload(e.target.files[0]);
+                    }
+                  }}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

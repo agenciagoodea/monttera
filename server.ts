@@ -3104,6 +3104,14 @@ async function startServer() {
         const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.jpg';
         const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext);
         moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
+        
+        // Validação física estrita
+        const physicalPath = path.join(publicUploadsDir, finalName);
+        if (!fs.existsSync(physicalPath)) {
+          // Desfazer inserção do produto
+          await dbAsync.run('DELETE FROM products WHERE id = ?', productIdNumber);
+          return res.status(500).json({ error: 'Erro de disco: A imagem principal não pôde ser gravada fisicamente no servidor.' });
+        }
         mainImagePath = `/uploads/${finalName}`;
       }
 
@@ -3744,6 +3752,104 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Erro ao excluir produto' });
+    }
+  });
+
+  // POST /api/admin/products/:id/main-image - Upload assíncrono da imagem principal com validação física estrita e limpeza
+  app.post('/api/admin/products/:id/main-image', authenticate, isAdmin, upload.single('image'), async (req, res) => {
+    const productId = Number(req.params.id);
+    const file = req.file;
+
+    try {
+      if (!file) {
+        return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+      }
+
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+      if (!allowedExts.includes(ext)) {
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        return res.status(400).json({ error: 'Tipo de arquivo inválido. Formatos aceitos: JPG, JPEG, PNG, WEBP e GIF.' });
+      }
+
+      const product = await dbAsync.get('SELECT * FROM products WHERE id = ?', productId) as any;
+      if (!product) {
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        return res.status(404).json({ error: 'Produto não encontrado.' });
+      }
+
+      const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+      const finalName = buildProductMediaName(product.slug || 'produto', productId, ext);
+      const physicalPath = path.join(publicUploadsDir, finalName);
+
+      // Move arquivo para pasta correta
+      moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
+
+      // Validação física estrita
+      if (!fs.existsSync(physicalPath)) {
+        return res.status(500).json({ error: 'Erro de disco: A imagem não pôde ser gravada fisicamente no servidor.' });
+      }
+
+      // Se houver uma imagem antiga cadastrada e ela for diferente da nova, remover fisicamente
+      const oldImage = product.image;
+      if (oldImage && oldImage !== `/uploads/${finalName}`) {
+        const oldImageName = oldImage.split('/').pop();
+        if (oldImageName) {
+          const oldPhysicalPath = path.join(publicUploadsDir, oldImageName);
+          if (fs.existsSync(oldPhysicalPath)) {
+            try {
+              fs.unlinkSync(oldPhysicalPath);
+            } catch (err) {
+              console.error('Erro ao deletar imagem substituída:', err);
+            }
+          }
+        }
+      }
+
+      const finalPublicUrl = `/uploads/${finalName}`;
+      await dbAsync.run('UPDATE products SET image = ? WHERE id = ?', finalPublicUrl, productId);
+
+      return res.json({ success: true, image: finalPublicUrl });
+    } catch (error: any) {
+      if (file && file.path && fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
+      console.error('Upload main-image error:', error);
+      return res.status(500).json({ error: 'Erro ao fazer upload da imagem principal: ' + error.message });
+    }
+  });
+
+  // DELETE /api/admin/products/:id/main-image - Remoção assíncrona da imagem principal com exclusão física no disco
+  app.delete('/api/admin/products/:id/main-image', authenticate, isAdmin, async (req, res) => {
+    const productId = Number(req.params.id);
+
+    try {
+      const product = await dbAsync.get('SELECT * FROM products WHERE id = ?', productId) as any;
+      if (!product) {
+        return res.status(404).json({ error: 'Produto não encontrado.' });
+      }
+
+      const oldImage = product.image;
+      if (oldImage) {
+        const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+        const oldImageName = oldImage.split('/').pop();
+        if (oldImageName) {
+          const oldPhysicalPath = path.join(publicUploadsDir, oldImageName);
+          if (fs.existsSync(oldPhysicalPath)) {
+            try {
+              fs.unlinkSync(oldPhysicalPath);
+            } catch (err) {
+              console.error('Erro ao deletar imagem principal excluída:', err);
+            }
+          }
+        }
+      }
+
+      await dbAsync.run('UPDATE products SET image = NULL WHERE id = ?', productId);
+      return res.json({ success: true });
+    } catch (error: any) {
+      console.error('Delete main-image error:', error);
+      return res.status(500).json({ error: 'Erro ao remover imagem principal: ' + error.message });
     }
   });
 
@@ -8902,17 +9008,33 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   });
 
   // --- MÓDULO FILE MANAGER ADMINISTRATIVO SEGURO ---
-  const ROOT_DIR = path.resolve(process.cwd(), 'public');
+  const ALLOWED_ROOTS: { [key: string]: string } = {
+    'public-uploads': path.resolve(process.cwd(), 'public/uploads'),
+    'uploads-arquivos': path.resolve(process.cwd(), 'uploads/arquivos')
+  };
+
+  // Garante que as pastas existam no disco
+  if (!fs.existsSync(ALLOWED_ROOTS['public-uploads'])) {
+    fs.mkdirSync(ALLOWED_ROOTS['public-uploads'], { recursive: true });
+  }
+  if (!fs.existsSync(ALLOWED_ROOTS['uploads-arquivos'])) {
+    fs.mkdirSync(ALLOWED_ROOTS['uploads-arquivos'], { recursive: true });
+  }
+
   const DANGEROUS_EXTENSIONS = ['.php', '.phtml', '.php3', '.php4', '.php5', '.php7', '.phps', '.js', '.jsx', '.ts', '.tsx', '.sh', '.bat', '.cmd', '.exe', '.json', '.htaccess', '.config'];
 
-  function isDangerousFile(fileName) {
+  function isDangerousFile(fileName: string) {
     const ext = path.extname(fileName).toLowerCase();
     return DANGEROUS_EXTENSIONS.includes(ext);
   }
 
-  function getSafePath(inputPath) {
-    const resolvedPath = path.resolve(ROOT_DIR, inputPath || '');
-    const relative = path.relative(ROOT_DIR, resolvedPath);
+  function getSafePath(rootKey: string, inputPath: string): string {
+    const baseDir = ALLOWED_ROOTS[rootKey];
+    if (!baseDir) {
+      throw new Error('Área de arquivos inválida ou não autorizada.');
+    }
+    const resolvedPath = path.resolve(baseDir, inputPath || '');
+    const relative = path.relative(baseDir, resolvedPath);
     if (relative.startsWith('..') || path.isAbsolute(relative)) {
       throw new Error('Acesso negado: Path Traversal detectado.');
     }
@@ -8953,8 +9075,24 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   // GET /api/admin/files - Listar
   app.get('/api/admin/files', authenticate, isAdmin, async (req, res) => {
     try {
+      const rootKey = String(req.query.rootKey || '').trim();
       const queryPath = String(req.query.path || '').trim();
-      const targetDir = getSafePath(queryPath);
+      const disk = getDiskSpaceInfo();
+
+      if (!rootKey) {
+        // Modo de seleção de raízes: Exibe os dois cards principais como pastas virtuais
+        return res.json({
+          isRootSelector: true,
+          currentPath: '',
+          items: [
+            { name: 'public/uploads', isDir: true, rootKey: 'public-uploads', size: 0, updatedAt: new Date(), relative: '' },
+            { name: 'uploads/arquivos', isDir: true, rootKey: 'uploads-arquivos', size: 0, updatedAt: new Date(), relative: '' }
+          ],
+          disk
+        });
+      }
+
+      const targetDir = getSafePath(rootKey, queryPath);
       
       if (!fs.existsSync(targetDir)) {
         return res.status(404).json({ error: 'Diretório não encontrado' });
@@ -8975,40 +9113,62 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             isDir: s.isDirectory(),
             size: s.size,
             updatedAt: s.mtime,
-            relative: path.relative(ROOT_DIR, fullPath).replace(/\\/g, '/')
+            relative: path.relative(ALLOWED_ROOTS[rootKey], fullPath).replace(/\\/g, '/')
           };
         } catch (e) {
           return null;
         }
       }).filter(Boolean);
 
-      const disk = getDiskSpaceInfo();
-      const currentRelative = path.relative(ROOT_DIR, targetDir).replace(/\\/g, '/');
+      const currentRelative = path.relative(ALLOWED_ROOTS[rootKey], targetDir).replace(/\\/g, '/');
 
       return res.json({
         currentPath: currentRelative,
+        rootKey,
         items,
         disk
       });
-    } catch (error) {
+    } catch (error: any) {
       return res.status(400).json({ error: error.message || 'Erro ao listar arquivos' });
+    }
+  });
+
+  // GET /api/admin/files/download - Download seguro de arquivo
+  app.get('/api/admin/files/download', authenticate, isAdmin, (req, res) => {
+    try {
+      const rootKey = String(req.query.rootKey || '').trim();
+      const relativePath = String(req.query.path || '').trim();
+      if (!rootKey) {
+        return res.status(400).json({ error: 'Parâmetro rootKey é obrigatório.' });
+      }
+      const safePath = getSafePath(rootKey, relativePath);
+      if (!fs.existsSync(safePath) || fs.statSync(safePath).isDirectory()) {
+        return res.status(404).json({ error: 'Arquivo não encontrado.' });
+      }
+      return res.download(safePath);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
     }
   });
 
   // POST /api/admin/files/mkdir - Criar pasta
   app.post('/api/admin/files/mkdir', authenticate, isAdmin, async (req, res) => {
     try {
+      const rootKey = String(req.body.rootKey || '').trim();
       const baseDirInput = String(req.body.path || '').trim();
       const folderName = String(req.body.name || '').trim();
+      if (!rootKey) {
+        return res.status(400).json({ error: 'Parâmetro rootKey é obrigatório.' });
+      }
       if (!folderName || isDangerousFile(folderName) || folderName.includes('/') || folderName.includes('\\')) {
         return res.status(400).json({ error: 'Nome de pasta inválido ou contendo caracteres proibidos' });
       }
 
-      const baseDir = getSafePath(baseDirInput);
+      const baseDir = getSafePath(rootKey, baseDirInput);
       const targetPath = path.join(baseDir, folderName);
       
       // Validação final de Path Traversal
-      getSafePath(path.relative(ROOT_DIR, targetPath));
+      getSafePath(rootKey, path.relative(ALLOWED_ROOTS[rootKey], targetPath));
 
       if (fs.existsSync(targetPath)) {
         return res.status(400).json({ error: 'Já existe uma pasta ou arquivo com este nome' });
@@ -9016,7 +9176,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       fs.mkdirSync(targetPath);
       return res.json({ success: true, message: 'Diretório criado com sucesso!' });
-    } catch (error) {
+    } catch (error: any) {
       return res.status(400).json({ error: error.message || 'Erro ao criar diretório' });
     }
   });
@@ -9024,21 +9184,25 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   // POST /api/admin/files/rename - Renomear
   app.post('/api/admin/files/rename', authenticate, isAdmin, async (req, res) => {
     try {
+      const rootKey = String(req.body.rootKey || '').trim();
       const baseDirInput = String(req.body.path || '').trim();
       const oldName = String(req.body.oldName || '').trim();
       const newName = String(req.body.newName || '').trim();
 
+      if (!rootKey) {
+        return res.status(400).json({ error: 'Parâmetro rootKey é obrigatório.' });
+      }
       if (!oldName || !newName || isDangerousFile(newName) || newName.includes('/') || newName.includes('\\')) {
         return res.status(400).json({ error: 'Nome de arquivo inválido ou extensão perigosa' });
       }
 
-      const baseDir = getSafePath(baseDirInput);
+      const baseDir = getSafePath(rootKey, baseDirInput);
       const oldPath = path.join(baseDir, oldName);
       const newPath = path.join(baseDir, newName);
 
       // Validação Path Traversal
-      getSafePath(path.relative(ROOT_DIR, oldPath));
-      getSafePath(path.relative(ROOT_DIR, newPath));
+      getSafePath(rootKey, path.relative(ALLOWED_ROOTS[rootKey], oldPath));
+      getSafePath(rootKey, path.relative(ALLOWED_ROOTS[rootKey], newPath));
 
       if (!fs.existsSync(oldPath)) {
         return res.status(404).json({ error: 'Arquivo ou diretório original não encontrado' });
@@ -9049,7 +9213,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       fs.renameSync(oldPath, newPath);
       return res.json({ success: true, message: 'Renomeado com sucesso!' });
-    } catch (error) {
+    } catch (error: any) {
       return res.status(400).json({ error: error.message || 'Erro ao renomear arquivo' });
     }
   });
@@ -9057,18 +9221,22 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   // POST /api/admin/files/delete - Excluir
   app.post('/api/admin/files/delete', authenticate, isAdmin, async (req, res) => {
     try {
+      const rootKey = String(req.body.rootKey || '').trim();
       const baseDirInput = String(req.body.path || '').trim();
       const name = String(req.body.name || '').trim();
 
+      if (!rootKey) {
+        return res.status(400).json({ error: 'Parâmetro rootKey é obrigatório.' });
+      }
       if (!name) {
         return res.status(400).json({ error: 'Nome do arquivo ou diretório é obrigatório' });
       }
 
-      const baseDir = getSafePath(baseDirInput);
+      const baseDir = getSafePath(rootKey, baseDirInput);
       const targetPath = path.join(baseDir, name);
 
       // Validação Path Traversal
-      getSafePath(path.relative(ROOT_DIR, targetPath));
+      getSafePath(rootKey, path.relative(ALLOWED_ROOTS[rootKey], targetPath));
 
       if (!fs.existsSync(targetPath)) {
         return res.status(404).json({ error: 'Arquivo ou diretório não encontrado' });
@@ -9082,7 +9250,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       }
 
       return res.json({ success: true, message: 'Excluído com sucesso!' });
-    } catch (error) {
+    } catch (error: any) {
       return res.status(400).json({ error: error.message || 'Erro ao excluir' });
     }
   });
@@ -9097,9 +9265,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   // POST /api/admin/files/upload - Upload
   app.post('/api/admin/files/upload', authenticate, isAdmin, fileManagerUpload.array('files'), async (req, res) => {
     try {
+      const rootKey = String(req.body.rootKey || req.query.rootKey || '').trim();
       const baseDirInput = String(req.body.path || '').trim();
-      const baseDir = getSafePath(baseDirInput);
-            const reqFiles = (req.files || []) as any;
+      if (!rootKey) {
+        return res.status(400).json({ error: 'Parâmetro rootKey é obrigatório.' });
+      }
+      const baseDir = getSafePath(rootKey, baseDirInput);
+      const reqFiles = (req.files || []) as any;
 
       if (reqFiles.length === 0) {
         return res.status(400).json({ error: 'Nenhum arquivo enviado' });
@@ -9119,12 +9291,12 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         const targetPath = path.join(baseDir, originalName);
         
         // Validação Path Traversal final
-        getSafePath(path.relative(ROOT_DIR, targetPath));
+        getSafePath(rootKey, path.relative(ALLOWED_ROOTS[rootKey], targetPath));
 
         // Mover com fallback EXDEV
         try {
           fs.renameSync(file.path, targetPath);
-        } catch (renameError) {
+        } catch (renameError: any) {
           if (renameError.code === 'EXDEV') {
             fs.copyFileSync(file.path, targetPath);
             fs.unlinkSync(file.path);
@@ -9141,7 +9313,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         uploaded: uploadedFiles,
         skipped: skippedFiles
       });
-    } catch (error) {
+    } catch (error: any) {
       return res.status(400).json({ error: error.message || 'Erro ao realizar upload' });
     }
   });
@@ -9149,18 +9321,22 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   // POST /api/admin/files/unzip - Descompactar ZIP com proteção Zip Slip
   app.post('/api/admin/files/unzip', authenticate, isAdmin, async (req, res) => {
     try {
+      const rootKey = String(req.body.rootKey || '').trim();
       const baseDirInput = String(req.body.path || '').trim();
       const fileName = String(req.body.name || '').trim();
 
+      if (!rootKey) {
+        return res.status(400).json({ error: 'Parâmetro rootKey é obrigatório.' });
+      }
       if (!fileName || path.extname(fileName).toLowerCase() !== '.zip') {
         return res.status(400).json({ error: 'Apenas arquivos .zip são permitidos para extração' });
       }
 
-      const baseDir = getSafePath(baseDirInput);
+      const baseDir = getSafePath(rootKey, baseDirInput);
       const zipPath = path.join(baseDir, fileName);
 
       // Validação Path Traversal
-      getSafePath(path.relative(ROOT_DIR, zipPath));
+      getSafePath(rootKey, path.relative(ALLOWED_ROOTS[rootKey], zipPath));
 
       if (!fs.existsSync(zipPath)) {
         return res.status(404).json({ error: 'Arquivo ZIP não encontrado' });
@@ -9188,7 +9364,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       // Extração segura
       zip.extractAllTo(baseDir, true);
       return res.json({ success: true, message: 'Arquivo ZIP descompactado com sucesso!' });
-    } catch (error) {
+    } catch (error: any) {
       return res.status(400).json({ error: error.message || 'Erro ao descompactar arquivo ZIP' });
     }
   });

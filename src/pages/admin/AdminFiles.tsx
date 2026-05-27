@@ -41,6 +41,7 @@ interface FilesResponse {
 }
 
 export default function AdminFiles() {
+  const [rootKey, setRootKey] = useState<string>('');
   const [currentPath, setCurrentPath] = useState<string>('');
   const [items, setItems] = useState<FileItem[]>([]);
   const [disk, setDisk] = useState<DiskSpace | null>(null);
@@ -48,6 +49,10 @@ export default function AdminFiles() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [viewMode, setViewMode] = useState<'list' | 'grid' | 'thumbs'>('thumbs');
   
+  // Filtro por extensões
+  const [extensionFilterType, setExtensionFilterType] = useState<'all' | 'images' | 'zip' | 'pdf' | 'docs' | 'other' | 'custom'>('all');
+  const [customExtensions, setCustomExtensions] = useState<string>('');
+
   // Modais e inputs
   const [newFolderName, setNewFolderName] = useState<string>('');
   const [isMkdirOpen, setIsMkdirOpen] = useState<boolean>(false);
@@ -65,17 +70,23 @@ export default function AdminFiles() {
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
 
   const DANGEROUS_EXTENSIONS = ['.php', '.phtml', '.php3', '.php4', '.php5', '.php7', '.phps', '.js', '.jsx', '.ts', '.tsx', '.sh', '.bat', '.cmd', '.exe', '.json', '.htaccess', '.config'];
+  const FILTER_EXTENSIONS: { [key: string]: string[] } = {
+    images: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'],
+    zip: ['zip'],
+    pdf: ['pdf'],
+    docs: ['doc', 'docx', 'xls', 'xlsx', 'csv', 'txt']
+  };
 
   const isDangerousFile = (fileName: string): boolean => {
     const ext = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
     return DANGEROUS_EXTENSIONS.includes(ext);
   };
 
-  const fetchFiles = async (pathStr: string = '') => {
+  const fetchFiles = async (pathStr: string = '', rKey: string = rootKey) => {
     setLoading(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/admin/files?path=${encodeURIComponent(pathStr)}`, {
+      const res = await fetch(`/api/admin/files?rootKey=${rKey}&path=${encodeURIComponent(pathStr)}`, {
         headers: { 'Cache-Control': 'no-cache' }
       });
       const data = await res.json();
@@ -92,18 +103,28 @@ export default function AdminFiles() {
   };
 
   useEffect(() => {
-    fetchFiles('');
+    fetchFiles('', '');
   }, []);
 
-  const handleNavigate = (pathName: string) => {
-    fetchFiles(pathName);
+  const handleNavigate = (pathName: string, itemRootKey?: string) => {
+    if (itemRootKey) {
+      setRootKey(itemRootKey);
+      fetchFiles(pathName, itemRootKey);
+    } else {
+      fetchFiles(pathName, rootKey);
+    }
   };
 
   const handleBack = () => {
-    if (!currentPath) return;
+    if (!currentPath) {
+      setRootKey('');
+      setCurrentPath('');
+      fetchFiles('', '');
+      return;
+    }
     const parts = currentPath.split('/');
     parts.pop();
-    fetchFiles(parts.join('/'));
+    fetchFiles(parts.join('/'), rootKey);
   };
 
   // Criar pasta
@@ -122,7 +143,7 @@ export default function AdminFiles() {
       const res = await fetch('/api/admin/files/mkdir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: currentPath, name: newFolderName.trim() })
+        body: JSON.stringify({ rootKey, path: currentPath, name: newFolderName.trim() })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao criar diretório');
@@ -154,7 +175,7 @@ export default function AdminFiles() {
       const res = await fetch('/api/admin/files/rename', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: currentPath, oldName: renameTarget.name, newName: renameNewName.trim() })
+        body: JSON.stringify({ rootKey, path: currentPath, oldName: renameTarget.name, newName: renameNewName.trim() })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao renomear');
@@ -180,7 +201,7 @@ export default function AdminFiles() {
       const res = await fetch('/api/admin/files/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: currentPath, name: deleteTarget.name })
+        body: JSON.stringify({ rootKey, path: currentPath, name: deleteTarget.name })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao excluir');
@@ -205,7 +226,7 @@ export default function AdminFiles() {
       const res = await fetch('/api/admin/files/unzip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: currentPath, name: unzipTarget.name })
+        body: JSON.stringify({ rootKey, path: currentPath, name: unzipTarget.name })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Erro ao extrair');
@@ -225,7 +246,6 @@ export default function AdminFiles() {
     e.preventDefault();
     if (!uploadFiles || uploadFiles.length === 0 || operationLoading) return;
 
-        // Validar extensões executáveis antes de enviar
     const filesArray = Array.from(uploadFiles || []) as File[];
     const dangerousList = filesArray.filter(file => isDangerousFile(file.name));
     if (dangerousList.length > 0) {
@@ -240,6 +260,7 @@ export default function AdminFiles() {
     setMessage(null);
     try {
       const formData = new FormData();
+      formData.append('rootKey', rootKey);
       formData.append('path', currentPath);
       filesArray.forEach((file) => {
         formData.append('files', file);
@@ -267,12 +288,50 @@ export default function AdminFiles() {
     }
   };
 
-  // Filtro de pesquisa
+  // Filtro de pesquisa e extensão
   const filteredItems = useMemo(() => {
-    return items.filter((item) =>
+    let result = items.filter((item) =>
       item.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }, [items, searchQuery]);
+
+    if (!rootKey) return result;
+
+    if (extensionFilterType === 'all') {
+      return result;
+    }
+
+    return result.filter((item) => {
+      if (item.isDir) return true;
+
+      const ext = item.name.slice(item.name.lastIndexOf('.') + 1).toLowerCase();
+
+      if (extensionFilterType === 'custom') {
+        if (!customExtensions.trim()) return true;
+        const customList = customExtensions
+          .split(',')
+          .map((e) => e.trim().replace(/^\./, '').toLowerCase())
+          .filter(Boolean);
+        return customList.includes(ext);
+      }
+
+      if (extensionFilterType === 'other') {
+        const allKnown = [
+          ...FILTER_EXTENSIONS.images,
+          ...FILTER_EXTENSIONS.zip,
+          ...FILTER_EXTENSIONS.pdf,
+          ...FILTER_EXTENSIONS.docs
+        ];
+        return !allKnown.includes(ext);
+      }
+
+      const activeList = FILTER_EXTENSIONS[extensionFilterType];
+      if (activeList) {
+        return activeList.includes(ext);
+      }
+
+      return true;
+    });
+  }, [items, searchQuery, rootKey, extensionFilterType, customExtensions]);
 
   // Formatar tamanho de arquivo
   const formatBytes = (bytes: number): string => {
@@ -297,10 +356,7 @@ export default function AdminFiles() {
 
   // Obter URL pública do arquivo
   const getFileUrl = (item: FileItem) => {
-    // Se o caminho relativo começa com "uploads" ou similar, já é servido publicamente sob /uploads
-    // O ROOT_DIR é a pasta "public". Então se o item está em "public/uploads/imagem.jpg",
-    // o caminho relativo retornado é "uploads/imagem.jpg", e o acesso público é via "/uploads/imagem.jpg"
-    return `/${item.relative}`;
+    return `/api/admin/files/download?rootKey=${rootKey}&path=${encodeURIComponent(item.relative)}`;
   };
 
   return (
@@ -315,20 +371,24 @@ export default function AdminFiles() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => setIsUploadOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/10 flex items-center gap-2 transition-transform hover:-translate-y-0.5 active:translate-y-0"
-          >
-            <Upload className="w-4.5 h-4.5" />
-            Fazer Upload
-          </button>
-          <button
-            onClick={() => setIsMkdirOpen(true)}
-            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest border border-slate-200 flex items-center gap-2 transition-transform hover:-translate-y-0.5 active:translate-y-0"
-          >
-            <Plus className="w-4.5 h-4.5" />
-            Nova Pasta
-          </button>
+          {rootKey && (
+            <>
+              <button
+                onClick={() => setIsUploadOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/10 flex items-center gap-2 transition-transform hover:-translate-y-0.5 active:translate-y-0"
+              >
+                <Upload className="w-4.5 h-4.5" />
+                Fazer Upload
+              </button>
+              <button
+                onClick={() => setIsMkdirOpen(true)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest border border-slate-200 flex items-center gap-2 transition-transform hover:-translate-y-0.5 active:translate-y-0"
+              >
+                <Plus className="w-4.5 h-4.5" />
+                Nova Pasta
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -411,19 +471,38 @@ export default function AdminFiles() {
           {/* Breadcrumbs de Navegação */}
           <div className="flex flex-wrap items-center gap-1.5 min-w-0">
             <button
-              onClick={() => handleNavigate('')}
-              className="text-xs font-black uppercase tracking-wider text-slate-400 hover:text-blue-600 transition-colors"
+              onClick={() => {
+                setRootKey('');
+                setCurrentPath('');
+                fetchFiles('', '');
+              }}
+              className={`text-xs font-black uppercase tracking-wider transition-colors ${!rootKey ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}
             >
-              public
+              Raiz
             </button>
+            {rootKey && (
+              <>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                <button
+                  onClick={() => {
+                    setCurrentPath('');
+                    fetchFiles('', rootKey);
+                  }}
+                  className={`text-xs font-black uppercase tracking-wider transition-colors ${!currentPath ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}
+                >
+                  {rootKey === 'public-uploads' ? 'public/uploads' : 'uploads/arquivos'}
+                </button>
+              </>
+            )}
             {currentPath.split('/').filter(Boolean).map((part, idx, arr) => {
               const fullSubPath = arr.slice(0, idx + 1).join('/');
+              const isLast = idx === arr.length - 1;
               return (
                 <React.Fragment key={fullSubPath}>
                   <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
                   <button
                     onClick={() => handleNavigate(fullSubPath)}
-                    className="text-xs font-black uppercase tracking-wider text-slate-400 hover:text-blue-600 transition-colors truncate max-w-[120px]"
+                    className={`text-xs font-black uppercase tracking-wider transition-colors truncate max-w-[120px] ${isLast ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`}
                   >
                     {part}
                   </button>
@@ -433,46 +512,90 @@ export default function AdminFiles() {
           </div>
 
           {/* Filtro e Seletor de Modo de Exibição */}
-          <div className="flex items-center gap-3 w-full md:w-auto">
-            <div className="relative flex-1 md:flex-initial">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filtrar arquivos..."
-                className="w-full md:w-64 pl-10 pr-4 py-2 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-500 bg-white"
-              />
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            </div>
+          {rootKey && (
+            <div className="flex items-center gap-3 w-full md:w-auto">
+              <div className="relative flex-1 md:flex-initial">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Filtrar arquivos..."
+                  className="w-full md:w-64 pl-10 pr-4 py-2 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-500 bg-white"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              </div>
 
-            <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden bg-white shrink-0">
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                className={`p-2 transition-all ${viewMode === 'list' ? 'bg-slate-100 text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
-                title="Visualização em Lista"
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('grid')}
-                className={`p-2 transition-all ${viewMode === 'grid' ? 'bg-slate-100 text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
-                title="Visualização em Grid"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('thumbs')}
-                className={`p-2 transition-all ${viewMode === 'thumbs' ? 'bg-slate-100 text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
-                title="Miniaturas (Imagens)"
-              >
-                <ImageIcon className="w-4 h-4" />
-              </button>
+              <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden bg-white shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`p-2 transition-all ${viewMode === 'list' ? 'bg-slate-100 text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Visualização em Lista"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  className={`p-2 transition-all ${viewMode === 'grid' ? 'bg-slate-100 text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Visualização em Grid"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('thumbs')}
+                  className={`p-2 transition-all ${viewMode === 'thumbs' ? 'bg-slate-100 text-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Miniaturas (Imagens)"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
+
+        {/* Barra de Filtros por Extensão (apenas se estiver dentro de uma raiz) */}
+        {rootKey && (
+          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/10 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mr-2">Extensões:</span>
+              {[
+                { id: 'all', label: 'Todos' },
+                { id: 'images', label: 'Imagens' },
+                { id: 'zip', label: 'ZIP' },
+                { id: 'pdf', label: 'PDF' },
+                { id: 'docs', label: 'Documentos' },
+                { id: 'other', label: 'Outros' },
+                { id: 'custom', label: 'Personalizado' },
+              ].map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setExtensionFilterType(filter.id as any)}
+                  className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
+                    extensionFilterType === filter.id
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                      : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-sm'
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+            {extensionFilterType === 'custom' && (
+              <div className="flex items-center gap-3 pt-2">
+                <input
+                  type="text"
+                  value={customExtensions}
+                  onChange={(e) => setCustomExtensions(e.target.value)}
+                  placeholder="Ex: webp, png, rar, pdf (separados por vírgula)"
+                  className="px-4 py-2 text-xs font-semibold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600/20 bg-white w-full max-w-md shadow-sm"
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Corpo de arquivos */}
         <div className="p-6">
@@ -480,6 +603,41 @@ export default function AdminFiles() {
             <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
               <Loader2 className="w-10 h-10 animate-spin text-blue-600" />
               <span className="text-xs font-black uppercase tracking-widest">Carregando mídias...</span>
+            </div>
+          ) : !rootKey ? (
+            /* Modo Seletor Principal de Pastas */
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-6">
+              {filteredItems.map((item) => (
+                <button
+                  key={item.name}
+                  onClick={() => handleNavigate('', item.rootKey)}
+                  className="bg-slate-50 hover:bg-white border-2 border-slate-100 hover:border-blue-500 rounded-[2.5rem] p-8 text-left transition-all duration-300 flex flex-col justify-between shadow-sm hover:shadow-xl group min-h-[240px] relative overflow-hidden"
+                >
+                  <div className="absolute -right-10 -bottom-10 opacity-5 group-hover:opacity-10 group-hover:scale-110 transition-all duration-500">
+                    <Folder className="w-64 h-64 text-blue-600 fill-blue-50" />
+                  </div>
+                  
+                  <div className="w-16 h-16 bg-blue-600/10 rounded-[1.25rem] flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all duration-300 shadow-md">
+                    <Folder className="w-8 h-8 fill-current" />
+                  </div>
+
+                  <div className="space-y-2 mt-8">
+                    <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">
+                      /{item.name}
+                    </h3>
+                    <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider leading-relaxed">
+                      {item.name === 'public/uploads' 
+                        ? 'Pasta pública de mídias, banners, fotos de produtos e uploads em geral do site.' 
+                        : 'Pasta de arquivos de produção, matrizes em ZIP e documentos restritos.'}
+                    </p>
+                  </div>
+
+                  <div className="mt-8 flex items-center gap-2 text-xs font-black text-blue-600 uppercase tracking-widest group-hover:translate-x-1.5 transition-transform duration-300">
+                    Explorar Diretório
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                </button>
+              ))}
             </div>
           ) : filteredItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-slate-400 text-center space-y-4">
@@ -490,15 +648,13 @@ export default function AdminFiles() {
                   Não encontramos arquivos {searchQuery ? 'correspondentes ao seu filtro' : 'nesta pasta no momento'}.
                 </p>
               </div>
-              {currentPath && (
-                <button
-                  onClick={handleBack}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider border border-slate-200 inline-flex items-center gap-2"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  Voltar Pasta
-                </button>
-              )}
+              <button
+                onClick={handleBack}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider border border-slate-200 inline-flex items-center gap-2"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Voltar
+              </button>
             </div>
           ) : (
             <>
