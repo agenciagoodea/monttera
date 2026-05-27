@@ -9261,6 +9261,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         }
       }).filter(Boolean);
 
+      // Ordenar: pastas primeiro, depois arquivos por data de modificação decrescente (último enviado primeiro)
+      items.sort((a: any, b: any) => {
+        if (a.isDir && !b.isDir) return -1;
+        if (!a.isDir && b.isDir) return 1;
+        return b.updatedAt.getTime() - a.updatedAt.getTime();
+      });
+
       const currentRelative = path.relative(ALLOWED_ROOTS[rootKey], targetDir).replace(/\\/g, '/');
 
       return res.json({
