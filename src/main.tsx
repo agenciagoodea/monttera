@@ -1,7 +1,12 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import axios from 'axios';
 import App from './App.tsx';
 import './index.css';
+
+// Configurar tokens CSRF globais para requisições com a biblioteca Axios
+axios.defaults.xsrfCookieName = 'csrf_token';
+axios.defaults.xsrfHeaderName = 'x-csrf-token';
 
 const originalFetch = window.fetch.bind(window);
 
