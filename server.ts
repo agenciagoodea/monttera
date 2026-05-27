@@ -3932,7 +3932,7 @@ async function startServer() {
     }
   });
 
-  // DELETE /api/admin/products/:id/main-image - Remoção assíncrona da imagem principal com exclusão física no disco
+  // DELETE /api/admin/products/:id/main-image - Remoção assíncrona da imagem principal (apenas desvincula no banco de dados sem excluir do disco)
   app.delete('/api/admin/products/:id/main-image', authenticate, isAdmin, async (req, res) => {
     const productId = Number(req.params.id);
 
@@ -3942,23 +3942,10 @@ async function startServer() {
         return res.status(404).json({ error: 'Produto não encontrado.' });
       }
 
-      const oldImage = product.image;
-      if (oldImage) {
-        const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
-        const oldImageName = oldImage.split('/').pop();
-        if (oldImageName) {
-          const oldPhysicalPath = path.join(publicUploadsDir, oldImageName);
-          if (fs.existsSync(oldPhysicalPath)) {
-            try {
-              fs.unlinkSync(oldPhysicalPath);
-            } catch (err) {
-              console.error('Erro ao deletar imagem principal excluída:', err);
-            }
-          }
-        }
-      }
-
       await dbAsync.run('UPDATE products SET image = NULL WHERE id = ?', productId);
+      
+      console.log(`[Admin Product Image Remove] Vínculo de imagem principal removido para produto ID ${productId} pelo admin`);
+      
       return res.json({ success: true });
     } catch (error: any) {
       console.error('Delete main-image error:', error);
