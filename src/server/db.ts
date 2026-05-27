@@ -942,6 +942,34 @@ export function initDb() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS api_rate_limits (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      scope VARCHAR(120) NOT NULL,
+      rate_key VARCHAR(255) NOT NULL,
+      window_start DATETIME NOT NULL,
+      hits INT NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_rate_scope_key_window (scope, rate_key, window_start),
+      INDEX idx_rate_scope_window (scope, window_start)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS admin_mfa_challenges (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      code_hash CHAR(64) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      attempts INT NOT NULL DEFAULT 0,
+      used TINYINT(1) DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_admin_mfa_user_expires (user_id, expires_at),
+      CONSTRAINT fk_admin_mfa_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
 
 export default {

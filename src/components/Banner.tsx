@@ -7,13 +7,13 @@ const steps = [
   {
     id: 1,
     title: 'Crie sua conta',
-    text: 'Cadastre-se ou faca login para liberar seus downloads.',
+    text: 'Cadastre-se ou faça login para liberar seus downloads.',
     icon: UserPlus,
   },
   {
     id: 2,
     title: 'Escolha as matrizes',
-    text: 'Adicione ao carrinho as pecas que voce deseja baixar.',
+    text: 'Adicione ao carrinho as peças que você deseja baixar.',
     icon: ShoppingCart,
   },
   {
@@ -77,7 +77,7 @@ export default function Banner() {
       <div className="relative z-10 mb-4 flex items-center justify-between">
         <div className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em] text-white">
           <Sparkles className="h-3.5 w-3.5" />
-          {activeSlide === 0 ? 'Guia rapido' : 'Solicitacao personalizada'}
+          {activeSlide === 0 ? 'Guia rápido' : 'Solicitação personalizada'}
         </div>
 
         <div className="flex items-center gap-2">
@@ -92,7 +92,7 @@ export default function Banner() {
           <button
             type="button"
             onClick={nextSlide}
-            aria-label="Proximo slide"
+            aria-label="Próximo slide"
             className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
           >
             <ArrowRight className="h-4 w-4" />
@@ -111,7 +111,7 @@ export default function Banner() {
             className="relative z-10"
           >
             <p className="max-w-full text-lg md:text-xl font-black text-white leading-tight uppercase tracking-tight">
-              Tudo pronto para voce baixar sua matriz em poucos minutos.
+              Tudo pronto para você baixar sua matriz em poucos minutos.
             </p>
 
             <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-3.5">
@@ -153,7 +153,7 @@ export default function Banner() {
           >
             <div className="mb-4 md:mb-5">
               <p className="max-w-full text-lg md:text-xl font-black text-white leading-tight uppercase tracking-tight">
-                Não achou a matriz? Envie-nos sua referencia pelo formulario que retornamos.
+                Não achou a matriz? Envie-nos sua referência pelo formulário que retornamos.
               </p>
             </div>
 
@@ -164,7 +164,7 @@ export default function Banner() {
 
       <div className="relative z-10 mt-6 flex items-center justify-center gap-2">
         <SlideIndicator active={activeSlide === 0} onClick={() => goToSlide(0)} label="Abrir slide de compra" />
-        <SlideIndicator active={activeSlide === 1} onClick={() => goToSlide(1)} label="Abrir slide de solicitacao" />
+        <SlideIndicator active={activeSlide === 1} onClick={() => goToSlide(1)} label="Abrir slide de solicitação" />
       </div>
     </section>
   );

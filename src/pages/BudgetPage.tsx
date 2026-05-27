@@ -87,9 +87,9 @@ export default function BudgetPage() {
 
       const res = await fetch('/api/matrix-requests', { method: 'POST', body: form });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || 'Nao foi possivel enviar seu pedido agora.');
+      if (!res.ok) throw new Error(data?.error || 'Não foi possível enviar seu pedido agora.');
 
-      setMessage({ type: 'success', text: 'Pedido enviado com sucesso! Nossa equipe ja iniciou a analise.' });
+      setMessage({ type: 'success', text: 'Pedido enviado com sucesso! Nossa equipe já iniciou a análise.' });
       setName('');
       setEmail('');
       setWhatsapp('');
@@ -119,14 +119,14 @@ export default function BudgetPage() {
         </div>
 
         <p className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em]">
-          <Sparkles className="h-3.5 w-3.5" /> Orcamento sob medida
+          <Sparkles className="h-3.5 w-3.5" /> Orçamento sob medida
         </p>
         <h1 className="mt-4 text-3xl md:text-5xl font-black tracking-[-0.03em] max-w-4xl">
           Desenvolvimento profissional de matrizes de bordado
         </h1>
         <p className="mt-4 max-w-3xl text-sm md:text-base text-blue-100/95 font-semibold">
-          <span className="block">Transforme sua arte em uma matriz otimizada e pronta para producao.</span>
-          <span className="block">Analise detalhada de cada projeto para garantir acabamento superior e eficiencia na maquina.</span>
+          <span className="block">Transforme sua arte em uma matriz otimizada e pronta para produção.</span>
+          <span className="block">Análise detalizada de cada projeto para garantir acabamento superior e eficiência na máquina.</span>
         </p>
       </section>
 
@@ -136,9 +136,9 @@ export default function BudgetPage() {
             <h2 className="text-xs font-black uppercase tracking-widest text-slate-500">Como funciona</h2>
             <div className="mt-5 space-y-4">
               {[
-                'Voce envia a referencia com os detalhes tecnicos.',
+                'Você envia a referência com os detalhes técnicos.',
                 'Nossa equipe valida viabilidade, prazo e complexidade.',
-                'Voce recebe retorno rapido e segue para producao.',
+                'Você recebe retorno rápido e segue para produção.',
               ].map((step, idx) => (
                 <div className="flex gap-3" key={step}>
                   <span className="mt-0.5 inline-flex h-8 w-8 items-center justify-center rounded-xl font-black text-white" style={{ backgroundColor: primary }}>
@@ -153,7 +153,7 @@ export default function BudgetPage() {
           <div className="rounded-[1.75rem] border border-slate-100 bg-white p-6 shadow-sm">
             <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Diferenciais</h3>
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-xs font-semibold text-slate-600">
-              <p className="inline-flex items-center gap-2 min-w-0"><Zap className="w-4 h-4 shrink-0" style={{ color: primary }} /> <span className="truncate">Atendimento agil</span></p>
+              <p className="inline-flex items-center gap-2 min-w-0"><Zap className="w-4 h-4 shrink-0" style={{ color: primary }} /> <span className="truncate">Atendimento ágil</span></p>
               <p className="inline-flex items-center gap-2 min-w-0"><Target className="w-4 h-4 shrink-0" style={{ color: primary }} /> <span className="truncate">Proposta objetiva</span></p>
               <p className="inline-flex items-center gap-2 min-w-0"><Clock3 className="w-4 h-4 shrink-0" style={{ color: primary }} /> <span className="truncate">Prazo transparente</span></p>
               <p className="inline-flex items-center gap-2 min-w-0"><FileText className="w-4 h-4 shrink-0" style={{ color: primary }} /> <span className="truncate">Escopo validado</span></p>
@@ -162,7 +162,7 @@ export default function BudgetPage() {
         </aside>
 
         <div className="rounded-[1.75rem] border border-slate-100 bg-white p-6 md:p-8 shadow-sm">
-          <h2 className="text-lg font-black text-slate-900 uppercase tracking-wider">Enviar solicitacao de orcamento</h2>
+          <h2 className="text-lg font-black text-slate-900 uppercase tracking-wider">Enviar solicitação de orçamento</h2>
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Nome" className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2" style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }} />
@@ -176,8 +176,8 @@ export default function BudgetPage() {
                 <option value="logo-marca">Logo/Marca</option>
                 <option value="escrita">Escrita</option>
                 <option value="frase">Frase</option>
-                <option value="simbolo">Simbolo</option>
-                <option value="brasao">Brasao</option>
+                <option value="simbolo">Símbolo</option>
+                <option value="brasao">Brasão</option>
                 <option value="desenho">Desenho</option>
                 <option value="outro">Outro</option>
               </select>
@@ -248,7 +248,7 @@ export default function BudgetPage() {
               value={details}
               onChange={(e) => setDetails(e.target.value)}
               rows={5}
-              placeholder="Informe outras informacoes importantes para a producao."
+              placeholder="Informe outras informações importantes para a produção."
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none focus:ring-2"
               style={{ ['--tw-ring-color' as any]: withAlpha(primary, 0.28) }}
             />
@@ -259,7 +259,7 @@ export default function BudgetPage() {
                   className="inline-flex items-center justify-center rounded-lg px-3 py-1.5 text-xs font-black text-white"
                   style={{ backgroundColor: primary }}
                 >
-                  Anexar referencia
+                  Anexar referência
                 </span>
                 <span className="min-w-0 truncate font-semibold text-slate-600">
                   {referenceImage?.name || 'Nenhum arquivo selecionado'}

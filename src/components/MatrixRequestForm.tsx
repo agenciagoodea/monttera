@@ -40,12 +40,12 @@ export default function MatrixRequestForm({ className = '', layout = 'vertical' 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(data?.error || 'Nao foi possivel enviar sua solicitacao agora.');
+        throw new Error(data?.error || 'Não foi possível enviar sua solicitação agora.');
       }
 
       setMessage({
         type: 'success',
-        text: 'Solicitacao enviada! Nossa equipe vai entrar em contato com voce em breve.',
+        text: 'Solicitação enviada! Nossa equipe vai entrar em contato com você em breve.',
       });
       setName('');
       setEmail('');
@@ -55,7 +55,7 @@ export default function MatrixRequestForm({ className = '', layout = 'vertical' 
     } catch (error: any) {
       setMessage({
         type: 'error',
-        text: error?.message || 'Erro ao enviar solicitacao.',
+        text: error?.message || 'Erro ao enviar solicitação.',
       });
     } finally {
       setSubmitting(false);
@@ -103,7 +103,7 @@ export default function MatrixRequestForm({ className = '', layout = 'vertical' 
 
           <label className={`block ${isHorizontal ? 'md:col-span-4' : ''}`}>
             <span className="mb-1 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-white/90">
-              <Phone className="h-3.5 w-3.5" /> Whatsapp com DDD
+              <Phone className="h-3.5 w-3.5" /> WhatsApp com DDD
             </span>
             <input
               type="text"
@@ -117,7 +117,7 @@ export default function MatrixRequestForm({ className = '', layout = 'vertical' 
 
           <label className={`block ${isHorizontal ? 'md:col-span-5 xl:col-span-4' : ''}`}>
             <span className="mb-1 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-white/90">
-              Demais informacoes
+              Demais informações
             </span>
             {isHorizontal ? (
               <input
@@ -125,21 +125,21 @@ export default function MatrixRequestForm({ className = '', layout = 'vertical' 
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
                 className="h-[58px] w-full rounded-lg border border-white/30 bg-white/88 px-3 py-2 text-[13px] font-semibold text-slate-700 outline-none transition-all focus:border-cyan-300 focus:bg-white focus:ring-2 focus:ring-cyan-100"
-                placeholder="Exemplo: tecido, tamanho estimado, tipo de bordado, aplicacao..."
+                placeholder="Exemplo: tecido, tamanho estimado, tipo de bordado, aplicação..."
               />
             ) : (
               <textarea
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
                 className="min-h-[88px] w-full rounded-lg border border-white/30 bg-white/88 px-3 py-2 text-[13px] font-semibold text-slate-700 outline-none transition-all focus:border-cyan-300 focus:bg-white focus:ring-2 focus:ring-cyan-100"
-                placeholder="Exemplo: tecido, tamanho estimado, tipo de bordado, aplicacao..."
+                placeholder="Exemplo: tecido, tamanho estimado, tipo de bordado, aplicação..."
               />
             )}
           </label>
 
           <label className={`block ${isHorizontal ? 'md:col-span-4 xl:col-span-4' : ''}`}>
             <span className="mb-1 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-white/90">
-              <FileImage className="h-3.5 w-3.5" /> Imagem de referencia
+              <FileImage className="h-3.5 w-3.5" /> Imagem de referência
             </span>
             <input
               type="file"
@@ -196,7 +196,7 @@ export default function MatrixRequestForm({ className = '', layout = 'vertical' 
               {submitting ? (
                 <>
                   <Loader2 className="h-4.5 w-4.5 animate-spin" />
-                  Enviando solicitacao...
+                  Enviando solicitação...
                 </>
               ) : (
                 <>

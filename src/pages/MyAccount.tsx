@@ -1222,13 +1222,18 @@ export default function MyAccount() {
                 </div>
               )}
 
-              <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
-                <p className="text-sm font-black">Alerta de não compartilhamento</p>
-                <p className="mt-1 text-sm font-semibold leading-relaxed">
-                  O arquivo adquirido é de uso pessoal e exclusivo do comprador. Não compartilhe, revenda, doe ou redistribua em redes sociais, grupos, sites ou qualquer outra mídia digital.
+              <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 space-y-3">
+                <p className="text-sm font-black flex items-center gap-2">
+                  <span>🔒</span> Uso exclusivo para quem adquiriu
                 </p>
-                <p className="mt-2 text-xs font-black uppercase tracking-wide text-amber-800">
-                  Redistribuição sem autorização é proibida pela Lei de Direitos Autorais (Lei 9.610/98).
+                <p className="text-xs font-semibold leading-relaxed">
+                  Essa matriz foi desenvolvida com muito carinho e dedicação. Por isso, pedimos que não compartilhe, doe ou revenda este arquivo em nenhuma plataforma, rede social ou mídia digital.
+                </p>
+                <p className="text-[11px] font-black uppercase tracking-wide text-amber-800 flex items-center gap-2">
+                  <span>📜</span> A redistribuição sem autorização é proibida pela Lei de Direitos Autorais (Lei 9.610/98).
+                </p>
+                <p className="text-xs font-bold flex items-center gap-1">
+                  Contamos com seu apoio para valorizar o trabalho de quem cria! <span>💛</span>
                 </p>
               </div>
             </div>

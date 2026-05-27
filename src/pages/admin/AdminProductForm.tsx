@@ -12,8 +12,9 @@ import {
   Settings,
   Tag,
   ChevronDown,
-  Hash,
-  Palette
+    Hash,
+  Palette,
+  Eye
 } from 'lucide-react';
 import HtmlRichEditor from '../../components/admin/HtmlRichEditor';
 import { getPublicAssetUrl, normalizePublicMediaUrl } from '../../lib/utils';
@@ -685,6 +686,17 @@ export default function AdminProductForm() {
             >
               {syncingMercadoPago ? 'Sincronizando...' : 'Sincronizar Produto Mercado Pago'}
             </button>
+          )}
+                    {id && formData.slug && (
+            <a
+              href={`/produto/${formData.slug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest border border-slate-200 transition-all flex items-center gap-2"
+            >
+              <Eye className="w-4 h-4" />
+              Visualizar Produto
+            </a>
           )}
           <button 
             onClick={handleSubmit}

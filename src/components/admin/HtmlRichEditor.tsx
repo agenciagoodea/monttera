@@ -71,12 +71,22 @@ export default function HtmlRichEditor({ label, value, onChange, placeholder, ro
     loadQuillFromCdn()
       .then(() => {
         if (!active || !editorHostRef.current || quillRef.current || !window.Quill) return;
-        const instance = new window.Quill(editorHostRef.current, {
+        const Quill = window.Quill;
+        // Forçar uso de inline styles em vez de classes
+        const ColorStyle = Quill.import('attributors/style/color');
+        Quill.register(ColorStyle, true);
+        const BackgroundStyle = Quill.import('attributors/style/background');
+        Quill.register(BackgroundStyle, true);
+        const AlignStyle = Quill.import('attributors/style/align');
+        Quill.register(AlignStyle, true);
+
+        const instance = new Quill(editorHostRef.current, {
           theme: 'snow',
           placeholder: placeholder || '',
           modules: {
             toolbar: [
               ['bold', 'italic'],
+              [{ color: [] }, { background: [] }],
               [{ list: 'ordered' }, { list: 'bullet' }],
               ['blockquote'],
               [{ align: [] }],

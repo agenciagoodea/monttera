@@ -7,6 +7,9 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaChallengeId, setMfaChallengeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -16,7 +19,16 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      const user: any = await login({ email, password });
+      const payload: any = mfaRequired
+        ? { email, password, mfa_code: mfaCode, mfa_challenge_id: mfaChallengeId }
+        : { email, password };
+      const user: any = await login(payload);
+      if (user?.mfa_required) {
+        setMfaRequired(true);
+        setMfaChallengeId(Number(user?.mfa_challenge_id || 0) || null);
+        setError(user?.message || 'Confirme o código MFA enviado por e-mail.');
+        return;
+      }
       if (user.type === 'user') {
         navigate('/admin');
       } else {
@@ -60,6 +72,24 @@ export default function Login() {
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300 group-focus-within:text-blue-500 transition-colors" />
               </div>
             </div>
+
+            {mfaRequired && (
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Código MFA</label>
+                <div className="relative group">
+                  <input
+                    type="text"
+                    required={mfaRequired}
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full pl-4 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all font-medium"
+                    placeholder="000000"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex justify-between items-center ml-1">

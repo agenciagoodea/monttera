@@ -59,6 +59,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     const data = await parseApiResponse(res);
     if (!res.ok || data.error) throw new Error(data.error || 'Falha ao autenticar');
+    if (data?.mfa_required) {
+      return data;
+    }
     setUser(data.user);
     return data.user;
   };

@@ -21,6 +21,7 @@ import nodemailer from 'nodemailer';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
+import AdmZip from 'adm-zip';
 
 // Shim para __dirname funcionar tanto em CommonJS (compilado) quanto em ESM (dev/tsx)
 const _dirname = typeof __dirname !== 'undefined'
@@ -81,8 +82,83 @@ const forgotPasswordRateLimit = createBasicRateLimit({
   message: 'Muitas solicitacoes de recuperacao. Aguarde alguns minutos e tente novamente.',
 });
 
+function createPersistentRateLimit(options: {
+  scope: string;
+  windowMs: number;
+  max: number;
+  message: string;
+}) {
+  return async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    try {
+      const ip = getClientIp(req);
+      const email = String((req.body?.email || '') as string).trim().toLowerCase();
+      const rateKey = `${ip}|${email || 'anonymous'}`;
+      const windowSeconds = Math.max(1, Math.floor(options.windowMs / 1000));
+
+      const row = await dbAsync.get(`
+        SELECT
+          hits,
+          UNIX_TIMESTAMP(window_start) AS window_start_unix
+        FROM api_rate_limits
+        WHERE scope = ?
+          AND rate_key = ?
+          AND window_start = FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP() / ?) * ?)
+        LIMIT 1
+      `, options.scope, rateKey, windowSeconds, windowSeconds) as any;
+
+      const nextHits = Number(row?.hits || 0) + 1;
+      const windowStartUnix = Number(row?.window_start_unix || Math.floor(Date.now() / 1000 / windowSeconds) * windowSeconds);
+      const retryAfterSeconds = Math.max(1, (windowStartUnix + windowSeconds) - Math.floor(Date.now() / 1000));
+
+      await dbAsync.run(`
+        INSERT INTO api_rate_limits (scope, rate_key, window_start, hits)
+        VALUES (?, ?, FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP() / ?) * ?), 1)
+        ON DUPLICATE KEY UPDATE hits = hits + 1, updated_at = CURRENT_TIMESTAMP
+      `, options.scope, rateKey, windowSeconds, windowSeconds);
+
+      if (nextHits > options.max) {
+        res.setHeader('Retry-After', String(retryAfterSeconds));
+        return res.status(429).json({ error: options.message });
+      }
+      return next();
+    } catch (error) {
+      console.error('Persistent rate-limit fallback to memory limiter due to error:', error);
+      return next();
+    }
+  };
+}
+
+const registerRateLimitPersistent = createPersistentRateLimit({
+  scope: 'auth_register',
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: 'Muitas tentativas de cadastro. Aguarde alguns minutos e tente novamente.',
+});
+
+const loginRateLimitPersistent = createPersistentRateLimit({
+  scope: 'auth_login',
+  windowMs: LOGIN_ATTEMPT_WINDOW_MINUTES * 60 * 1000,
+  max: Math.max(15, LOGIN_ATTEMPT_MAX_FAILS * 3),
+  message: 'Muitas tentativas de login. Aguarde alguns minutos e tente novamente.',
+});
+
+const forgotPasswordRateLimitPersistent = createPersistentRateLimit({
+  scope: 'auth_forgot_password',
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: 'Muitas solicitacoes de recuperacao. Aguarde alguns minutos e tente novamente.',
+});
+
 function isValidEmail(email: string) {
   return EMAIL_REGEX.test(String(email || '').trim().toLowerCase());
+}
+
+function shouldRequireAdminMfa() {
+  return String(process.env.ADMIN_MFA_REQUIRED || 'false').toLowerCase() === 'true';
+}
+
+function hashMfaCode(raw: string) {
+  return crypto.createHash('sha256').update(String(raw || '')).digest('hex');
 }
 
 function getAuthCookieOptions(req: express.Request): express.CookieOptions {
@@ -93,6 +169,132 @@ function getAuthCookieOptions(req: express.Request): express.CookieOptions {
     secure,
     maxAge: 7 * 24 * 60 * 60 * 1000,
   };
+}
+
+function getCsrfCookieOptions(req: express.Request): express.CookieOptions {
+  const secure = isProduction || req.secure || req.headers['x-forwarded-proto'] === 'https';
+  return {
+    httpOnly: false,
+    sameSite: 'lax',
+    secure,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/',
+  };
+}
+
+function generateCsrfToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function sanitizeRichHtml(input: any): string {
+  const raw = String(input ?? '');
+  if (!raw.trim()) return '';
+
+  const allowedTags = new Set([
+    'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's',
+    'ul', 'ol', 'li', 'blockquote', 'code', 'pre',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'a', 'img', 'hr', 'span', 'div',
+  ]);
+  const voidTags = new Set(['br', 'hr', 'img']);
+  const blockedContentTags = /<(script|style|iframe|object|embed|form|meta|link|base)\b[^>]*>[\s\S]*?<\/\1>/gi;
+  const blockedSingleTags = /<(script|style|iframe|object|embed|form|meta|link|base)\b[^>]*\/?>/gi;
+
+  const allowedAttrsByTag: Record<string, Set<string>> = {
+    a: new Set(['href', 'title', 'target', 'rel']),
+    img: new Set(['src', 'alt', 'title', 'width', 'height', 'loading']),
+    div: new Set(['class']),
+    span: new Set(['class']),
+    p: new Set(['class']),
+    code: new Set(['class']),
+    pre: new Set(['class']),
+  };
+  const globalAllowedAttrs = new Set(['class', 'title', 'aria-label']);
+
+  const escapeAttr = (value: string) =>
+    String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+  const isSafeUrl = (value: string, forImage: boolean) => {
+    const normalized = String(value || '').trim().replace(/[\u0000-\u001F\u007F]/g, '');
+    if (!normalized) return false;
+    const lower = normalized.toLowerCase();
+    if (lower.startsWith('javascript:') || lower.startsWith('vbscript:')) return false;
+    if (lower.startsWith('data:')) {
+      if (!forImage) return false;
+      return /^data:image\/(png|jpe?g|gif|webp|avif);base64,[a-z0-9+/=\s]+$/i.test(normalized);
+    }
+    if (lower.startsWith('/') || lower.startsWith('./') || lower.startsWith('../')) return true;
+    return /^(https?:|mailto:|tel:)/i.test(normalized);
+  };
+
+  const sanitized = raw
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!doctype[\s\S]*?>/gi, '')
+    .replace(blockedContentTags, '')
+    .replace(blockedSingleTags, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/<\s*(\/?)\s*([a-z0-9-]+)([^>]*)>/gi, (_full, slash, tagNameRaw, attrsRaw) => {
+      const tag = String(tagNameRaw || '').toLowerCase();
+      const isClosing = String(slash || '') === '/';
+      if (!allowedTags.has(tag)) return '';
+      if (isClosing) {
+        if (voidTags.has(tag)) return '';
+        return `</${tag}>`;
+      }
+
+      const allowedAttrs = new Set([
+        ...Array.from(globalAllowedAttrs),
+        ...Array.from(allowedAttrsByTag[tag] || []),
+      ]);
+      const attrRegex = /([a-zA-Z_:][a-zA-Z0-9_:\-\.]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+      const outAttrs: string[] = [];
+      let match: RegExpExecArray | null = null;
+      while ((match = attrRegex.exec(String(attrsRaw || '')))) {
+        const attrName = String(match[1] || '').toLowerCase();
+        if (!allowedAttrs.has(attrName)) continue;
+        if (attrName.startsWith('on')) continue;
+        const rawValue = String(match[3] ?? match[4] ?? match[5] ?? '').trim();
+        if (!rawValue) continue;
+
+        if (attrName === 'href') {
+          if (!isSafeUrl(rawValue, false)) continue;
+          outAttrs.push(`href="${escapeAttr(rawValue)}"`);
+          continue;
+        }
+        if (attrName === 'src') {
+          if (!isSafeUrl(rawValue, tag === 'img')) continue;
+          outAttrs.push(`src="${escapeAttr(rawValue)}"`);
+          continue;
+        }
+        if (attrName === 'target') {
+          const targetVal = rawValue.toLowerCase() === '_blank' ? '_blank' : '_self';
+          outAttrs.push(`target="${targetVal}"`);
+          continue;
+        }
+        if (attrName === 'rel') {
+          continue;
+        }
+        outAttrs.push(`${attrName}="${escapeAttr(rawValue)}"`);
+      }
+
+      if (tag === 'a') {
+        const hasTargetBlank = outAttrs.some((value) => /target="_blank"/i.test(value));
+        if (hasTargetBlank) outAttrs.push('rel="noopener noreferrer"');
+      }
+      if (tag === 'img' && !outAttrs.some((value) => /^loading=/i.test(value))) {
+        outAttrs.push('loading="lazy"');
+      }
+
+      const attrs = outAttrs.length > 0 ? ` ${outAttrs.join(' ')}` : '';
+      if (voidTags.has(tag)) return `<${tag}${attrs}>`;
+      return `<${tag}${attrs}>`;
+    });
+
+  return sanitized.trim();
 }
 
 // Simple in-memory cache for extreme optimization
@@ -294,7 +496,7 @@ async function fetchMercadoPagoAccountInfo(accessToken: string) {
 }
 
 // ConfiguraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o do Multer para Uploads
-const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.svg', '.ico']);
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.ico']);
 const ZIP_EXTENSIONS = new Set(['.zip', '.rar', '.7z']);
 const EMBROIDERY_EXTENSIONS = new Set(['.pes', '.jef', '.dst', '.exp', '.xxx', '.vp3', '.hus']);
 const PDF_EXTENSIONS = new Set(['.pdf']);
@@ -306,9 +508,6 @@ function isAllowedUpload(fieldName: string, extension: string, mimeType: string)
   if (fieldName === 'image' || fieldName === 'gallery' || fieldName === 'avatar' || fieldName === 'logo') {
     if (ext === '.ico') {
       return mime === 'image/x-icon' || mime === 'image/vnd.microsoft.icon' || mime === 'application/octet-stream';
-    }
-    if (ext === '.svg') {
-      return mime === 'image/svg+xml' || mime === 'text/plain' || mime === 'application/octet-stream';
     }
     return IMAGE_EXTENSIONS.has(ext) && mime.startsWith('image/');
   }
@@ -380,12 +579,26 @@ function moveUploadedFileToFinalPath(
   finalFileName: string,
 ): { absolutePath: string; fileName: string } | null {
   if (!file || !file.path || !finalFileName) return null;
-  if (!fs.existsSync(absoluteDestDir)) fs.mkdirSync(absoluteDestDir, { recursive: true });
-  const source = path.resolve(file.path);
-  const target = path.resolve(path.join(absoluteDestDir, finalFileName));
-  if (source === target) return { absolutePath: target, fileName: finalFileName };
-  fs.renameSync(source, target);
-  return { absolutePath: target, fileName: finalFileName };
+  try {
+    if (!fs.existsSync(absoluteDestDir)) fs.mkdirSync(absoluteDestDir, { recursive: true });
+    const source = path.resolve(file.path);
+    const target = path.resolve(path.join(absoluteDestDir, finalFileName));
+    if (source === target) return { absolutePath: target, fileName: finalFileName };
+    try {
+      fs.renameSync(source, target);
+    } catch (renameError: any) {
+      if (renameError.code === 'EXDEV') {
+        fs.copyFileSync(source, target);
+        fs.unlinkSync(source);
+      } else {
+        throw renameError;
+      }
+    }
+    return { absolutePath: target, fileName: finalFileName };
+  } catch (error) {
+    console.error('Erro ao mover arquivo físico de upload:', error);
+    return null;
+  }
 }
 
 async function createUniqueProductSlug(baseName: string, ignoreProductId?: number) {
@@ -1877,6 +2090,10 @@ async function initSettings() {
 }
 
 async function initTestData() {
+  if (isProduction) {
+    console.log('Skipping test data seeding in production.');
+    return;
+  }
   await initSettings();
   const hashedPassword = await hashPassword('123456');
   const adrianoPassword = await hashPassword('04039866');
@@ -1921,9 +2138,13 @@ async function startServer() {
     console.log('Initializing database schema...');
     initDb();
     
-    // Inicializa dados de teste
-    console.log('Initializing test data...');
-    await initTestData();
+    const shouldSeedTestData = !isProduction && process.env.ALLOW_TEST_DATA_SEED === 'true';
+    if (shouldSeedTestData) {
+      console.log('Initializing test data...');
+      await initTestData();
+    } else {
+      console.log('Skipping test data initialization.');
+    }
 
     // Insert some mock data if empty
     const shouldSeedDemoData = process.env.SEED_DEMO_DATA === 'true';
@@ -1990,11 +2211,21 @@ async function startServer() {
     next();
   });
 
+  const normalizeOrigin = (value: string): string => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+      return new URL(raw).origin;
+    } catch {
+      return '';
+    }
+  };
   const settingsForCors = loadSettingsMap(['app_url']);
   const configuredAppUrl = String(process.env.APP_URL || settingsForCors.app_url || '').trim();
   const localOrigins = ['http://localhost:3000', 'http://127.0.0.1:3000'];
   const allowedOrigins = new Set<string>(localOrigins);
-  if (configuredAppUrl) allowedOrigins.add(configuredAppUrl);
+  const configuredAppOrigin = normalizeOrigin(configuredAppUrl);
+  if (configuredAppOrigin) allowedOrigins.add(configuredAppOrigin);
 
   app.use(cors({
     origin: (origin, callback) => {
@@ -2009,6 +2240,42 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '15mb' }));
   app.use(cookieParser());
   app.use((req, res, next) => {
+    const csrfCookie = String(req.cookies?.csrf_token || '').trim();
+    if (!csrfCookie) {
+      const token = generateCsrfToken();
+      res.cookie('csrf_token', token, getCsrfCookieOptions(req));
+      req.cookies.csrf_token = token;
+    }
+    return next();
+  });
+  app.use((req, res, next) => {
+    const method = String(req.method || 'GET').toUpperCase();
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return next();
+    if (!String(req.path || '').startsWith('/api/')) return next();
+    if (String(req.path || '').startsWith('/api/webhooks/')) return next();
+
+    const origin = normalizeOrigin(String(req.headers.origin || ''));
+    const referer = String(req.headers.referer || '').trim();
+    const refererOrigin = referer ? normalizeOrigin(referer) : '';
+    const hasAuthCookie = Boolean(req.cookies?.auth_token);
+    const csrfHeader = String(req.headers['x-csrf-token'] || '').trim();
+    const csrfCookie = String(req.cookies?.csrf_token || '').trim();
+    const isSensitiveApi = hasAuthCookie || String(req.path || '').startsWith('/api/admin/') || String(req.path || '').startsWith('/api/customer/');
+
+    if (!isSensitiveApi) return next();
+
+    if (origin && !allowedOrigins.has(origin)) {
+      return res.status(403).json({ error: 'Origin bloqueada por politica de seguranca' });
+    }
+    if (!origin && refererOrigin && !allowedOrigins.has(refererOrigin)) {
+      return res.status(403).json({ error: 'Referer bloqueado por politica de seguranca' });
+    }
+    if (hasAuthCookie && (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader)) {
+      return res.status(403).json({ error: 'CSRF token ausente ou invalido' });
+    }
+    return next();
+  });
+  app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -2018,7 +2285,14 @@ async function startServer() {
     }
     next();
   });
-  app.use('/uploads', express.static('public/uploads'));
+  app.use('/uploads', express.static('public/uploads', {
+    index: false,
+    dotfiles: 'deny',
+    setHeaders: (res) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; media-src 'self';");
+    },
+  }));
   const wpUploadsRoots = getWpUploadsRoots();
   wpUploadsRoots.forEach((root) => {
     app.use('/wp-content/uploads', express.static(root));
@@ -2063,11 +2337,11 @@ async function startServer() {
       return res.json(products);
     } catch (error: any) {
       console.error('SEARCH ERROR:', error);
-      return res.status(500).json({ error: error.message });
+      return res.status(500).json({ error: 'Erro interno ao processar busca' });
     }
   });
 
-  app.post('/api/auth/register', registerRateLimit, async (req, res) => {
+  app.post('/api/auth/register', registerRateLimitPersistent, registerRateLimit, async (req, res) => {
     const {
       firstName,
       lastName,
@@ -2245,11 +2519,13 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/login', loginRateLimit, async (req, res) => {
+  app.post('/api/auth/login', loginRateLimitPersistent, loginRateLimit, async (req, res) => {
     try {
-      const { email, password } = req.body || {};
+      const { email, password, mfa_code, mfa_challenge_id } = req.body || {};
       const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
       const normalizedPassword = typeof password === 'string' ? password : '';
+      const normalizedMfaCode = typeof mfa_code === 'string' ? mfa_code.trim() : '';
+      const normalizedMfaChallengeId = Number(mfa_challenge_id || 0);
       const ip = getClientIp(req);
       const verificationRequired = await resolveEmailVerificationRequired();
 
@@ -2299,6 +2575,65 @@ async function startServer() {
         console.log(`Falha no login: Usuario inativo (${user.status}) - ${normalizedEmail}`);
         await recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(403).json({ error: 'Esta conta esta inativa' });
+      }
+
+      const adminMfaEnabled = shouldRequireAdminMfa() && user.role === 'admin';
+      if (adminMfaEnabled) {
+        if (Number.isFinite(normalizedMfaChallengeId) && normalizedMfaChallengeId > 0 && normalizedMfaCode) {
+          const challenge = await dbAsync.get(
+            'SELECT * FROM admin_mfa_challenges WHERE id = ? AND user_id = ? AND used = 0 LIMIT 1',
+            normalizedMfaChallengeId,
+            Number(user.id),
+          ) as any;
+          if (!challenge) {
+            await recordLoginAttempt(normalizedEmail, ip, false);
+            return res.status(401).json({ error: 'Desafio MFA invalido. Tente login novamente.' });
+          }
+          const expired = new Date(challenge.expires_at).getTime() < Date.now();
+          if (expired || Number(challenge.attempts || 0) >= 5) {
+            await dbAsync.run('UPDATE admin_mfa_challenges SET used = 1 WHERE id = ?', Number(challenge.id));
+            await recordLoginAttempt(normalizedEmail, ip, false);
+            return res.status(401).json({ error: 'Codigo MFA expirado. Inicie um novo login.' });
+          }
+          const expectedHash = String(challenge.code_hash || '');
+          const providedHash = hashMfaCode(normalizedMfaCode);
+          if (expectedHash !== providedHash) {
+            await dbAsync.run('UPDATE admin_mfa_challenges SET attempts = attempts + 1 WHERE id = ?', Number(challenge.id));
+            await recordLoginAttempt(normalizedEmail, ip, false);
+            return res.status(401).json({ error: 'Codigo MFA invalido.' });
+          }
+          await dbAsync.run('UPDATE admin_mfa_challenges SET used = 1 WHERE id = ?', Number(challenge.id));
+        } else {
+          const otp = String(Math.floor(100000 + Math.random() * 900000));
+          const otpHash = hashMfaCode(otp);
+          const mfaTtlMinutes = Math.max(3, Number(process.env.ADMIN_MFA_TTL_MINUTES || '10'));
+          const challengeInsert = await dbAsync.run(
+            'INSERT INTO admin_mfa_challenges (user_id, code_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))',
+            Number(user.id),
+            otpHash,
+            mfaTtlMinutes,
+          );
+          const appUrl = buildBaseAppUrl(req);
+          await sendEmail({
+            to: String(user.email || normalizedEmail),
+            templateKey: 'password_reset',
+            variables: {
+              name: user.name || 'Administrador',
+              reset_url: `${appUrl}/login`,
+              expiry_hours: (mfaTtlMinutes / 60).toFixed(1),
+              code: otp,
+              mfa_code: otp,
+              login_url: `${appUrl}/login`,
+            },
+          }).catch((err) => console.error('Failed to send admin MFA code:', err));
+
+          return res.status(202).json({
+            success: false,
+            mfa_required: true,
+            mfa_challenge_id: Number(challengeInsert.lastInsertRowid),
+            message: 'Codigo de verificacao enviado para seu e-mail.',
+          });
+        }
       }
 
       const isEmailVerified = Boolean(user.email_verified_at);
@@ -2521,7 +2856,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/forgot-password', forgotPasswordRateLimit, async (req, res) => {
+  app.post('/api/auth/forgot-password', forgotPasswordRateLimitPersistent, forgotPasswordRateLimit, async (req, res) => {
     try {
       const { email } = req.body || {};
       if (!email) return res.status(400).json({ error: 'E-mail obrigatorio' });
@@ -2719,6 +3054,8 @@ async function startServer() {
       return res.status(400).json({ error: 'Nome do produto ÃƒÆ’Ã‚Â© obrigatÃƒÆ’Ã‚Â³rio' });
     }
 
+    const safeDescription = description !== undefined ? (sanitizeRichHtml(description).trim() || null) : null;
+    const safeShortDescription = short_description !== undefined ? (sanitizeRichHtml(short_description).trim() || null) : null;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     const finalPrice = Number(price);
     if (!Number.isFinite(finalPrice)) {
@@ -2752,7 +3089,7 @@ async function startServer() {
           image, image_alt, production_sheet, category_id, stitch_count, colors, is_featured, is_new,
           seo_title, seo_description, seo_keywords, canonical_url, noindex
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, normalizedName, uniqueSlug, description || null, short_description || null, finalPrice, finalSalePrice, null, String(image_alt || '').trim() || null, null, normalizedCategoryId, normalizedStitchCount, colors || null, is_featured === 'true' || is_featured === '1' ? 1 : 0, is_new === 'true' || is_new === '1' ? 1 : 0, seo_title || null, seo_description || null, seo_keywords || null, canonical_url || null, noindex === 'true' || noindex === '1' ? 1 : 0);
+      `, normalizedName, uniqueSlug, safeDescription, safeShortDescription, finalPrice, finalSalePrice, null, String(image_alt || '').trim() || null, null, normalizedCategoryId, normalizedStitchCount, colors || null, is_featured === 'true' || is_featured === '1' ? 1 : 0, is_new === 'true' || is_new === '1' ? 1 : 0, seo_title || null, seo_description || null, seo_keywords || null, canonical_url || null, noindex === 'true' || noindex === '1' ? 1 : 0);
 
       const productId = result.lastInsertRowid;
       const productIdNumber = Number(productId);
@@ -2974,8 +3311,12 @@ async function startServer() {
     const nextSlug = slug
       ? slugify(slug, { lower: true })
       : slugify(nextName, { lower: true });
-    const nextDescription = description ?? existingProduct.description;
-    const nextShortDescription = short_description ?? existingProduct.short_description;
+    const nextDescription = description !== undefined
+      ? (sanitizeRichHtml(description).trim() || null)
+      : existingProduct.description;
+    const nextShortDescription = short_description !== undefined
+      ? (sanitizeRichHtml(short_description).trim() || null)
+      : existingProduct.short_description;
     const nextPrice = price !== undefined ? Number(price) : existingProduct.price;
 
     const salePriceInput = promotional_price ?? sale_price;
@@ -5367,7 +5708,8 @@ async function startServer() {
       if (!['privacy', 'terms', 'cookies'].includes(normalizedType)) {
         return res.status(400).json({ error: 'Tipo de politica invalido' });
       }
-      if (!version || !title || !content) {
+      const safePolicyContent = sanitizeRichHtml(content).trim();
+      if (!version || !title || !safePolicyContent) {
         return res.status(400).json({ error: 'version, title e content sao obrigatorios' });
       }
 
@@ -5377,7 +5719,7 @@ async function startServer() {
         normalizedType,
         String(version).trim(),
         String(title).trim(),
-        String(content),
+        safePolicyContent,
         parseBooleanSetting(is_active, false) ? 1 : 0,
         parseBooleanSetting(force_reaccept, false) ? 1 : 0,
         Number(adminUser.id),
@@ -5454,7 +5796,7 @@ async function startServer() {
       const normalizedType = String(policy_type || '').trim().toLowerCase();
       const normalizedVersion = String(version || '').trim();
       const normalizedTitle = String(title || '').trim();
-      const normalizedContent = String(content || '');
+      const normalizedContent = sanitizeRichHtml(content).trim();
 
       if (!['privacy', 'terms', 'cookies'].includes(normalizedType)) {
         return res.status(400).json({ error: 'Tipo de politica invalido' });
@@ -7096,6 +7438,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const rows = await dbAsync.all('SELECT `key`, value FROM settings WHERE `key` IN ("smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_secure")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       
+      const allowInvalidTls = process.env.SMTP_ALLOW_INVALID_TLS === 'true';
       const transporter = nodemailer.createTransport({
         host: settings.smtp_host,
         port: Number(settings.smtp_port) || 587,
@@ -7105,7 +7448,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           pass: settings.smtp_pass
         },
         tls: {
-          rejectUnauthorized: false
+          rejectUnauthorized: !allowInvalidTls
         }
       });
 
@@ -8555,6 +8898,298 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       });
     } catch (error) {
       return res.status(500).json({ error: 'Erro ao buscar config PayPal' });
+    }
+  });
+
+  // --- MÓDULO FILE MANAGER ADMINISTRATIVO SEGURO ---
+  const ROOT_DIR = path.resolve(process.cwd(), 'public');
+  const DANGEROUS_EXTENSIONS = ['.php', '.phtml', '.php3', '.php4', '.php5', '.php7', '.phps', '.js', '.jsx', '.ts', '.tsx', '.sh', '.bat', '.cmd', '.exe', '.json', '.htaccess', '.config'];
+
+  function isDangerousFile(fileName) {
+    const ext = path.extname(fileName).toLowerCase();
+    return DANGEROUS_EXTENSIONS.includes(ext);
+  }
+
+  function getSafePath(inputPath) {
+    const resolvedPath = path.resolve(ROOT_DIR, inputPath || '');
+    const relative = path.relative(ROOT_DIR, resolvedPath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error('Acesso negado: Path Traversal detectado.');
+    }
+    return resolvedPath;
+  }
+
+  function getDiskSpaceInfo() {
+    const info = { total: 100 * 1024 * 1024 * 1024, free: 60 * 1024 * 1024 * 1024, used: 40 * 1024 * 1024 * 1024 };
+    try {
+      if (process.platform === 'win32') {
+        const currentDrive = process.cwd().includes(':') ? process.cwd().split(':')[0] + ':' : 'C:';
+        const { execSync } = require('child_process');
+        const output = execSync(`wmic logicaldisk where "DeviceID='${currentDrive}'" get FreeSpace,Size /format:list`, { encoding: 'utf8' });
+        const freeMatch = output.match(/FreeSpace=(\d+)/i);
+        const sizeMatch = output.match(/Size=(\d+)/i);
+        if (freeMatch && sizeMatch) {
+          const free = parseInt(freeMatch[1], 10);
+          const total = parseInt(sizeMatch[1], 10);
+          return { total, free, used: total - free };
+        }
+      } else {
+        const { execSync } = require('child_process');
+        const output = execSync('df -B1 / | tail -n 1', { encoding: 'utf8' });
+        const parts = output.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          const total = parseInt(parts[1], 10);
+          const used = parseInt(parts[2], 10);
+          const free = parseInt(parts[3], 10);
+          return { total, free, used };
+        }
+      }
+    } catch (err) {
+      console.error('Falha ao ler espaço em disco real, usando fallback:', err);
+    }
+    return info;
+  }
+
+  // GET /api/admin/files - Listar
+  app.get('/api/admin/files', authenticate, isAdmin, async (req, res) => {
+    try {
+      const queryPath = String(req.query.path || '').trim();
+      const targetDir = getSafePath(queryPath);
+      
+      if (!fs.existsSync(targetDir)) {
+        return res.status(404).json({ error: 'Diretório não encontrado' });
+      }
+
+      const stats = fs.statSync(targetDir);
+      if (!stats.isDirectory()) {
+        return res.status(400).json({ error: 'O caminho especificado não é um diretório' });
+      }
+
+      const files = fs.readdirSync(targetDir);
+      const items = files.map((fileName) => {
+        const fullPath = path.join(targetDir, fileName);
+        try {
+          const s = fs.statSync(fullPath);
+          return {
+            name: fileName,
+            isDir: s.isDirectory(),
+            size: s.size,
+            updatedAt: s.mtime,
+            relative: path.relative(ROOT_DIR, fullPath).replace(/\\/g, '/')
+          };
+        } catch (e) {
+          return null;
+        }
+      }).filter(Boolean);
+
+      const disk = getDiskSpaceInfo();
+      const currentRelative = path.relative(ROOT_DIR, targetDir).replace(/\\/g, '/');
+
+      return res.json({
+        currentPath: currentRelative,
+        items,
+        disk
+      });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Erro ao listar arquivos' });
+    }
+  });
+
+  // POST /api/admin/files/mkdir - Criar pasta
+  app.post('/api/admin/files/mkdir', authenticate, isAdmin, async (req, res) => {
+    try {
+      const baseDirInput = String(req.body.path || '').trim();
+      const folderName = String(req.body.name || '').trim();
+      if (!folderName || isDangerousFile(folderName) || folderName.includes('/') || folderName.includes('\\')) {
+        return res.status(400).json({ error: 'Nome de pasta inválido ou contendo caracteres proibidos' });
+      }
+
+      const baseDir = getSafePath(baseDirInput);
+      const targetPath = path.join(baseDir, folderName);
+      
+      // Validação final de Path Traversal
+      getSafePath(path.relative(ROOT_DIR, targetPath));
+
+      if (fs.existsSync(targetPath)) {
+        return res.status(400).json({ error: 'Já existe uma pasta ou arquivo com este nome' });
+      }
+
+      fs.mkdirSync(targetPath);
+      return res.json({ success: true, message: 'Diretório criado com sucesso!' });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Erro ao criar diretório' });
+    }
+  });
+
+  // POST /api/admin/files/rename - Renomear
+  app.post('/api/admin/files/rename', authenticate, isAdmin, async (req, res) => {
+    try {
+      const baseDirInput = String(req.body.path || '').trim();
+      const oldName = String(req.body.oldName || '').trim();
+      const newName = String(req.body.newName || '').trim();
+
+      if (!oldName || !newName || isDangerousFile(newName) || newName.includes('/') || newName.includes('\\')) {
+        return res.status(400).json({ error: 'Nome de arquivo inválido ou extensão perigosa' });
+      }
+
+      const baseDir = getSafePath(baseDirInput);
+      const oldPath = path.join(baseDir, oldName);
+      const newPath = path.join(baseDir, newName);
+
+      // Validação Path Traversal
+      getSafePath(path.relative(ROOT_DIR, oldPath));
+      getSafePath(path.relative(ROOT_DIR, newPath));
+
+      if (!fs.existsSync(oldPath)) {
+        return res.status(404).json({ error: 'Arquivo ou diretório original não encontrado' });
+      }
+      if (fs.existsSync(newPath)) {
+        return res.status(400).json({ error: 'Já existe um arquivo ou pasta com este nome' });
+      }
+
+      fs.renameSync(oldPath, newPath);
+      return res.json({ success: true, message: 'Renomeado com sucesso!' });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Erro ao renomear arquivo' });
+    }
+  });
+
+  // POST /api/admin/files/delete - Excluir
+  app.post('/api/admin/files/delete', authenticate, isAdmin, async (req, res) => {
+    try {
+      const baseDirInput = String(req.body.path || '').trim();
+      const name = String(req.body.name || '').trim();
+
+      if (!name) {
+        return res.status(400).json({ error: 'Nome do arquivo ou diretório é obrigatório' });
+      }
+
+      const baseDir = getSafePath(baseDirInput);
+      const targetPath = path.join(baseDir, name);
+
+      // Validação Path Traversal
+      getSafePath(path.relative(ROOT_DIR, targetPath));
+
+      if (!fs.existsSync(targetPath)) {
+        return res.status(404).json({ error: 'Arquivo ou diretório não encontrado' });
+      }
+
+      const stat = fs.statSync(targetPath);
+      if (stat.isDirectory()) {
+        fs.rmSync(targetPath, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(targetPath);
+      }
+
+      return res.json({ success: true, message: 'Excluído com sucesso!' });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Erro ao excluir' });
+    }
+  });
+
+  // Configuração do multer temporário para a API de arquivos
+  const fileManagerTempDir = path.join(process.cwd(), 'temp/uploads_temp');
+  if (!fs.existsSync(fileManagerTempDir)) {
+    fs.mkdirSync(fileManagerTempDir, { recursive: true });
+  }
+  const fileManagerUpload = multer({ dest: fileManagerTempDir });
+
+  // POST /api/admin/files/upload - Upload
+  app.post('/api/admin/files/upload', authenticate, isAdmin, fileManagerUpload.array('files'), async (req, res) => {
+    try {
+      const baseDirInput = String(req.body.path || '').trim();
+      const baseDir = getSafePath(baseDirInput);
+            const reqFiles = (req.files || []) as any;
+
+      if (reqFiles.length === 0) {
+        return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+      }
+
+      const uploadedFiles = [];
+      const skippedFiles = [];
+
+      for (const file of reqFiles) {
+        const originalName = file.originalname;
+        if (isDangerousFile(originalName)) {
+          fs.unlinkSync(file.path); // Apaga temporário perigoso
+          skippedFiles.push(originalName);
+          continue;
+        }
+
+        const targetPath = path.join(baseDir, originalName);
+        
+        // Validação Path Traversal final
+        getSafePath(path.relative(ROOT_DIR, targetPath));
+
+        // Mover com fallback EXDEV
+        try {
+          fs.renameSync(file.path, targetPath);
+        } catch (renameError) {
+          if (renameError.code === 'EXDEV') {
+            fs.copyFileSync(file.path, targetPath);
+            fs.unlinkSync(file.path);
+          } else {
+            throw renameError;
+          }
+        }
+        uploadedFiles.push(originalName);
+      }
+
+      return res.json({
+        success: true,
+        message: 'Upload concluído!',
+        uploaded: uploadedFiles,
+        skipped: skippedFiles
+      });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Erro ao realizar upload' });
+    }
+  });
+
+  // POST /api/admin/files/unzip - Descompactar ZIP com proteção Zip Slip
+  app.post('/api/admin/files/unzip', authenticate, isAdmin, async (req, res) => {
+    try {
+      const baseDirInput = String(req.body.path || '').trim();
+      const fileName = String(req.body.name || '').trim();
+
+      if (!fileName || path.extname(fileName).toLowerCase() !== '.zip') {
+        return res.status(400).json({ error: 'Apenas arquivos .zip são permitidos para extração' });
+      }
+
+      const baseDir = getSafePath(baseDirInput);
+      const zipPath = path.join(baseDir, fileName);
+
+      // Validação Path Traversal
+      getSafePath(path.relative(ROOT_DIR, zipPath));
+
+      if (!fs.existsSync(zipPath)) {
+        return res.status(404).json({ error: 'Arquivo ZIP não encontrado' });
+      }
+
+      const zip = new AdmZip(zipPath);
+      const zipEntries = zip.getEntries();
+
+      // Validação antecipada contra Zip Slip e extensões nocivas
+      for (const entry of zipEntries) {
+        if (entry.isDirectory) continue;
+        const entryName = entry.entryName;
+        
+        if (isDangerousFile(entryName)) {
+          return res.status(400).json({ error: `O arquivo contido '${entryName}' possui uma extensão proibida por segurança.` });
+        }
+
+        const targetPath = path.resolve(baseDir, entryName);
+        const relative = path.relative(baseDir, targetPath);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+          return res.status(400).json({ error: 'Acesso negado: Tentativa de Zip Slip detectada no arquivo ZIP.' });
+        }
+      }
+
+      // Extração segura
+      zip.extractAllTo(baseDir, true);
+      return res.json({ success: true, message: 'Arquivo ZIP descompactado com sucesso!' });
+    } catch (error) {
+      return res.status(400).json({ error: error.message || 'Erro ao descompactar arquivo ZIP' });
     }
   });
 

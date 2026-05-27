@@ -76,6 +76,7 @@ export async function sendEmail({ to, templateKey, variables = {} }: SendEmailPa
     const html = compileBody(templateVars);
 
     // 5. Send with Nodemailer
+    const allowInvalidTls = process.env.SMTP_ALLOW_INVALID_TLS === 'true';
     const transporter = nodemailer.createTransport({
       host: smtp_host,
       port: Number(smtp_port) || 587,
@@ -85,7 +86,7 @@ export async function sendEmail({ to, templateKey, variables = {} }: SendEmailPa
         pass: smtp_pass
       },
       tls: {
-        rejectUnauthorized: false
+        rejectUnauthorized: !allowInvalidTls
       }
     });
 

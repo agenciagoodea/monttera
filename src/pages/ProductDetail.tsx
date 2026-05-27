@@ -208,6 +208,10 @@ export default function ProductDetail() {
   }, [activeImageIndex, galleryImages]);
 
   const discount = product?.sale_price && product?.price ? Math.round((1 - product.sale_price / product.price) * 100) : 0;
+  const hasStitchCount = useMemo(() => {
+    const sc = String(product?.stitch_count ?? '').trim().toLowerCase();
+    return sc !== '' && sc !== '-' && sc !== '0' && sc !== 'n/a' && sc !== 'não informado' && sc !== 'nao informado' && sc !== 'undefined' && sc !== 'null';
+  }, [product?.stitch_count]);
   const gallery = galleryImages;
   const displayedImage = activeImage || gallery[activeImageIndex] || product?.image;
   const siteDisplayName = String(settings?.site_name || 'Digital Bordados').trim();
@@ -628,18 +632,20 @@ export default function ProductDetail() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-            <div className="p-4 bg-white border border-slate-200 rounded-2xl">
-              <div className="flex items-center gap-2 mb-1 text-slate-500">
-                <Hash className="w-4 h-4" />
-                <p className="text-[11px] font-bold uppercase tracking-widest">Pontos</p>
+                    <div className={`grid grid-cols-1 ${hasStitchCount ? 'sm:grid-cols-2' : ''} gap-4 mb-6`}>
+            {hasStitchCount && (
+              <div className="p-4 bg-white border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-2 mb-1 text-slate-500">
+                  <Hash className="w-4 h-4" />
+                  <p className="text-[11px] font-bold uppercase tracking-widest">Pontos</p>
+                </div>
+                <p className="text-base font-black text-slate-800">{product.stitch_count}</p>
               </div>
-              <p className="text-base font-black text-slate-800">{product.stitch_count ?? '-'}</p>
-            </div>
+            )}
             <div className="p-4 bg-white border border-slate-200 rounded-2xl">
               <div className="flex items-center gap-2 mb-1 text-slate-500">
                 <Palette className="w-4 h-4" />
-                <p className="text-[11px] font-bold uppercase tracking-widest">Cores</p>
+                <p className="text-[11px] font-bold uppercase tracking-widest">Sequência de Cores</p>
               </div>
               <p className="text-base font-black text-blue-700">{product.colors || '1'}</p>
             </div>

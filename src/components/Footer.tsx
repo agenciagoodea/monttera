@@ -91,12 +91,12 @@ export default function Footer() {
           {/* Payment Methods */}
           <div className="lg:col-span-2">
             <h4 className="text-white font-black mb-10 uppercase text-xs tracking-[0.3em] opacity-50">Pagamento</h4>
-            <div className="grid grid-cols-2 gap-3">
-              {['Visa', 'Master', 'Hiper', 'Elo', 'Pix', 'PayPal'].map(p => (
-                <div key={p} className="bg-white/10 border border-white/10 rounded-xl py-3 flex items-center justify-center text-[10px] font-black text-white/80 uppercase tracking-widest backdrop-blur-sm">
-                  {p}
-                </div>
-              ))}
+            <div className="flex items-center justify-start">
+              <img 
+                src="/uploads/pagamentos.webp" 
+                alt="Formas de pagamento aceitas" 
+                className="w-full h-auto object-contain max-h-16"
+              />
             </div>
           </div>
         </div>
@@ -115,8 +115,8 @@ export default function Footer() {
              <div className="flex items-center gap-4 bg-white/5 border border-white/10 px-6 py-3 rounded-2xl backdrop-blur-md">
                 <ShieldCheck className="w-6 h-6 text-emerald-400" />
                 <span className="text-[10px] font-black text-white/80 uppercase tracking-widest leading-tight">
-                  Ambiente Seguro<br/>
-                  <span className="text-[8px] text-white/40 font-bold uppercase tracking-widest">Proteção SSL 256-bit</span>
+                   Ambiente Seguro<br/>
+                   <span className="text-[8px] text-white/40 font-bold uppercase tracking-widest">Proteção SSL 256-bit</span>
                 </span>
              </div>
              <div className="flex gap-8 text-[11px] font-black text-white/60 uppercase tracking-widest">

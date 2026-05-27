@@ -488,7 +488,7 @@ export default function CartPage() {
         </div>
         <div className="w-full xl:w-auto xl:max-w-[960px] flex flex-col md:flex-row md:items-center gap-3">
           <div className="bg-[#eaf4fc] border border-blue-100 rounded-2xl p-4 text-[12px] text-blue-900 leading-relaxed shadow-sm flex-1">
-            <p className="font-bold mb-1 text-blue-950">Neste pacote cont?m arquivos: PES - JEF - DST - EXP - XXX</p>
+            <p className="font-bold mb-1 text-blue-950">Neste pacote contém arquivos: PES - JEF - DST - EXP - XXX</p>
             <p>
               Após a finalização da sua compra, caso você não seja redirecionado automaticamente para download, acesse o Painel do Cliente no menu superior do site clicando na opção <strong>"Matrizes Compradas"</strong> para visualizar e baixar seus arquivos.
             </p>
@@ -496,7 +496,7 @@ export default function CartPage() {
           <div className="w-full xl:w-[390px] rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
             <img
               src={securityImageSrc}
-              alt="Selo de seguran?a da compra"
+              alt="Selo de segurança da compra"
               onError={() => {
                 if (securityImageSrc.endsWith('/seguranca')) setSecurityImageSrc('/uploads/seguranca.jpeg');
               }}
