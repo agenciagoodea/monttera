@@ -1393,9 +1393,6 @@ function findSlugMediaFallbacks(slug: string, kind: 'image' | 'pdf', productId?:
 function resolvePublicMediaWithFallback(mediaUrl: unknown, slug: string, kind: 'image' | 'pdf', productId?: number): string {
   const normalized = normalizePublicMediaUrl(mediaUrl);
   if (normalized) {
-    if (normalized.startsWith('/uploads/') && !publicUrlFileExists(normalized)) {
-      return '';
-    }
     return normalized;
   }
   return '';
@@ -3430,14 +3427,27 @@ async function startServer() {
     const privateUploadsDir = path.resolve(process.cwd(), 'uploads', 'arquivos');
 
     const imageUpload = files['image']?.[0];
-    const nextImagePath = imageUpload
-      ? (() => {
-          const ext = path.extname(imageUpload.originalname || imageUpload.filename || '').toLowerCase() || '.jpg';
-          const finalName = buildProductMediaName(nextSlug, productId, ext);
-          moveUploadedFileToFinalPath(imageUpload, publicUploadsDir, finalName);
-          return `/uploads/${finalName}`;
-        })()
-      : existingProduct.image;
+    let nextImagePath = existingProduct.image;
+    if (imageUpload) {
+      // A saída final sempre será .jpg (após watermark)
+      const finalName = buildProductMediaName(nextSlug, productId, '.jpg');
+      const physicalPath = path.join(publicUploadsDir, finalName);
+      const tempPath = imageUpload.path;
+
+      // Aplicar marca d'água
+      await applyWatermark(tempPath, physicalPath);
+
+      // Remover arquivo temporário original
+      if (fs.existsSync(tempPath) && tempPath !== physicalPath) {
+        try { fs.unlinkSync(tempPath); } catch (_) { /* ignorar */ }
+      }
+
+      // Validação física estrita
+      if (!fs.existsSync(physicalPath)) {
+        return res.status(500).json({ error: 'Erro de disco: A imagem principal editada não pôde ser gravada fisicamente no servidor.' });
+      }
+      nextImagePath = `/uploads/${finalName}`;
+    }
 
     const productionSheetUpload = files['production_sheet']?.[0];
     const generatedProductionSheetPath = productionSheetUpload
