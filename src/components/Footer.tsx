@@ -29,8 +29,8 @@ export default function Footer() {
           <div className="lg:col-span-5 space-y-10">
             <Link to="/" className="flex flex-col group">
               {settings.logo_url ? (
-                <div className="bg-white/95 p-4 rounded-3xl w-fit shadow-xl shadow-black/10">
-                  <img src={settings.logo_url} alt={settings.site_name} className="h-20 w-auto object-contain" />
+                <div className="bg-white/95 p-5 rounded-3xl w-fit shadow-xl shadow-black/10">
+                  <img src={settings.logo_url} alt={settings.site_name} className="h-28 w-auto object-contain" />
                 </div>
               ) : (
                 <div className="flex flex-col">

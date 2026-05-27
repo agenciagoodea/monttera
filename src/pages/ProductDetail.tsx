@@ -642,13 +642,15 @@ export default function ProductDetail() {
                 <p className="text-base font-black text-slate-800">{product.stitch_count}</p>
               </div>
             )}
-            <div className="p-4 bg-white border border-slate-200 rounded-2xl">
-              <div className="flex items-center gap-2 mb-1 text-slate-500">
-                <Palette className="w-4 h-4" />
-                <p className="text-[11px] font-bold uppercase tracking-widest">Sequência de Cores</p>
+            {product.colors && String(product.colors).trim() !== '' && (
+              <div className="p-4 bg-white border border-slate-200 rounded-2xl">
+                <div className="flex items-center gap-2 mb-1 text-slate-500">
+                  <Palette className="w-4 h-4" />
+                  <p className="text-[11px] font-bold uppercase tracking-widest">Sequência de Cores</p>
+                </div>
+                <p className="text-base font-black text-blue-700">{product.colors}</p>
               </div>
-              <p className="text-base font-black text-blue-700">{product.colors || '1'}</p>
-            </div>
+            )}
           </div>
           {product.short_description && (
             <div 

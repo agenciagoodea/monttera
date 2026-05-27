@@ -160,6 +160,13 @@ export default function CartPage() {
           const profile = data?.user ?? data;
           if (profile && !profile.error) {
             const [firstName, ...rest] = String(profile.name || '').split(' ');
+            // Separar rua e número: billing_address pode vir com número embutido (ex: "Rua X, 315")
+            const rawStreet = String(profile.billing_address || profile.address || '');
+            const rawNumber = String(profile.billing_number || profile.number || '');
+            // Remove o número concatenado ao final da rua, se existir
+            const cleanStreet = rawNumber && rawStreet
+              ? rawStreet.replace(new RegExp(',?\\s*' + rawNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$'), '').trim()
+              : rawStreet;
             setPayer(prev => ({
               ...prev,
               email: String(profile.email || user.email || prev.email),
@@ -167,8 +174,8 @@ export default function CartPage() {
               last_name: String(profile.last_name || rest.join(' ') || prev.last_name),
               cpf: String(profile.cpf || prev.cpf),
               zip_code: String(profile.billing_zip || profile.zip || prev.zip_code),
-              street: String(profile.billing_address || profile.address || prev.street),
-              number: String(profile.billing_number || profile.number || prev.number),
+              street: cleanStreet || prev.street,
+              number: rawNumber || prev.number,
               neighborhood: String(profile.billing_neighborhood || profile.neighborhood || profile.district || prev.neighborhood),
               city: String(profile.billing_city || profile.city || prev.city),
               state: String(profile.billing_state || profile.state || prev.state),
