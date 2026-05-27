@@ -426,7 +426,7 @@ export default function ProductDetail() {
             onMouseEnter={() => setIsImageHovered(true)}
             onMouseLeave={() => setIsImageHovered(false)}
           >
-            <div className="aspect-square relative flex items-center justify-center p-8 bg-slate-50/50">
+            <div className="aspect-square relative flex items-center justify-center bg-slate-50/50">
               <div className="absolute inset-0 opacity-[0.03] pointer-events-none grid grid-cols-4 grid-rows-4 rotate-12 scale-150 select-none">
                 {Array.from({ length: 16 }).map((_, i) => (
                   <span key={i} className="text-[10px] font-black uppercase text-slate-900 flex items-center justify-center">
@@ -451,7 +451,7 @@ export default function ProductDetail() {
                       console.debug('[ProductDetail] image load error:', failedSrc);
                     }
                   }}
-                  className="w-full h-full object-contain relative z-10 drop-shadow-2xl will-change-transform" 
+                  className="w-full h-full object-cover relative z-10 will-change-transform" 
                 />
               </AnimatePresence>
 
@@ -909,8 +909,8 @@ export default function ProductDetail() {
                 data-related-card="true"
                 className="group snap-start shrink-0 basis-[82%] sm:basis-[46%] lg:basis-[31%] xl:basis-[24%] bg-white border border-slate-100 rounded-3xl p-4 transition-all hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1"
               >
-                <div className="aspect-square bg-slate-50 rounded-2xl overflow-hidden mb-4 p-4 relative">
-                  <img src={rel.image} alt={rel.name} loading="lazy" className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-500" />
+                <div className="aspect-square bg-slate-50 rounded-2xl overflow-hidden mb-4 relative">
+                  <img src={rel.image} alt={rel.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                   {rel.sale_price && (
                     <div className="absolute top-3 right-3 bg-red-500 text-white text-[9px] font-black px-2 py-1 rounded-full uppercase">
                       {Math.round((1 - rel.sale_price / rel.price) * 100)}% OFF

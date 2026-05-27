@@ -3699,7 +3699,7 @@ async function startServer() {
           source.seo_keywords || null,
           null, // canonical_url reset for duplicate
           source.noindex ?? 0,
-          source.status || 'active',
+          'draft', // always create duplicate as draft — must be manually published
         ] as any);
         const newId = Number((result as any).insertId || 0);
         if (!newId) throw new Error('duplicate_insert_failed');
