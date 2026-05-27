@@ -57,12 +57,20 @@ async function applyWatermark(inputPath: string, outputPath: string): Promise<vo
 
   // Aplicar marca d'água sobre a imagem base:
   // 1. Flatten com fundo branco sólido (#ffffff) para lidar com fundos transparentes de PNG/WEBP
-  // 2. Redimensiona para 1080x1080 fit cover, centralizado
-  // 3. Aplica o composite da marca d'água por cima
-  // 4. Salva como JPG qualidade 90
+  // 2. Redimensiona proporcionalmente para caber em 1060x1060 (fit: contain) sem cortes, com fundo branco
+  // 3. Estende 10px em toda a volta (top, bottom, left, right) com fundo branco, totalizando exatamente 1080x1080
+  // 4. Aplica o composite da marca d'água de 1080x1080 por cima
+  // 5. Salva como JPG qualidade 90
   await sharp(inputPath)
     .flatten({ background: '#ffffff' })
-    .resize(1080, 1080, { fit: 'cover', position: 'center' })
+    .resize(1060, 1060, { fit: 'contain', background: '#ffffff' })
+    .extend({
+      top: 10,
+      bottom: 10,
+      left: 10,
+      right: 10,
+      background: '#ffffff'
+    })
     .composite([{ input: watermarkBuffer, gravity: 'center' }])
     .jpeg({ quality: 90 })
     .toFile(outputPath);
