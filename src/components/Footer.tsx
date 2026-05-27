@@ -92,11 +92,11 @@ export default function Footer() {
           <div className="lg:col-span-2">
             <h4 className="text-white font-black mb-10 uppercase text-xs tracking-[0.3em] opacity-50">Pagamento</h4>
             <div className="flex items-center justify-start">
-              <div className="bg-white/95 p-4 rounded-3xl w-fit shadow-xl shadow-black/10 flex items-center justify-center">
+              <div className="bg-white/95 p-5 rounded-[2.2rem] w-fit shadow-xl shadow-black/10 flex items-center justify-center hover:scale-105 transition-transform duration-300">
                 <img 
                   src="/uploads/pagamentos.webp" 
                   alt="Formas de pagamento aceitas" 
-                  className="h-10 w-auto object-contain"
+                  className="h-16 w-auto object-contain"
                 />
               </div>
             </div>

@@ -1629,7 +1629,7 @@ export default function AdminProductForm() {
       {/* MODAL POPUP: GERENCIAR IMAGEM PRINCIPAL */}
       {isMainImageModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2rem] border border-slate-100 p-6 md:p-8 max-w-lg w-full shadow-2xl space-y-6">
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 p-6 md:p-10 max-w-5xl w-full shadow-2xl space-y-8">
             <div className="flex items-center justify-between border-b border-slate-50 pb-4">
               <div>
                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Imagem Principal</h3>
@@ -1702,7 +1702,7 @@ export default function AdminProductForm() {
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto p-1 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-4 max-h-[30rem] overflow-y-auto p-2 bg-slate-50 rounded-3xl border border-slate-100">
                     {serverImages.map((url, i) => {
                       const isSelected = selectedGalleryImage === url;
                       return (
@@ -1735,7 +1735,7 @@ export default function AdminProductForm() {
                 <div className="flex flex-col items-center justify-center bg-slate-50 rounded-3xl p-6 min-h-[200px] relative border border-slate-100 overflow-hidden">
                   {previews.main ? (
                     <div className="space-y-4 w-full text-center">
-                      <div className="aspect-video w-full max-w-xs mx-auto rounded-2xl overflow-hidden border border-slate-200 shadow-md">
+                      <div className="aspect-video w-full max-w-md mx-auto rounded-3xl overflow-hidden border border-slate-200 shadow-md">
                         <img src={previews.main} className="w-full h-full object-cover" />
                       </div>
                       <div className="text-center text-[10px] font-bold text-slate-500 truncate max-w-full px-4">
