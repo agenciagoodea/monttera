@@ -42,12 +42,19 @@ export default function AdminProductList() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [pagination, setPagination] = useState<PaginationData>({
     page: 1,
     limit: 10,
     total: 0,
     pages: 1
   });
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const fetchProducts = async (page = 1) => {
     setLoading(true);
@@ -113,6 +120,29 @@ export default function AdminProductList() {
     }
   };
 
+  const handleToggleStatus = async (id: number, currentStatus: string | null) => {
+    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    try {
+      const res = await fetch(`/api/admin/products/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setProducts(prev => prev.map(p => p.id === id ? { ...p, status: newStatus } : p));
+        setToast({
+          message: newStatus === 'active' ? 'Produto ativado com sucesso' : 'Produto desativado com sucesso',
+          type: 'success'
+        });
+      } else {
+        setToast({ message: data.error || 'Erro ao atualizar status', type: 'error' });
+      }
+    } catch (error) {
+      setToast({ message: 'Erro ao conectar ao servidor', type: 'error' });
+    }
+  };
+
   const toCurrencyNumber = (value: unknown) => {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : 0;
@@ -120,6 +150,14 @@ export default function AdminProductList() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
+      {/* Toast de Confirmação Visual elegante */}
+      {toast && (
+        <div className={`fixed top-6 right-6 z-50 px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300 border ${
+          toast.type === 'success' ? 'bg-emerald-550 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
+        }`} style={{ backgroundColor: toast.type === 'success' ? '#ecfdf5' : '#fdf2f2', zIndex: 9999 }}>
+          {toast.message}
+        </div>
+      )}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
           <h1 className="text-3xl font-black text-slate-800 uppercase tracking-tight">Produtos</h1>
@@ -227,15 +265,21 @@ export default function AdminProductList() {
                   </td>
                   <td className="px-8 py-6">
                     <div className="flex justify-center">
-                      {product.status === 'active' ? (
-                        <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[9px] font-black uppercase tracking-widest">
-                          <CheckCircle2 className="w-3 h-3" /> Ativo
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-500 rounded-full text-[9px] font-black uppercase tracking-widest">
-                          <XCircle className="w-3 h-3" /> Inativo
-                        </span>
-                      )}
+                      <button
+                        onClick={() => handleToggleStatus(product.id, product.status)}
+                        className="group/btn relative transition-transform active:scale-95"
+                        title={product.status === 'active' ? 'Clique para desativar produto' : 'Clique para ativar produto'}
+                      >
+                        {product.status === 'active' ? (
+                          <span className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 hover:text-emerald-700 transition-all border border-emerald-100 group-hover/btn:scale-105">
+                            <CheckCircle2 className="w-3 h-3" /> Ativo
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-500 rounded-full text-[9px] font-black uppercase tracking-widest hover:bg-slate-200 hover:text-slate-700 transition-all border border-slate-200 group-hover/btn:scale-105">
+                            <XCircle className="w-3 h-3" /> Inativo
+                          </span>
+                        )}
+                      </button>
                     </div>
                   </td>
                   <td className="px-8 py-6">

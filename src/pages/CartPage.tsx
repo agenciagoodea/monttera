@@ -152,6 +152,34 @@ export default function CartPage() {
     return 'px-4 py-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs font-semibold text-emerald-700';
   };
 
+  const parseLegacyAddress = (rawValue: string | null | undefined) => {
+    const raw = String(rawValue || '').trim();
+    if (!raw) return { address: '', number: '', complement: '' };
+
+    let base = raw;
+    let complement = '';
+    const complementMatch = raw.match(/^(.*?)(?:\s+-\s+)(.+)$/);
+    if (complementMatch) {
+      base = complementMatch[1].trim();
+      complement = complementMatch[2].trim();
+    }
+
+    let address = base;
+    let number = '';
+    const numberMatch = base.match(/^(.*?)(?:,\s*)([0-9A-Za-z\-\/]+)$/);
+    if (numberMatch) {
+      address = numberMatch[1].trim();
+      number = numberMatch[2].trim();
+      const escapedNumber = number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const duplicatedSuffix = new RegExp(`^(.*?)(?:,\\s*${escapedNumber})$`);
+      while (duplicatedSuffix.test(address)) {
+        address = address.replace(duplicatedSuffix, '$1').trim();
+      }
+    }
+
+    return { address, number, complement };
+  };
+
   useEffect(() => {
     if (user) {
       fetch('/api/customer/account')
@@ -160,13 +188,11 @@ export default function CartPage() {
           const profile = data?.user ?? data;
           if (profile && !profile.error) {
             const [firstName, ...rest] = String(profile.name || '').split(' ');
-            // Separar rua e número: billing_address pode vir com número embutido (ex: "Rua X, 315")
+            
+            // Usar o parser padrão para extrair rua e número separados
             const rawStreet = String(profile.billing_address || profile.address || '');
-            const rawNumber = String(profile.billing_number || profile.number || '');
-            // Remove o número concatenado ao final da rua, se existir
-            const cleanStreet = rawNumber && rawStreet
-              ? rawStreet.replace(new RegExp(',?\\s*' + rawNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$'), '').trim()
-              : rawStreet;
+            const parsed = parseLegacyAddress(rawStreet);
+
             setPayer(prev => ({
               ...prev,
               email: String(profile.email || user.email || prev.email),
@@ -174,8 +200,8 @@ export default function CartPage() {
               last_name: String(profile.last_name || rest.join(' ') || prev.last_name),
               cpf: String(profile.cpf || prev.cpf),
               zip_code: String(profile.billing_zip || profile.zip || prev.zip_code),
-              street: cleanStreet || prev.street,
-              number: rawNumber || prev.number,
+              street: parsed.address || prev.street,
+              number: parsed.number || prev.number,
               neighborhood: String(profile.billing_neighborhood || profile.neighborhood || profile.district || prev.neighborhood),
               city: String(profile.billing_city || profile.city || prev.city),
               state: String(profile.billing_state || profile.state || prev.state),

@@ -38,25 +38,43 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /**
  * Aplica marca d'água sobre uma imagem de produto.
  * - A marca d'água (/public/uploads/marcadagua.png) é redimensionada para 1080x1080 e sobreposta sobre a imagem.
+ * - Mescla transparências de PNG/WEBP em um fundo branco sólido para evitar fundo preto indesejado.
  * - A imagem final é sempre salva como JPG qualidade 90%, em 1080x1080 (cover centralizado).
  * - Se marcadagua.png não existir, lança erro com mensagem clara.
+ * - Efetua checagens estritas de existência e tamanho de disco pós-processamento.
  */
 async function applyWatermark(inputPath: string, outputPath: string): Promise<void> {
   const watermarkPath = path.join(process.cwd(), 'public', 'uploads', 'marcadagua.png');
   if (!fs.existsSync(watermarkPath)) {
     throw new Error('Arquivo de marca d\'água não encontrado em /public/uploads/marcadagua.png. Envie o arquivo antes de fazer upload de imagens.');
   }
+
   // Redimensionar marca d'água para 1080x1080 cobrindo tudo
   const watermarkBuffer = await sharp(watermarkPath)
     .resize(1080, 1080, { fit: 'fill' })
     .png()
     .toBuffer();
-  // Aplicar marca d'água sobre a imagem base (1080x1080, cover centralizado) → JPG 90%
+
+  // Aplicar marca d'água sobre a imagem base:
+  // 1. Flatten com fundo branco sólido (#ffffff) para lidar com fundos transparentes de PNG/WEBP
+  // 2. Redimensiona para 1080x1080 fit cover, centralizado
+  // 3. Aplica o composite da marca d'água por cima
+  // 4. Salva como JPG qualidade 90
   await sharp(inputPath)
+    .flatten({ background: '#ffffff' })
     .resize(1080, 1080, { fit: 'cover', position: 'center' })
     .composite([{ input: watermarkBuffer, gravity: 'center' }])
     .jpeg({ quality: 90 })
     .toFile(outputPath);
+
+  // Validações físicas estritas pós-processamento
+  if (!fs.existsSync(outputPath)) {
+    throw new Error('Erro de gravação física: O arquivo JPG final processado com marca d\'água não pôde ser encontrado no disco.');
+  }
+  const stats = fs.statSync(outputPath);
+  if (stats.size === 0) {
+    throw new Error('Erro de gravação física: O arquivo processado resultante com marca d\'água possui tamanho igual a zero.');
+  }
 }
 
 
@@ -3798,6 +3816,31 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Erro ao excluir produto' });
+    }
+  });
+
+  app.patch('/api/admin/products/:id/status', authenticate, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'inactive'].includes(status)) {
+      return res.status(400).json({ error: 'Status inválido. Use "active" ou "inactive"' });
+    }
+
+    try {
+      const product = await dbAsync.get('SELECT id, name FROM products WHERE id = ?', id);
+      if (!product) {
+        return res.status(404).json({ error: 'Produto não encontrado' });
+      }
+
+      await dbAsync.run('UPDATE products SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', status, id);
+      
+      console.log(`[Admin Product Status Update] Produto ID ${id} alterado para status ${status} pelo admin ID ${(req as any).user?.id}`);
+
+      return res.json({ success: true, message: `Produto ${status === 'active' ? 'ativado' : 'desativado'} com sucesso` });
+    } catch (error) {
+      console.error('Failed to update product status:', error);
+      return res.status(500).json({ error: 'Erro ao atualizar status do produto no banco de dados' });
     }
   });
 
@@ -8477,53 +8520,35 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         is_new: resolveProductIsNew(productRow, newBadgeDays),
       };
 
-      // Related products: prioritize same category best-sellers; fill with random actives if needed.
-      const categoryRows = await dbAsync.all(`
-        SELECT DISTINCT category_id
-        FROM product_category_relations
-        WHERE product_id = ? AND category_id IS NOT NULL
-      `, product.id) as any[];
+      // Related products: prioritize same category (strict parent/child hierarchy)
+      let relatedCategoryId = product.category_id;
+      let isChildCategory = false;
 
-      const categoryIds = Array.from(
-        new Set(
-          [product.category_id, ...categoryRows.map((row) => row.category_id)]
-            .map((value) => Number(value))
-            .filter((value) => Number.isFinite(value) && value > 0),
-        ),
-      );
+      if (product.category_id) {
+        if (product.category_parent_id) {
+          isChildCategory = true;
+        }
+      } else {
+        const firstRelation = await dbAsync.get(`
+          SELECT pc.id, pc.parent_id
+          FROM product_category_relations pcr
+          JOIN product_categories pc ON pcr.category_id = pc.id
+          WHERE pcr.product_id = ?
+          LIMIT 1
+        `, product.id) as any;
+
+        if (firstRelation) {
+          relatedCategoryId = firstRelation.id;
+          if (firstRelation.parent_id) {
+            isChildCategory = true;
+          }
+        }
+      }
 
       const maxRelated = 24;
       let relatedRows: any[] = [];
-      if (categoryIds.length > 0) {
-        const placeholders = categoryIds.map(() => '?').join(', ');
-        relatedRows = await dbAsync.all(`
-          SELECT
-            p.*,
-            COALESCE(SUM(
-              CASE
-                WHEN o.status IN ('paid', 'approved', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing') THEN oi.quantity
-                ELSE 0
-              END
-            ), 0) AS sold_qty,
-            CASE
-              WHEN p.category_id IN (${placeholders}) OR pcr.category_id IN (${placeholders}) THEN 2
-              ELSE 0
-            END AS relevance_score
-          FROM products p
-          LEFT JOIN product_category_relations pcr ON pcr.product_id = p.id
-          LEFT JOIN order_items oi ON oi.product_id = p.id
-          LEFT JOIN orders o ON o.id = oi.order_id
-          WHERE p.id != ?
-            AND p.status = 'active'
-            AND (
-              p.category_id IN (${placeholders})
-              OR pcr.category_id IN (${placeholders})
-            )
-          GROUP BY p.id
-          ORDER BY sold_qty DESC, relevance_score DESC, p.created_at DESC, p.id DESC
-          LIMIT ?
-        `, ...categoryIds, ...categoryIds, product.id, ...categoryIds, ...categoryIds, maxRelated) as any[];
-      } else {
+
+      if (relatedCategoryId) {
         relatedRows = await dbAsync.all(`
           SELECT
             p.*,
@@ -8534,17 +8559,23 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
               END
             ), 0) AS sold_qty
           FROM products p
+          LEFT JOIN product_category_relations pcr ON pcr.product_id = p.id
           LEFT JOIN order_items oi ON oi.product_id = p.id
           LEFT JOIN orders o ON o.id = oi.order_id
           WHERE p.id != ?
             AND p.status = 'active'
+            AND (
+              p.category_id = ?
+              OR pcr.category_id = ?
+            )
           GROUP BY p.id
           ORDER BY sold_qty DESC, p.created_at DESC, p.id DESC
           LIMIT ?
-        `, product.id, maxRelated) as any[];
+        `, product.id, relatedCategoryId, relatedCategoryId, maxRelated) as any[];
       }
 
-      if (relatedRows.length < maxRelated) {
+      // Se for categoria PAI e não tiver itens suficientes, ou se não houver categoria, preencher com RAND
+      if (!isChildCategory && relatedRows.length < maxRelated) {
         const existingIds = new Set<number>(relatedRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id)));
         const missing = maxRelated - relatedRows.length;
         const fallbackRows = await dbAsync.all(`
@@ -8618,7 +8649,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Reviews Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // -------------------------------- Reviews --------------------------------
   app.get('/api/products/:slug/reviews', async (req, res) => {
     try {
       const { slug } = req.params;
@@ -8669,7 +8700,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
 
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ PayPal Utilities Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // -------------------------------- PayPal Utilities --------------------------------
 
   async function getPayPalConfig() {
     const s = await loadSettingsMapAsync([
@@ -8678,18 +8709,19 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       'paypal_production_client_id', 'paypal_production_client_secret',
       'paypal_default_currency', 'paypal_brl_usd_rate', 'paypal_brl_eur_rate', 'paypal_webhook_id',
     ]);
-    const mode = (process.env.PAYPAL_MODE || s.paypal_mode || 'sandbox').toLowerCase() as 'sandbox' | 'production';
+    // Prioridade máxima para as configurações alteradas/salvas no banco de dados (settings)
+    const mode = (s.paypal_mode || process.env.PAYPAL_MODE || 'sandbox').toLowerCase() as 'sandbox' | 'production';
     const clientId = mode === 'production'
-      ? (process.env.PAYPAL_PRODUCTION_CLIENT_ID || s.paypal_production_client_id || '')
-      : (process.env.PAYPAL_SANDBOX_CLIENT_ID || s.paypal_sandbox_client_id || '');
+      ? (s.paypal_production_client_id || process.env.PAYPAL_PRODUCTION_CLIENT_ID || '')
+      : (s.paypal_sandbox_client_id || process.env.PAYPAL_SANDBOX_CLIENT_ID || '');
     const clientSecret = mode === 'production'
-      ? (process.env.PAYPAL_PRODUCTION_CLIENT_SECRET || s.paypal_production_client_secret || '')
-      : (process.env.PAYPAL_SANDBOX_CLIENT_SECRET || s.paypal_sandbox_client_secret || '');
-    const rawCurrency = String(process.env.PAYPAL_DEFAULT_CURRENCY || s.paypal_default_currency || 'USD').toUpperCase();
+      ? (s.paypal_production_client_secret || process.env.PAYPAL_PRODUCTION_CLIENT_SECRET || '')
+      : (s.paypal_sandbox_client_secret || process.env.PAYPAL_SANDBOX_CLIENT_SECRET || '');
+    const rawCurrency = String(s.paypal_default_currency || process.env.PAYPAL_DEFAULT_CURRENCY || 'USD').toUpperCase();
     const currency = (['BRL', 'USD', 'EUR'].includes(rawCurrency) ? rawCurrency : 'USD') as 'BRL' | 'USD' | 'EUR';
-    const usdRate = parseFloat(process.env.PAYPAL_BRL_USD_RATE || s.paypal_brl_usd_rate || '5.20');
-    const eurRate = parseFloat(process.env.PAYPAL_BRL_EUR_RATE || s.paypal_brl_eur_rate || '6.00');
-    const webhookId = process.env.PAYPAL_WEBHOOK_ID || s.paypal_webhook_id || '';
+    const usdRate = parseFloat(s.paypal_brl_usd_rate || process.env.PAYPAL_BRL_USD_RATE || '5.20');
+    const eurRate = parseFloat(s.paypal_brl_eur_rate || process.env.PAYPAL_BRL_EUR_RATE || '6.00');
+    const webhookId = s.paypal_webhook_id || process.env.PAYPAL_WEBHOOK_ID || '';
     const enabled = (s.paypal_enabled === 'true');
     return {
       mode,

@@ -303,6 +303,7 @@ export default function AdminProductForm() {
     if (!id) {
       setMainImage(null);
       setPreviews(prev => ({ ...prev, main: '' }));
+      setActiveModalTab('upload'); // Garante que fica na aba de upload vazia
       return;
     }
 
@@ -321,7 +322,8 @@ export default function AdminProductForm() {
 
       setPreviews(prev => ({ ...prev, main: '' }));
       setMainImage(null);
-      setIsMainImageModalOpen(false);
+      setActiveModalTab('upload'); // Fica na aba de upload vazia após remover
+      // REMOVIDO: setIsMainImageModalOpen(false); -> mantêm o popup aberto!
     } catch (err: any) {
       setModalError(err.message || 'Falha ao remover arquivo.');
     } finally {
