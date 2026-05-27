@@ -7701,14 +7701,14 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   app.put('/api/admin/email-templates/:key', authenticate, isAdmin, async (req, res) => {
     try {
       const { subject, body } = req.body;
-      if (!subject || !body) return res.status(400).json({ error: 'Subject e body sÃƒÂ£o obrigatÃƒÂ³rios' });
+      if (!subject || !body) return res.status(400).json({ error: 'Subject e body são obrigatórios' });
 
       const changes = await dbAsync.run(
         'UPDATE email_templates SET subject = ?, body = ? WHERE `key` = ?',
         subject, body, req.params.key
       );
 
-      if (changes.changes === 0) return res.status(404).json({ error: 'Template nÃƒÂ£o encontrado' });
+      if (changes.changes === 0) return res.status(404).json({ error: 'Template não encontrado' });
       res.json({ success: true });
     } catch (error) {
       console.error('Error updating email template:', error);
@@ -7752,10 +7752,10 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   app.post('/api/admin/email/send-test', authenticate, isAdmin, async (req, res) => {
     try {
       const { to, template_key } = req.body;
-      if (!to || !template_key) return res.status(400).json({ error: 'DestinatÃƒÂ¡rio e template_key sÃƒÂ£o obrigatÃƒÂ³rios' });
+      if (!to || !template_key) return res.status(400).json({ error: 'Destinatário e template_key são obrigatórios' });
 
       const testVars = {
-        name: 'UsuÃƒÂ¡rio Teste',
+        name: 'Usuário Teste',
         email: to,
         login_url: 'https://digitalbordados.com.br/login',
         reset_url: 'https://digitalbordados.com.br/redefinir-senha?token=test',
