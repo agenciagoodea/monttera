@@ -102,6 +102,8 @@ export default function AdminProductForm() {
   const [isMainImageModalOpen, setIsMainImageModalOpen] = useState(false);
   const [activeModalTab, setActiveModalTab] = useState<'gallery' | 'upload'>('gallery');
   const [selectedGalleryImage, setSelectedGalleryImage] = useState<string | null>(null);
+  const [serverImages, setServerImages] = useState<string[]>([]);
+  const [loadingServerImages, setLoadingServerImages] = useState(false);
   const [modalUploadLoading, setModalUploadLoading] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const productionSheetFileName = productionSheetFile?.name || (() => {
@@ -362,6 +364,27 @@ export default function AdminProductForm() {
       setModalError(err.message || 'Falha ao gravar arquivo no servidor.');
     } finally {
       setModalUploadLoading(false);
+    }
+  };
+
+  const fetchServerImages = async () => {
+    setLoadingServerImages(true);
+    setModalError(null);
+    try {
+      const res = await fetch('/api/admin/files?rootKey=public-uploads');
+      if (!res.ok) throw new Error('Não foi possível carregar as imagens do servidor.');
+      const data = await res.json();
+      if (data && Array.isArray(data.items)) {
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+        const imageUrls = data.items
+          .filter((item: any) => !item.isDir && allowedExts.some(ext => String(item.name).toLowerCase().endsWith(ext)))
+          .map((item: any) => `/uploads/${item.relative}`);
+        setServerImages(imageUrls);
+      }
+    } catch (err: any) {
+      setModalError(err.message || 'Erro ao buscar imagens do servidor.');
+    } finally {
+      setLoadingServerImages(false);
     }
   };
 
@@ -1399,8 +1422,9 @@ export default function AdminProductForm() {
                 <div 
                   onClick={() => {
                     setIsMainImageModalOpen(true);
-                    setActiveModalTab(existingGalleryUrls.length > 0 ? 'gallery' : 'upload');
+                    setActiveModalTab('gallery');
                     setSelectedGalleryImage(previews.main || null);
+                    fetchServerImages();
                   }}
                   className="relative aspect-video rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 overflow-hidden flex items-center justify-center group cursor-pointer hover:border-blue-400 transition-all"
                 >
@@ -1629,72 +1653,85 @@ export default function AdminProductForm() {
             )}
 
             {/* ABAS DO MODAL */}
-            {existingGalleryUrls.length > 0 && (
-              <div className="flex border-b border-slate-100 pb-2 gap-4">
-                <button
-                  type="button"
-                  onClick={() => setActiveModalTab('gallery')}
-                  className={`pb-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
-                    activeModalTab === 'gallery'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  Escolher da Galeria
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveModalTab('upload')}
-                  className={`pb-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
-                    activeModalTab === 'upload'
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  Enviar Nova Imagem
-                </button>
-              </div>
-            )}
+            <div className="flex border-b border-slate-100 pb-2 gap-4">
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('gallery')}
+                className={`pb-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                  activeModalTab === 'gallery'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                Escolher Imagem Enviada
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('upload')}
+                className={`pb-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                  activeModalTab === 'upload'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                Enviar Nova Imagem
+              </button>
+            </div>
 
             {/* CONTEÚDO DA ABA SELECIONADA */}
-            {activeModalTab === 'gallery' && existingGalleryUrls.length > 0 ? (
+            {activeModalTab === 'gallery' ? (
               <div className="space-y-4">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Imagens enviadas na galeria deste produto:</p>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto p-1 bg-slate-50 rounded-2xl border border-slate-100">
-                  {existingGalleryUrls.map((url, i) => {
-                    const isSelected = selectedGalleryImage === url;
-                    return (
-                      <div
-                        key={i}
-                        onClick={() => setSelectedGalleryImage(url)}
-                        className={`relative aspect-square rounded-xl overflow-hidden border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'border-blue-600 ring-2 ring-blue-600 shadow-md scale-95'
-                            : 'border-slate-200 hover:border-blue-400'
-                        }`}
-                      >
-                        <img src={url} className="w-full h-full object-cover" />
-                        {isSelected && (
-                          <div className="absolute inset-0 bg-blue-600/10 flex items-center justify-center">
-                            <div className="bg-blue-600 text-white rounded-full p-1 shadow-md">
-                              <Check className="w-3.5 h-3.5" />
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                  Selecione qualquer imagem já enviada ao servidor:
+                </p>
+                {loadingServerImages ? (
+                  <div className="flex flex-col items-center justify-center p-8 bg-slate-50 rounded-2xl border border-slate-100 min-h-[160px] animate-pulse">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Carregando imagens...</span>
+                  </div>
+                ) : serverImages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center p-8 bg-slate-50 rounded-2xl border border-slate-100 min-h-[160px] text-center space-y-3">
+                    <p className="text-xs font-black text-slate-700 uppercase tracking-tight">
+                      Nenhuma imagem encontrada no servidor.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModalTab('upload')}
+                      className="px-4 py-2 bg-blue-600 text-white font-black text-[10px] uppercase tracking-widest rounded-xl shadow-lg hover:bg-blue-700"
+                    >
+                      Enviar nova imagem
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto p-1 bg-slate-50 rounded-2xl border border-slate-100">
+                    {serverImages.map((url, i) => {
+                      const isSelected = selectedGalleryImage === url;
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => setSelectedGalleryImage(url)}
+                          className={`relative aspect-square rounded-xl overflow-hidden border cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-blue-600 ring-2 ring-blue-600 shadow-md scale-95'
+                              : 'border-slate-200 hover:border-blue-400'
+                          }`}
+                        >
+                          <img src={url} className="w-full h-full object-cover" />
+                          {isSelected && (
+                            <div className="absolute inset-0 bg-blue-600/10 flex items-center justify-center">
+                              <div className="bg-blue-600 text-white rounded-full p-1 shadow-md">
+                                <Check className="w-3.5 h-3.5" />
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              /* ABA DE UPLOAD OU PRODUTO SEM GALERIA */
-              <div className="space-y-4">
-                {existingGalleryUrls.length === 0 && (
-                  <div className="p-4 bg-amber-50/50 border border-amber-100 rounded-2xl text-[10px] font-black text-amber-700 uppercase tracking-widest text-center">
-                    Nenhuma imagem encontrada na galeria deste produto.
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
-                
+              </div>
+            ) : (
+              /* ABA DE UPLOAD */
+              <div className="space-y-4">
                 <div className="flex flex-col items-center justify-center bg-slate-50 rounded-3xl p-6 min-h-[200px] relative border border-slate-100 overflow-hidden">
                   {previews.main ? (
                     <div className="space-y-4 w-full text-center">
@@ -1731,10 +1768,10 @@ export default function AdminProductForm() {
                 Fechar
               </button>
               
-              {activeModalTab === 'gallery' && existingGalleryUrls.length > 0 ? (
+              {activeModalTab === 'gallery' ? (
                 <button
                   type="button"
-                  disabled={modalUploadLoading || !selectedGalleryImage || selectedGalleryImage === previews.main}
+                  disabled={modalUploadLoading || !selectedGalleryImage || selectedGalleryImage === previews.main || loadingServerImages}
                   onClick={() => selectedGalleryImage && handleSelectGalleryImage(selectedGalleryImage)}
                   className="px-5 py-3 rounded-xl bg-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-lg hover:bg-blue-700 disabled:opacity-50 transition-all"
                 >
@@ -1754,7 +1791,7 @@ export default function AdminProductForm() {
                   )}
 
                   <label className="relative cursor-pointer px-5 py-3 rounded-xl bg-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/10 hover:bg-blue-700 transition-all flex items-center justify-center disabled:opacity-50">
-                    <span>{previews.main ? 'Substituir Imagem' : 'Enviar nova imagem'}</span>
+                    <span>{previews.main ? 'Substituir Imagem' : 'Enviar imagem principal'}</span>
                     <input
                       type="file"
                       accept="image/*"
