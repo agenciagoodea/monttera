@@ -223,7 +223,7 @@ export default function Home() {
                     }}
                   >
                     {tickerLogos.map((url, idx) => (
-                      <div key={idx} className="w-32 h-16 flex-shrink-0 flex items-center justify-center grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all duration-500">
+                      <div key={idx} className="w-32 h-16 flex-shrink-0 flex items-center justify-center transition-all duration-250 ease-in-out hover:scale-[1.06] cursor-pointer">
                         <img 
                           src={url} 
                           alt="Brand Logo" 

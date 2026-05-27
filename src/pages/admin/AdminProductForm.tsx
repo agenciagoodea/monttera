@@ -14,7 +14,8 @@ import {
   ChevronDown,
     Hash,
   Palette,
-  Eye
+  Eye,
+  Check
 } from 'lucide-react';
 import HtmlRichEditor from '../../components/admin/HtmlRichEditor';
 import { getPublicAssetUrl, normalizePublicMediaUrl } from '../../lib/utils';
@@ -99,6 +100,8 @@ export default function AdminProductForm() {
   const [previews, setPreviews] = useState<{main: string, gallery: string[]}>({ main: '', gallery: [] });
   const [existingGalleryUrls, setExistingGalleryUrls] = useState<string[]>([]);
   const [isMainImageModalOpen, setIsMainImageModalOpen] = useState(false);
+  const [activeModalTab, setActiveModalTab] = useState<'gallery' | 'upload'>('gallery');
+  const [selectedGalleryImage, setSelectedGalleryImage] = useState<string | null>(null);
   const [modalUploadLoading, setModalUploadLoading] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const productionSheetFileName = productionSheetFile?.name || (() => {
@@ -319,6 +322,44 @@ export default function AdminProductForm() {
       setIsMainImageModalOpen(false);
     } catch (err: any) {
       setModalError(err.message || 'Falha ao remover arquivo.');
+    } finally {
+      setModalUploadLoading(false);
+    }
+  };
+
+  const handleSelectGalleryImage = async (url: string) => {
+    if (!url) return;
+    setModalError(null);
+
+    // Se o produto for NOVO (sem id), apenas define localmente
+    if (!id) {
+      setPreviews(prev => ({ ...prev, main: url }));
+      setIsMainImageModalOpen(false);
+      return;
+    }
+
+    // Se o produto já existe (Edição), enviar assincronamente a URL selecionada
+    setModalUploadLoading(true);
+    try {
+      const res = await fetch(`/api/admin/products/${id}/main-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ image_url: url })
+      });
+
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || 'Erro ao definir imagem da galeria como principal.');
+      }
+
+      // Atualiza previews e fecha modal
+      const newUrl = getPublicAssetUrl(payload.image || '');
+      setPreviews(prev => ({ ...prev, main: newUrl }));
+      setMainImage(null);
+      setIsMainImageModalOpen(false);
+    } catch (err: any) {
+      setModalError(err.message || 'Falha ao gravar arquivo no servidor.');
     } finally {
       setModalUploadLoading(false);
     }
@@ -1356,7 +1397,11 @@ export default function AdminProductForm() {
               <div className="space-y-4">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Imagem Principal</label>
                 <div 
-                  onClick={() => setIsMainImageModalOpen(true)}
+                  onClick={() => {
+                    setIsMainImageModalOpen(true);
+                    setActiveModalTab(existingGalleryUrls.length > 0 ? 'gallery' : 'upload');
+                    setSelectedGalleryImage(previews.main || null);
+                  }}
                   className="relative aspect-video rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 overflow-hidden flex items-center justify-center group cursor-pointer hover:border-blue-400 transition-all"
                 >
                   {previews.main ? (
@@ -1583,27 +1628,97 @@ export default function AdminProductForm() {
               </div>
             )}
 
-            <div className="flex flex-col items-center justify-center bg-slate-50 rounded-3xl p-6 min-h-[220px] relative border border-slate-100 overflow-hidden">
-              {previews.main ? (
-                <div className="space-y-4 w-full text-center">
-                  <div className="aspect-video w-full max-w-xs mx-auto rounded-2xl overflow-hidden border border-slate-200 shadow-md">
-                    <img src={previews.main} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="text-center text-[10px] font-bold text-slate-500 truncate max-w-full px-4">
-                    <span className="block text-slate-400 font-semibold uppercase tracking-wider">Caminho / URL Pública:</span>
-                    <span className="select-all font-mono">{previews.main.startsWith('blob:') ? 'Pré-visualização Local (Ainda não salvo)' : previews.main}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center space-y-3">
-                  <ImageIcon className="w-12 h-12 text-slate-300 mx-auto" />
-                  <p className="text-xs font-black text-slate-700 uppercase tracking-tight">
-                    Nenhuma imagem principal cadastrada para este produto.
-                  </p>
-                </div>
-              )}
-            </div>
+            {/* ABAS DO MODAL */}
+            {existingGalleryUrls.length > 0 && (
+              <div className="flex border-b border-slate-100 pb-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveModalTab('gallery')}
+                  className={`pb-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                    activeModalTab === 'gallery'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  Escolher da Galeria
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveModalTab('upload')}
+                  className={`pb-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all ${
+                    activeModalTab === 'upload'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  Enviar Nova Imagem
+                </button>
+              </div>
+            )}
 
+            {/* CONTEÚDO DA ABA SELECIONADA */}
+            {activeModalTab === 'gallery' && existingGalleryUrls.length > 0 ? (
+              <div className="space-y-4">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Imagens enviadas na galeria deste produto:</p>
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-h-60 overflow-y-auto p-1 bg-slate-50 rounded-2xl border border-slate-100">
+                  {existingGalleryUrls.map((url, i) => {
+                    const isSelected = selectedGalleryImage === url;
+                    return (
+                      <div
+                        key={i}
+                        onClick={() => setSelectedGalleryImage(url)}
+                        className={`relative aspect-square rounded-xl overflow-hidden border cursor-pointer transition-all ${
+                          isSelected
+                            ? 'border-blue-600 ring-2 ring-blue-600 shadow-md scale-95'
+                            : 'border-slate-200 hover:border-blue-400'
+                        }`}
+                      >
+                        <img src={url} className="w-full h-full object-cover" />
+                        {isSelected && (
+                          <div className="absolute inset-0 bg-blue-600/10 flex items-center justify-center">
+                            <div className="bg-blue-600 text-white rounded-full p-1 shadow-md">
+                              <Check className="w-3.5 h-3.5" />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              /* ABA DE UPLOAD OU PRODUTO SEM GALERIA */
+              <div className="space-y-4">
+                {existingGalleryUrls.length === 0 && (
+                  <div className="p-4 bg-amber-50/50 border border-amber-100 rounded-2xl text-[10px] font-black text-amber-700 uppercase tracking-widest text-center">
+                    Nenhuma imagem encontrada na galeria deste produto.
+                  </div>
+                )}
+                
+                <div className="flex flex-col items-center justify-center bg-slate-50 rounded-3xl p-6 min-h-[200px] relative border border-slate-100 overflow-hidden">
+                  {previews.main ? (
+                    <div className="space-y-4 w-full text-center">
+                      <div className="aspect-video w-full max-w-xs mx-auto rounded-2xl overflow-hidden border border-slate-200 shadow-md">
+                        <img src={previews.main} className="w-full h-full object-cover" />
+                      </div>
+                      <div className="text-center text-[10px] font-bold text-slate-500 truncate max-w-full px-4">
+                        <span className="block text-slate-400 font-semibold uppercase tracking-wider">Caminho / URL Pública:</span>
+                        <span className="select-all font-mono">{previews.main.startsWith('blob:') ? 'Pré-visualização Local (Ainda não salvo)' : previews.main}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center space-y-3">
+                      <ImageIcon className="w-12 h-12 text-slate-300 mx-auto" />
+                      <p className="text-xs font-black text-slate-700 uppercase tracking-tight">
+                        Nenhuma imagem principal cadastrada para este produto.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* BOTTOM BAR / BOTÕES DE AÇÃO */}
             <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
               <button
                 type="button"
@@ -1616,31 +1731,44 @@ export default function AdminProductForm() {
                 Fechar
               </button>
               
-              {previews.main && (
+              {activeModalTab === 'gallery' && existingGalleryUrls.length > 0 ? (
                 <button
                   type="button"
-                  disabled={modalUploadLoading}
-                  onClick={handleModalImageRemove}
-                  className="px-5 py-3 rounded-xl bg-red-600 text-white font-black text-xs uppercase tracking-widest shadow-lg hover:bg-red-700 disabled:opacity-50"
+                  disabled={modalUploadLoading || !selectedGalleryImage || selectedGalleryImage === previews.main}
+                  onClick={() => selectedGalleryImage && handleSelectGalleryImage(selectedGalleryImage)}
+                  className="px-5 py-3 rounded-xl bg-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-lg hover:bg-blue-700 disabled:opacity-50 transition-all"
                 >
-                  {modalUploadLoading ? 'Removendo...' : 'Remover Imagem'}
+                  {modalUploadLoading ? 'Salvando...' : 'Definir como Imagem Principal'}
                 </button>
-              )}
+              ) : (
+                <>
+                  {previews.main && (
+                    <button
+                      type="button"
+                      disabled={modalUploadLoading}
+                      onClick={handleModalImageRemove}
+                      className="px-5 py-3 rounded-xl bg-red-600 text-white font-black text-xs uppercase tracking-widest shadow-lg hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {modalUploadLoading ? 'Removendo...' : 'Remover Imagem'}
+                    </button>
+                  )}
 
-              <label className="relative cursor-pointer px-5 py-3 rounded-xl bg-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/10 hover:bg-blue-700 transition-all flex items-center justify-center disabled:opacity-50">
-                <span>{previews.main ? 'Substituir Imagem' : 'Enviar imagem principal'}</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  disabled={modalUploadLoading}
-                  onChange={(e) => {
-                    if (e.target.files?.[0]) {
-                      handleModalImageUpload(e.target.files[0]);
-                    }
-                  }}
-                  className="hidden"
-                />
-              </label>
+                  <label className="relative cursor-pointer px-5 py-3 rounded-xl bg-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/10 hover:bg-blue-700 transition-all flex items-center justify-center disabled:opacity-50">
+                    <span>{previews.main ? 'Substituir Imagem' : 'Enviar nova imagem'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={modalUploadLoading}
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) {
+                          handleModalImageUpload(e.target.files[0]);
+                        }
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </>
+              )}
             </div>
           </div>
         </div>

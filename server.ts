@@ -3759,8 +3759,24 @@ async function startServer() {
   app.post('/api/admin/products/:id/main-image', authenticate, isAdmin, upload.single('image'), async (req, res) => {
     const productId = Number(req.params.id);
     const file = req.file;
+    const { image_url } = req.body || {};
 
     try {
+      if (image_url) {
+        const cleanUrl = String(image_url).trim();
+        if (!cleanUrl.startsWith('/uploads/')) {
+          return res.status(400).json({ error: 'Caminho de imagem inválido. Deve apontar para a pasta /uploads/' });
+        }
+
+        const product = await dbAsync.get('SELECT * FROM products WHERE id = ?', productId) as any;
+        if (!product) {
+          return res.status(404).json({ error: 'Produto não encontrado.' });
+        }
+
+        await dbAsync.run('UPDATE products SET image = ? WHERE id = ?', cleanUrl, productId);
+        return res.json({ success: true, image: cleanUrl });
+      }
+
       if (!file) {
         return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
       }
@@ -8139,11 +8155,16 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         VALUES (?, ?, ?, ?, ?, 'pending')
       `, normalizedName, normalizedEmail, normalizedWhatsapp, normalizedDetails || null, referenceImagePath);
 
-      const settings = await loadSettingsMapAsync(['app_url', 'email_contact', 'matrix_request_team_email']);
+      const settings = await loadSettingsMapAsync(['app_url', 'email_contact', 'matrix_request_team_email', 'email_requests']);
       const appUrl = settings.app_url || `${req.protocol}://${req.get('host')}`;
       const referenceImageUrl = referenceImagePath ? `${appUrl}${referenceImagePath}` : '';
       const requestId = Number(insertResult.lastInsertRowid || 0);
-      const teamEmail = String(settings.matrix_request_team_email || settings.email_contact || '').trim().toLowerCase();
+      const teamEmail = String(settings.email_requests || settings.matrix_request_team_email || settings.email_contact || '').trim().toLowerCase();
+
+      // Ajuste 5: Preparar data/hora formatada em PT-BR e HTML para details
+      const now = new Date();
+      const dateTimeStr = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      const detailsHtml = normalizedDetails.replace(/\n/g, '<br/>');
 
       const createBudgetLog = async (recipientType: 'team' | 'customer', toEmail: string, templateKey: string) => {
         const result = await dbAsync.run(`
@@ -8178,6 +8199,8 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             email: normalizedEmail,
             whatsapp: normalizedWhatsapp,
             details: normalizedDetails,
+            details_html: detailsHtml,
+            date_time: dateTimeStr,
             reference_image: referenceImageUrl,
           },
         });
@@ -8192,7 +8215,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         }
       } else {
         teamStatus = 'erro';
-        teamError = 'Email da equipe nao configurado em Configuracoes > E-mail > Equipe de Orcamento.';
+        teamError = 'Email da equipe nao configurado em Configuracoes > Aparência e Home.';
       }
 
       const customerLogId = await createBudgetLog('customer', normalizedEmail, 'matrix_request_in_analysis');
@@ -8205,6 +8228,8 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           email: normalizedEmail,
           whatsapp: normalizedWhatsapp,
           details: normalizedDetails,
+          details_html: detailsHtml,
+          date_time: dateTimeStr,
           reference_image: referenceImageUrl,
         },
       });
@@ -9486,6 +9511,101 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       console.error('[Cron] Error checking pending PIX:', error);
     }
   }, 30 * 60 * 1000);
+
+  async function ensureEmailTemplatesUpdated() {
+    try {
+      const templates = [
+        {
+          key: 'matrix_request_team_received',
+          name: 'Solicitação de Matriz — Notificação Interna',
+          subject: 'Nova solicitação recebida - Digital Bordados',
+          variables: JSON.stringify(['request_id', 'name', 'email', 'whatsapp', 'details', 'details_html', 'date_time', 'reference_image', 'store_name']),
+          body: `<div style="font-family: Arial, sans-serif; padding: 25px; background-color: #f8fafc; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+  <div style="text-align: center; margin-bottom: 25px; border-bottom: 1px solid #e2e8f0; padding-bottom: 20px;">
+    <h2 style="margin: 0; color: #0f172a; font-size: 20px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">Nova solicitação recebida</h2>
+    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 13px; font-weight: 600;">Digital Bordados — Notificação Interna</p>
+  </div>
+  
+  <div style="background-color: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+    <p style="margin: 0 0 10px 0; font-size: 14px; color: #334155;"><strong style="color: #0f172a; display: inline-block; width: 120px;">ID:</strong> #{{request_id}}</p>
+    <p style="margin: 0 0 10px 0; font-size: 14px; color: #334155;"><strong style="color: #0f172a; display: inline-block; width: 120px;">Nome:</strong> {{name}}</p>
+    <p style="margin: 0 0 10px 0; font-size: 14px; color: #334155;"><strong style="color: #0f172a; display: inline-block; width: 120px;">E-mail:</strong> <a href="mailto:{{email}}" style="color: #2563eb; text-decoration: none; font-weight: 600;">{{email}}</a></p>
+    <p style="margin: 0 0 10px 0; font-size: 14px; color: #334155;"><strong style="color: #0f172a; display: inline-block; width: 120px;">WhatsApp:</strong> <a href="https://wa.me/{{whatsapp}}" style="color: #2563eb; text-decoration: none; font-weight: 600;">{{whatsapp}}</a></p>
+    <p style="margin: 0 0 10px 0; font-size: 14px; color: #334155;"><strong style="color: #0f172a; display: inline-block; width: 120px;">Data/Hora:</strong> {{date_time}}</p>
+  </div>
+
+  <div style="background-color: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+    <h4 style="margin: 0 0 12px 0; color: #0f172a; font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">Dados do Formulário</h4>
+    <div style="font-size: 13px; color: #334155; line-height: 1.6; font-weight: 500;">
+      {{{details_html}}}
+    </div>
+  </div>
+
+  {{#if reference_image}}
+  <div style="text-align: center; margin-top: 25px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+    <a href="{{reference_image}}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; justify-content: center; padding: 12px 25px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">
+      Visualizar Referência
+    </a>
+  </div>
+  {{/if}}
+</div>`
+        },
+        {
+          key: 'matrix_request_in_analysis',
+          name: 'Solicitação de Matriz em Análise',
+          subject: 'Recebemos sua solicitação - Digital Bordados',
+          variables: JSON.stringify(['request_id', 'name', 'details_html', 'store_logo', 'store_name']),
+          body: `<div style="font-family: Arial, sans-serif; padding: 25px; background-color: #f8fafc; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+  <div style="text-align: center; margin-bottom: 25px; border-bottom: 1px solid #e2e8f0; padding-bottom: 20px;">
+    {{#if store_logo}}
+    <img src="{{store_logo}}" alt="{{store_name}}" style="max-height: 50px; margin-bottom: 15px;" />
+    {{/if}}
+    <h2 style="margin: 0; color: #0f172a; font-size: 20px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">Recebemos sua solicitação</h2>
+    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 13px; font-weight: 600;">Olá, {{name}}.</p>
+  </div>
+
+  <div style="background-color: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px; line-height: 1.6;">
+    <p style="margin: 0 0 15px 0; font-size: 14px; color: #334155; font-weight: 500;">
+      Recebemos sua solicitação com sucesso.
+    </p>
+    <p style="margin: 0; font-size: 14px; color: #334155; font-weight: 500;">
+      Nossa equipe irá analisar as informações enviadas e retornará em breve com os próximos passos.
+    </p>
+  </div>
+
+  <div style="background-color: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+    <h4 style="margin: 0 0 12px 0; color: #0f172a; font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">Resumo da solicitação</h4>
+    <div style="font-size: 13px; color: #334155; line-height: 1.6; font-weight: 500;">
+      {{{details_html}}}
+    </div>
+  </div>
+
+  <div style="text-align: center; margin-top: 25px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; font-weight: 600; line-height: 1.5;">
+    Atenciosamente,<br/>
+    <strong style="color: #0f172a;">Equipe {{store_name}}</strong>
+  </div>
+</div>`
+        }
+      ];
+
+      for (const t of templates) {
+        await dbAsync.run(`
+          INSERT INTO email_templates (\`key\`, name, subject, body, variables)
+          VALUES (?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE 
+            name = VALUES(name), 
+            subject = VALUES(subject), 
+            body = VALUES(body), 
+            variables = VALUES(variables)
+        `, t.key, t.name, t.subject, t.body, t.variables);
+      }
+      console.log('[EmailTemplates] Templates de solicitação de orçamento atualizados com sucesso.');
+    } catch (err) {
+      console.error('[EmailTemplates] Erro ao atualizar templates de email:', err);
+    }
+  }
+
+  ensureEmailTemplatesUpdated().catch(err => console.error('Erro na atualização de templates:', err));
 
   if (!process.env.VERCEL) {
     console.log(`Starting express server on port ${PORT}...`);

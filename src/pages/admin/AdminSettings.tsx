@@ -192,6 +192,7 @@ export default function AdminSettings() {
     smtp_from_email: '',
     smtp_secure: 'false',
     matrix_request_team_email: '',
+    email_requests: '',
     brand_logos: '[]',
     lgpd_enabled: 'true',
     lgpd_require_consent_register: 'true',
@@ -471,6 +472,16 @@ export default function AdminSettings() {
     e.preventDefault();
     setSaving(true);
     setMessage(null);
+
+    if (settings.email_requests) {
+      const emailIsValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(settings.email_requests).trim());
+      if (!emailIsValid) {
+        setMessage({ text: 'Por favor, digite um e-mail válido para receber solicitações.', type: 'error' });
+        setSaving(false);
+        return;
+      }
+    }
+
     try {
       const res = await fetch('/api/admin/settings', {
         method: 'POST',
@@ -1093,6 +1104,16 @@ export default function AdminSettings() {
                           value={settings.email_contact}
                           onChange={e => setSettings({...settings, email_contact: e.target.value})}
                         />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">E-mail para receber solicitações</label>
+                        <input 
+                          type="email" 
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                          value={settings.email_requests || ''}
+                          onChange={e => setSettings({...settings, email_requests: e.target.value})}
+                        />
+                        <p className="text-[9px] font-bold text-slate-400 mt-0.5">Este e-mail receberá as mensagens enviadas pelos formulários de Solicitação Personalizada e Orçamento.</p>
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Telefone de Contato</label>
