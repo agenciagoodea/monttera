@@ -3183,7 +3183,23 @@ async function startServer() {
         const file = files['production_sheet'][0];
         const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.pdf';
         const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext);
+        const targetPath = path.join(publicUploadsDir, finalName);
+
         moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
+
+        // Validação física estrita
+        if (!fs.existsSync(targetPath)) {
+          // Desfazer inserção do produto
+          await dbAsync.run('DELETE FROM products WHERE id = ?', productIdNumber);
+          return res.status(500).json({ error: 'Erro de disco: O PDF da Folha de Produção não pôde ser gravado fisicamente no servidor.' });
+        }
+        const stats = fs.statSync(targetPath);
+        if (stats.size === 0) {
+          // Desfazer inserção do produto
+          await dbAsync.run('DELETE FROM products WHERE id = ?', productIdNumber);
+          try { fs.unlinkSync(targetPath); } catch (_) {}
+          return res.status(500).json({ error: 'Erro de disco: O arquivo PDF da Folha de Produção resultante possui tamanho igual a zero.' });
+        }
         productionSheetValue = `/uploads/${finalName}`;
       }
 
@@ -3239,13 +3255,29 @@ async function startServer() {
         }
       }
 
-      // Arquivos de ProduÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o
+      // Arquivos de Produção
       if (files['production_files']) {
         for (const [index, f] of files['production_files'].entries()) {
           const ext = path.extname(f.originalname || f.filename || '').toLowerCase() || '.zip';
           const suffix = index === 0 ? undefined : `a${index + 1}`;
           const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext, suffix);
+          const targetPath = path.join(privateUploadsDir, finalName);
+
           moveUploadedFileToFinalPath(f, privateUploadsDir, finalName);
+
+          // Validação física estrita
+          if (!fs.existsSync(targetPath)) {
+            // Desfazer inserção do produto
+            await dbAsync.run('DELETE FROM products WHERE id = ?', productIdNumber);
+            return res.status(500).json({ error: `Erro de disco: O arquivo de matriz ZIP (${finalName}) não pôde ser gravado fisicamente no servidor.` });
+          }
+          const stats = fs.statSync(targetPath);
+          if (stats.size === 0) {
+            await dbAsync.run('DELETE FROM products WHERE id = ?', productIdNumber);
+            try { fs.unlinkSync(targetPath); } catch (_) {}
+            return res.status(500).json({ error: `Erro de disco: O arquivo de matriz ZIP (${finalName}) gravado possui tamanho igual a zero.` });
+          }
+
           await dbAsync.run('INSERT IGNORE INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, finalName, `/uploads/arquivos/${finalName}`, 'production');
         }
       }
@@ -3450,19 +3482,27 @@ async function startServer() {
     }
 
     const productionSheetUpload = files['production_sheet']?.[0];
-    const generatedProductionSheetPath = productionSheetUpload
-      ? (() => {
-          const ext = path.extname(productionSheetUpload.originalname || productionSheetUpload.filename || '').toLowerCase() || '.pdf';
-          const finalName = buildProductMediaName(nextSlug, productId, ext);
-          moveUploadedFileToFinalPath(productionSheetUpload, publicUploadsDir, finalName);
-          return `/uploads/${finalName}`;
-        })()
-      : null;
-    const nextProductionSheet = generatedProductionSheetPath
-      ? generatedProductionSheetPath
-      : (production_sheet !== undefined
-        ? ((typeof production_sheet === 'string' ? production_sheet.trim() : '') || null)
-        : existingProduct.production_sheet);
+    let nextProductionSheet = existingProduct.production_sheet;
+    if (productionSheetUpload) {
+      const ext = path.extname(productionSheetUpload.originalname || productionSheetUpload.filename || '').toLowerCase() || '.pdf';
+      const finalName = buildProductMediaName(nextSlug, productId, ext);
+      const targetPath = path.join(publicUploadsDir, finalName);
+
+      moveUploadedFileToFinalPath(productionSheetUpload, publicUploadsDir, finalName);
+
+      // Validação física estrita
+      if (!fs.existsSync(targetPath)) {
+        return res.status(500).json({ error: 'Erro de disco: O PDF da Folha de Produção editado não pôde ser gravado fisicamente no servidor.' });
+      }
+      const stats = fs.statSync(targetPath);
+      if (stats.size === 0) {
+        try { fs.unlinkSync(targetPath); } catch (_) {}
+        return res.status(500).json({ error: 'Erro de disco: O arquivo PDF da Folha de Produção resultante possui tamanho igual a zero.' });
+      }
+      nextProductionSheet = `/uploads/${finalName}`;
+    } else if (production_sheet !== undefined) {
+      nextProductionSheet = (typeof production_sheet === 'string' ? production_sheet.trim() : '') || null;
+    }
 
     try {
       await dbAsync.run(`
@@ -3489,7 +3529,7 @@ async function startServer() {
         WHERE id = ?
       `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextImageAlt, nextProductionSheet, nextSeoTitle, nextSeoDescription, nextSeoKeywords, nextCanonicalUrl, nextNoindex, productId);
 
-      if (files['image']?.[0] && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.includes('/uploads/')) {
+      if (nextImagePath !== existingProduct.image && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.includes('/uploads/')) {
         const oldImageRelative = existingProduct.image.replace(/^https?:\/\/[^/]+/i, '');
         const oldImageFsPath = path.join(process.cwd(), 'public', oldImageRelative.replace('/uploads/', 'uploads/'));
         try {
@@ -3501,7 +3541,7 @@ async function startServer() {
         }
       }
 
-      if (generatedProductionSheetPath && existingProduct.production_sheet && typeof existingProduct.production_sheet === 'string' && existingProduct.production_sheet.includes('/uploads/')) {
+      if (nextProductionSheet !== existingProduct.production_sheet && existingProduct.production_sheet && typeof existingProduct.production_sheet === 'string' && existingProduct.production_sheet.includes('/uploads/')) {
         const oldSheetRelative = existingProduct.production_sheet.replace(/^https?:\/\/[^/]+/i, '');
         const oldSheetFsPath = path.join(process.cwd(), 'public', oldSheetRelative.replace('/uploads/', 'uploads/'));
         try {
@@ -3509,7 +3549,7 @@ async function startServer() {
             fs.unlinkSync(oldSheetFsPath);
           }
         } catch (fileError) {
-          console.warn('Falha ao remover folha de produÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Â£o antiga:', fileError);
+          console.warn('Falha ao remover folha de produção antiga:', fileError);
         }
       }
 
@@ -3595,7 +3635,20 @@ async function startServer() {
             const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.zip';
             const suffix = index === 0 ? undefined : `a${index + 1}`;
             const finalName = buildProductMediaName(nextSlug, productId, ext, suffix);
+            const targetPath = path.join(privateUploadsDir, finalName);
+
             moveUploadedFileToFinalPath(file, privateUploadsDir, finalName);
+
+            // Validação física estrita
+            if (!fs.existsSync(targetPath)) {
+              return res.status(500).json({ error: `Erro de disco: O arquivo de matriz ZIP (${finalName}) editado não pôde ser gravado fisicamente no servidor.` });
+            }
+            const stats = fs.statSync(targetPath);
+            if (stats.size === 0) {
+              try { fs.unlinkSync(targetPath); } catch (_) {}
+              return res.status(500).json({ error: `Erro de disco: O arquivo de matriz ZIP (${finalName}) editado possui tamanho igual a zero.` });
+            }
+
             await dbAsync.run('INSERT INTO product_files (product_id, file_name, file_path, file_type) VALUES (?, ?, ?, ?)', productId, finalName, `/uploads/arquivos/${finalName}`, 'production');
           }
         }
