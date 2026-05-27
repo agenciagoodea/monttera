@@ -1,0 +1,78 @@
+﻿{
+    "date":  "2026-05-25",
+    "backup":  "backup_security_20260525_215226",
+    "summary":  {
+                    "score_before":  58,
+                    "score_after":  84,
+                    "critical":  1,
+                    "high":  2,
+                    "medium":  4,
+                    "low":  0
+                },
+    "applied_fixes":  [
+                          {
+                              "file":  "server.ts",
+                              "type":  "seed-hardening",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "server.ts",
+                              "type":  "upload-hardening-no-svg",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "server.ts",
+                              "type":  "static-uploads-security-headers",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "server.ts",
+                              "type":  "error-leak-reduction",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "src/server/mailer.ts",
+                              "type":  "smtp-tls-validation-default",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "server.ts",
+                              "type":  "csrf-double-submit",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "src/main.tsx",
+                              "type":  "csrf-header-auto-attach",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "src/server/db.ts",
+                              "type":  "persistent-rate-limit-table",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "server.ts",
+                              "type":  "persistent-rate-limit-middleware",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "src/server/db.ts",
+                              "type":  "admin-mfa-table",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "server.ts",
+                              "type":  "admin-mfa-flow",
+                              "status":  "done"
+                          },
+                          {
+                              "file":  "src/pages/Login.tsx",
+                              "type":  "admin-mfa-ui-flow",
+                              "status":  "done"
+                          }
+                      ],
+    "pending":  [
+                    "migrar sanitizacao regex para biblioteca whitelist robusta",
+                    "resolver cadeia CA local para npm audit"
+                ]
+}

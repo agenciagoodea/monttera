@@ -1,0 +1,83 @@
+{
+  "name": "react-example",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20 <21",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "tunnel": "node scripts/tunnel.cjs",
+    "dev": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs watch --clear-screen=false server.ts",
+    "build": "npm run clean && npm run build:client && npm run build:server",
+    "build:client": "node --max-old-space-size=2048 ./scripts/build-client.mjs",
+    "build:server": "node ./node_modules/typescript/bin/tsc -p tsconfig.server.json && node ./scripts/postbuild-server.mjs",
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});\"",
+    "lint": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "start": "node dist/server.cjs",
+    "start:dev": "node --max-old-space-size=2048 ./node_modules/tsx/dist/cli.mjs watch --clear-screen=false server.ts",
+    "verify:build": "npm run build && node -e \"const fs=require('fs');if(!fs.existsSync('dist/server.cjs')){throw new Error('dist/server.cjs nao foi gerado')}\"",
+    "doctor": "node ./scripts/doctor.mjs",
+    "doctor:strict": "node ./scripts/doctor.mjs --strict",
+    "doctor:startup": "node ./scripts/doctor.mjs --startup",
+    "doctor:startup:strict": "node ./scripts/doctor.mjs --startup --strict",
+    "media:migrate:dry": "node --import tsx ./scripts/migrate-wp-media-to-node-uploads.ts",
+    "media:migrate:apply": "node --import tsx ./scripts/migrate-wp-media-to-node-uploads.ts --apply",
+    "deploy:directadmin": "npm run doctor:strict && npm run build && npm run doctor:startup:strict",
+    "prepare:deploy": "npm run deploy:directadmin && node ./scripts/prepare-deploy.mjs"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/nodemailer": "^8.0.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "axios": "^1.16.0",
+    "bcryptjs": "^3.0.3",
+    "clsx": "^2.1.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "handlebars": "^4.7.9",
+    "html2canvas": "^1.4.1",
+    "jsonwebtoken": "^9.0.3",
+    "jspdf": "^4.2.1",
+    "lucide-react": "^0.546.0",
+    "mercadopago": "^2.12.0",
+    "motion": "^12.23.24",
+    "multer": "^2.1.1",
+    "mysql2": "^3.22.3",
+    "nodemailer": "^8.0.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.14.2",
+    "recharts": "^3.8.1",
+    "slugify": "^1.6.9",
+    "sync-mysql2": "^1.0.8",
+    "tailwind-merge": "^3.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^22.14.0",
+    "autoprefixer": "^10.4.21",
+    "ssh2": "^1.17.0",
+    "tailwindcss": "^4.1.14",
+    "tunnel-ssh": "^5.2.0"
+  },
+  "overrides": {
+    "babel-runtime": {
+      "core-js": "2.6.12"
+    },
+    "node-domexception": "^1.0.0",
+    "protobufjs": "^7.4.0",
+    "uuid": "^9.0.1"
+  }
+}
