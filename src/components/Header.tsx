@@ -161,9 +161,9 @@ export default function Header() {
         <div className="max-w-[1440px] mx-auto flex flex-col xl:flex-row items-center xl:items-center justify-between gap-4">
           <div className="flex items-center gap-6 w-full xl:w-auto justify-between">
             {/* Logo */}
-            <Link to="/" className="flex flex-col group shrink-0 min-w-[120px] xl:min-w-[130px]">
+            <Link to="/" className="flex flex-col group shrink-0 min-w-[140px] xl:min-w-[160px]">
               {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="h-10 xl:h-11 w-auto object-contain" />
+                <img src={logoUrl} alt="Logo" className="h-12 xl:h-16 w-auto object-contain" />
               ) : (
                 <>
                   <span className="text-4xl font-black text-primary leading-none tracking-tighter uppercase group-hover:text-blue-800 transition-colors">

@@ -22,6 +22,7 @@ import { MercadoPagoConfig, Payment } from 'mercadopago';
 import axios from 'axios';
 import { fileURLToPath } from 'url';
 import AdmZip from 'adm-zip';
+import sharp from 'sharp';
 
 // Shim para __dirname funcionar tanto em CommonJS (compilado) quanto em ESM (dev/tsx)
 const _dirname = typeof __dirname !== 'undefined'
@@ -33,6 +34,31 @@ const EMAIL_VERIFICATION_TOKEN_TTL_HOURS = Number(process.env.EMAIL_VERIFICATION
 const LOGIN_ATTEMPT_WINDOW_MINUTES = Number(process.env.LOGIN_ATTEMPT_WINDOW_MINUTES || '15');
 const LOGIN_ATTEMPT_MAX_FAILS = Number(process.env.LOGIN_ATTEMPT_MAX_FAILS || '7');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Aplica marca d'água sobre uma imagem de produto.
+ * - A marca d'água (/public/uploads/marcadagua.png) é redimensionada para 1080x1080 e sobreposta sobre a imagem.
+ * - A imagem final é sempre salva como JPG qualidade 90%, em 1080x1080 (cover centralizado).
+ * - Se marcadagua.png não existir, lança erro com mensagem clara.
+ */
+async function applyWatermark(inputPath: string, outputPath: string): Promise<void> {
+  const watermarkPath = path.join(process.cwd(), 'public', 'uploads', 'marcadagua.png');
+  if (!fs.existsSync(watermarkPath)) {
+    throw new Error('Arquivo de marca d\'água não encontrado em /public/uploads/marcadagua.png. Envie o arquivo antes de fazer upload de imagens.');
+  }
+  // Redimensionar marca d'água para 1080x1080 cobrindo tudo
+  const watermarkBuffer = await sharp(watermarkPath)
+    .resize(1080, 1080, { fit: 'fill' })
+    .png()
+    .toBuffer();
+  // Aplicar marca d'água sobre a imagem base (1080x1080, cover centralizado) → JPG 90%
+  await sharp(inputPath)
+    .resize(1080, 1080, { fit: 'cover', position: 'center' })
+    .composite([{ input: watermarkBuffer, gravity: 'center' }])
+    .jpeg({ quality: 90 })
+    .toFile(outputPath);
+}
+
 
 function createBasicRateLimit(options: {
   windowMs: number;
@@ -3101,12 +3127,20 @@ async function startServer() {
       let mainImagePath: string | null = null;
       if (files['image']?.[0]) {
         const file = files['image'][0];
-        const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.jpg';
-        const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext);
-        moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
+        // A saída final sempre será .jpg (após watermark)
+        const finalName = buildProductMediaName(normalizedSlug, productIdNumber, '.jpg');
+        const physicalPath = path.join(publicUploadsDir, finalName);
+        const tempPath = file.path;
+
+        // Aplicar marca d'água
+        await applyWatermark(tempPath, physicalPath);
+
+        // Remover arquivo temporário original
+        if (fs.existsSync(tempPath) && tempPath !== physicalPath) {
+          try { fs.unlinkSync(tempPath); } catch (_) { /* ignorar */ }
+        }
         
         // Validação física estrita
-        const physicalPath = path.join(publicUploadsDir, finalName);
         if (!fs.existsSync(physicalPath)) {
           // Desfazer inserção do produto
           await dbAsync.run('DELETE FROM products WHERE id = ?', productIdNumber);
@@ -3140,9 +3174,15 @@ async function startServer() {
 
       if (files['gallery']) {
         for (const [index, f] of files['gallery'].entries()) {
-          const ext = path.extname(f.originalname || f.filename || '').toLowerCase() || '.jpg';
-          const finalName = buildProductMediaName(normalizedSlug, productIdNumber, ext, `g${index + 1}`);
-          moveUploadedFileToFinalPath(f, publicUploadsDir, finalName);
+          // A saída final sempre será .jpg (após watermark)
+          const finalName = buildProductMediaName(normalizedSlug, productIdNumber, '.jpg', `g${index + 1}`);
+          const physicalPath = path.join(publicUploadsDir, finalName);
+          // Aplicar marca d'água sobre a imagem de galeria
+          await applyWatermark(f.path, physicalPath);
+          // Remover arquivo temporário original
+          if (fs.existsSync(f.path) && f.path !== physicalPath) {
+            try { fs.unlinkSync(f.path); } catch (_) { /* ignorar */ }
+          }
           await dbAsync.run('INSERT IGNORE INTO product_images (product_id, url, alt_text, file_type) VALUES (?, ?, ?, ?)', productId, `/uploads/${finalName}`, parsedGalleryAltsNew[index] || null, 'gallery');
         }
       }
@@ -3488,9 +3528,15 @@ async function startServer() {
 
         if (hasNewGalleryFiles) {
           for (const [index, file] of files['gallery'].entries()) {
-            const ext = path.extname(file.originalname || file.filename || '').toLowerCase() || '.jpg';
-            const finalName = buildProductMediaName(nextSlug, productId, ext, `g${index + 1}`);
-            moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
+            // A saída final sempre será .jpg (após watermark)
+            const finalName = buildProductMediaName(nextSlug, productId, '.jpg', `g${index + 1}`);
+            const physicalPath = path.join(publicUploadsDir, finalName);
+            // Aplicar marca d'água sobre a imagem de galeria
+            await applyWatermark(file.path, physicalPath);
+            // Remover o arquivo temporário original
+            if (fs.existsSync(file.path) && file.path !== physicalPath) {
+              try { fs.unlinkSync(file.path); } catch (_) { /* ignorar */ }
+            }
             await dbAsync.run('INSERT INTO product_images (product_id, url, alt_text, file_type) VALUES (?, ?, ?, ?)', productId, `/uploads/${finalName}`, parsedGalleryAltsNew[index] || null, 'gallery');
           }
         }
@@ -3795,11 +3841,19 @@ async function startServer() {
       }
 
       const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
-      const finalName = buildProductMediaName(product.slug || 'produto', productId, ext);
+      // A saída final sempre será .jpg (após watermark)
+      const finalName = buildProductMediaName(product.slug || 'produto', productId, '.jpg');
       const physicalPath = path.join(publicUploadsDir, finalName);
+      // Caminho temporário da imagem recebida antes de aplicar watermark
+      const tempPath = file.path;
 
-      // Move arquivo para pasta correta
-      moveUploadedFileToFinalPath(file, publicUploadsDir, finalName);
+      // Aplicar marca d'água: lê o arquivo temporário, processa, salva em physicalPath
+      await applyWatermark(tempPath, physicalPath);
+
+      // Remover arquivo temporário original (sem watermark)
+      if (fs.existsSync(tempPath) && tempPath !== physicalPath) {
+        try { fs.unlinkSync(tempPath); } catch (_) { /* ignorar */ }
+      }
 
       // Validação física estrita
       if (!fs.existsSync(physicalPath)) {
@@ -8380,13 +8434,43 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   app.get('/api/products/:slug', async (req, res) => {
     try {
       const productRow = await dbAsync.get(`
-        SELECT p.*, pc.name as category_name, pc.slug as category_slug
+        SELECT p.*,
+               pc.id as category_id,
+               pc.name as category_name,
+               pc.slug as category_slug,
+               pc.parent_id as category_parent_id,
+               parent_cat.name as parent_category_name,
+               parent_cat.slug as parent_category_slug
         FROM products p
         LEFT JOIN product_categories pc ON p.category_id = pc.id
+        LEFT JOIN product_categories parent_cat ON pc.parent_id = parent_cat.id
         WHERE p.slug = ?
       `, req.params.slug) as any;
 
       if (!productRow) return res.status(404).json({ error: 'Produto nao encontrado' });
+
+      // Se a categoria principal for nula, buscar a primeira categoria vinculada
+      if (!productRow.category_id) {
+        const fallbackCat = await dbAsync.get(`
+          SELECT pc.id, pc.name, pc.slug, pc.parent_id,
+                 parent_cat.name as parent_name, parent_cat.slug as parent_slug
+          FROM product_category_relations pcr
+          JOIN product_categories pc ON pcr.category_id = pc.id
+          LEFT JOIN product_categories parent_cat ON pc.parent_id = parent_cat.id
+          WHERE pcr.product_id = ?
+          LIMIT 1
+        `, productRow.id) as any;
+
+        if (fallbackCat) {
+          productRow.category_id = fallbackCat.id;
+          productRow.category_name = fallbackCat.name;
+          productRow.category_slug = fallbackCat.slug;
+          productRow.category_parent_id = fallbackCat.parent_id;
+          productRow.parent_category_name = fallbackCat.parent_name;
+          productRow.parent_category_slug = fallbackCat.parent_slug;
+        }
+      }
+
       const newBadgeDays = await resolveNewBadgeDays();
       const product = {
         ...productRow,

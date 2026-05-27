@@ -495,11 +495,23 @@ export default function ProductDetail() {
               </button>
             </div>
 
-            <div className="p-4 bg-white border-t border-slate-50 flex items-center justify-center gap-2">
+            <div className="p-4 bg-white border-t border-slate-50 flex items-center justify-center gap-1.5 flex-wrap">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Categoria:</span>
-              <Link to={`/?category=${product.category_slug}`} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest">
-                {product.category_name || 'Geral'}
-              </Link>
+              {product.parent_category_name ? (
+                <>
+                  <Link to={`/?category=${product.parent_category_slug}`} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest">
+                    {product.parent_category_name}
+                  </Link>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">&gt;</span>
+                  <Link to={`/?category=${product.category_slug}`} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest">
+                    {product.category_name}
+                  </Link>
+                </>
+              ) : (
+                <Link to={`/?category=${product.category_slug}`} className="text-[10px] font-black text-blue-600 hover:underline uppercase tracking-widest">
+                  {product.category_name || 'Geral'}
+                </Link>
+              )}
             </div>
           </motion.div>
 

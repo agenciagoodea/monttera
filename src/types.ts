@@ -23,6 +23,8 @@ export interface Product {
   category_id: number;
   category_name?: string;
   category_slug?: string;
+  parent_category_name?: string;
+  parent_category_slug?: string;
   stitch_count?: number;
   colors?: string;
   is_new: boolean | number;
