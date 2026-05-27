@@ -2932,7 +2932,9 @@ async function startServer() {
 
       await dbAsync.run(
         'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
-        user.id, token, expiresAt.toISOString()
+        user.id,
+        token,
+        expiresAt.toISOString().slice(0, 19).replace('T', ' ')
       );
 
       const settings = await loadSettingsMapAsync(['app_url']);
@@ -9830,6 +9832,5 @@ export default async (req: any, res: any) => {
   const app = await appPromise;
   return app(req, res);
 };
-
 
 
