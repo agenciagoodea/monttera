@@ -1016,7 +1016,7 @@ async function buildOrderEmailPayload(orderId: number, paymentMethodRaw: string,
       order_status: orderStatus,
       items: orderEmailHtml,
       payment_method: paymentMethodLabel[paymentMethod] || paymentMethod,
-      account_url: `${appUrl}/conta`,
+      account_url: `${appUrl}/minha-conta`,
     },
     adminVariables: {
       name: 'Equipe',
@@ -2952,14 +2952,14 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       console.error('Forgot password error:', error);
-      res.status(500).json({ error: 'Erro interno ao solicitar recuperaÃƒÂ§ÃƒÂ£o de senha' });
+      res.status(500).json({ error: 'Erro interno ao solicitar recupera\u00e7\u00e3o de senha' });
     }
   });
 
   app.post('/api/auth/reset-password', async (req, res) => {
     try {
       const { token, new_password } = req.body || {};
-      if (!token || !new_password) return res.status(400).json({ error: 'Token e nova senha sÃƒÂ£o obrigatÃƒÂ³rios' });
+      if (!token || !new_password) return res.status(400).json({ error: 'Token e nova senha s\u00e3o obrigat\u00f3rios' });
       if (String(new_password).length < 8) {
         return res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres' });
       }
@@ -2970,7 +2970,7 @@ async function startServer() {
       ) as any;
 
       if (!resetRequest) {
-        return res.status(400).json({ error: 'Token invÃƒÂ¡lido ou expirado' });
+        return res.status(400).json({ error: 'Token inv\u00e1lido ou expirado' });
       }
 
       const hashedPassword = await hashPassword(new_password);
@@ -4622,7 +4622,7 @@ async function startServer() {
                     order_id: order.id,
                     order_total: `R$ ${order.total.toFixed(2)}`,
                     items: `<ul>${itemsHtml}</ul>`,
-                    downloads_url: `${appUrl}/conta`,
+                    downloads_url: `${appUrl}/minha-conta`,
                   },
                 }).catch(err => console.error('Failed to send order_paid email:', err));
 
@@ -7764,13 +7764,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         order_status: 'Pendente',
         items: '<li>1x Produto Teste - R$ 150,00</li>',
         payment_method: 'PIX',
-        account_url: 'https://digitalbordados.com.br/conta',
-        downloads_url: 'https://digitalbordados.com.br/conta',
+        account_url: 'https://digitalbordados.com.br/minha-conta',
+        downloads_url: 'https://digitalbordados.com.br/minha-conta',
         retry_url: 'https://digitalbordados.com.br/checkout',
         pix_code: '00020126580014br.gov.bcb.pix...',
         expires_at: new Date(Date.now() + 3600000).toLocaleString('pt-BR'),
         temp_password: 'SenhaTemporaria123',
-        change_password_url: 'https://digitalbordados.com.br/conta',
+        change_password_url: 'https://digitalbordados.com.br/minha-conta',
         expires_in: '2'
       };
 
@@ -9079,7 +9079,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             templateKey: 'order_paid',
             variables: {
               ...paidEmailPayload.variables,
-              downloads_url: `${appUrl}/conta`,
+              downloads_url: `${appUrl}/minha-conta`,
             },
           }).catch((err) => console.error('Failed to send PayPal order_paid email:', err));
         }
@@ -9150,7 +9150,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
               templateKey: 'order_paid',
               variables: {
                 ...paidEmailPayload.variables,
-                downloads_url: `${appUrl}/conta`,
+                downloads_url: `${appUrl}/minha-conta`,
               },
             }).catch((err) => console.error('Failed to send PayPal webhook order_paid email:', err));
           }
@@ -9830,8 +9830,6 @@ export default async (req: any, res: any) => {
   const app = await appPromise;
   return app(req, res);
 };
-
-
 
 
 
