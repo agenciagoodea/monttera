@@ -41,6 +41,14 @@ export interface Product {
   updated_at?: string;
   gallery?: ProductGalleryImage[];
   relatedProducts?: Product[];
+  categories?: {
+    id: number;
+    name: string;
+    slug: string;
+    parent_id?: number | null;
+    parent_name?: string | null;
+    parent_slug?: string | null;
+  }[];
 }
 
 export interface ProductGalleryImage {

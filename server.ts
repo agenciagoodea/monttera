@@ -8700,13 +8700,33 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         image: normalizePublicMediaUrl(relatedProduct?.image),
       }));
 
+      // Carregar todas as categorias vinculadas ao produto
+      const categoriesRows = await dbAsync.all(`
+        SELECT DISTINCT pc.id, pc.name, pc.slug, pc.parent_id,
+               parent_cat.name as parent_name, parent_cat.slug as parent_slug
+        FROM product_category_relations pcr
+        JOIN product_categories pc ON pcr.category_id = pc.id
+        LEFT JOIN product_categories parent_cat ON pc.parent_id = parent_cat.id
+        WHERE pcr.product_id = ?
+      `, product.id) as any[];
+
+      const categories = categoriesRows.map((row) => ({
+        id: row.id,
+        name: String(row?.name || '').trim(),
+        slug: String(row?.slug || '').trim(),
+        parent_id: row?.parent_id ?? null,
+        parent_name: row?.parent_name ? String(row.parent_name).trim() : null,
+        parent_slug: row?.parent_slug ? String(row.parent_slug).trim() : null,
+      }));
+
       if (process.env.NODE_ENV !== 'production') {
         console.debug('[api/products/:slug] production_sheet raw:', product?.production_sheet);
         console.debug('[api/products/:slug] production_sheet normalized:', normalizedProduct.production_sheet);
         console.debug('[api/products/:slug] gallery rows:', gallery);
+        console.debug('[api/products/:slug] product categories:', categories);
       }
 
-      res.json({ ...normalizedProduct, gallery, relatedProducts: normalizedRelatedProducts });
+      res.json({ ...normalizedProduct, gallery, relatedProducts: normalizedRelatedProducts, categories });
     } catch (error) {
       console.error('Error fetching product detail:', error);
       res.status(500).json({ error: 'Erro interno ao buscar produto' });
