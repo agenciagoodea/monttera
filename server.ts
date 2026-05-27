@@ -1388,11 +1388,13 @@ function findSlugMediaFallbacks(slug: string, kind: 'image' | 'pdf', productId?:
 
 function resolvePublicMediaWithFallback(mediaUrl: unknown, slug: string, kind: 'image' | 'pdf', productId?: number): string {
   const normalized = normalizePublicMediaUrl(mediaUrl);
-  if (normalized && (!normalized.startsWith('/uploads/') || publicUrlFileExists(normalized))) {
+  if (normalized) {
+    if (normalized.startsWith('/uploads/') && !publicUrlFileExists(normalized)) {
+      return '';
+    }
     return normalized;
   }
-  const fallbacks = findSlugMediaFallbacks(slug, kind, productId);
-  return fallbacks[0] || normalized || '';
+  return '';
 }
 
 function ensureDirSync(dirPath: string) {
