@@ -29,9 +29,9 @@ async function run() {
   // 2. BUSCAR TODOS OS product_files
   // ============================================================
   const [productFiles] = await connection.query(`
-    SELECT id as file_id, product_id, file_name, file_path, file_type, is_main
+    SELECT id as file_id, product_id, file_name, file_path, file_type
     FROM product_files
-    ORDER BY product_id ASC, is_main DESC
+    ORDER BY product_id ASC
   `);
 
   await connection.end();
