@@ -3344,6 +3344,8 @@ async function startServer() {
     const productId = Number(req.params.id);
     const existingProduct = await dbAsync.get('SELECT * FROM products WHERE id = ?', productId) as any;
 
+    console.log('[PUT /api/admin/products/:id] req.body:', JSON.stringify(req.body));
+
     if (!existingProduct) {
       return res.status(404).json({ error: 'Produto nÃƒÆ’Ã‚Â£o encontrado' });
     }
