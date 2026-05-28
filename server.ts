@@ -215,23 +215,31 @@ function hashMfaCode(raw: string) {
 
 function getAuthCookieOptions(req: express.Request): express.CookieOptions {
   const secure = isProduction || req.secure || req.headers['x-forwarded-proto'] === 'https';
-  return {
+  const options: express.CookieOptions = {
     httpOnly: true,
     sameSite: 'lax',
     secure,
     maxAge: 7 * 24 * 60 * 60 * 1000,
   };
+  if (isProduction) {
+    options.domain = '.digitalbordados.com.br';
+  }
+  return options;
 }
 
 function getCsrfCookieOptions(req: express.Request): express.CookieOptions {
   const secure = isProduction || req.secure || req.headers['x-forwarded-proto'] === 'https';
-  return {
+  const options: express.CookieOptions = {
     httpOnly: false,
     sameSite: 'lax',
     secure,
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/',
   };
+  if (isProduction) {
+    options.domain = '.digitalbordados.com.br';
+  }
+  return options;
 }
 
 function generateCsrfToken() {
@@ -2263,6 +2271,55 @@ async function startServer() {
       res.writeHead(301, { Location: targetUrl });
       return res.end();
     }
+    next();
+  });
+
+  // Middleware de Redirecionamento Automático Mobile <-> Desktop
+  app.use((req, res, next) => {
+    // Permite desligar via variável de ambiente para emergências ou testes
+    const enableRedirect = String(process.env.ENABLE_MOBILE_REDIRECT || 'true').toLowerCase() === 'true';
+    if (!enableRedirect) return next();
+
+    const path = String(req.path || '');
+
+    // Isenções estritas: não redirecionar APIs, uploads ou arquivos estáticos com extensões comuns
+    if (path.startsWith('/api/') || path.startsWith('/uploads/')) return next();
+
+    const ext = String(path.split('.').pop() || '').toLowerCase();
+    const staticExtensions = ['js', 'css', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'json', 'pdf', 'zip', 'txt', 'xml', 'map'];
+    if (staticExtensions.includes(ext)) return next();
+
+    // Verificação de cookie de escape "prefer_desktop=true"
+    const preferDesktop = String(req.cookies?.prefer_desktop || '').trim().toLowerCase() === 'true';
+    if (preferDesktop) {
+      // Se estiver forçando o desktop mas acessar o subdomínio mobile, deve conseguir navegar
+      const host = String(req.headers.host || '').trim();
+      if (host === 'digitalbordados.com.br') {
+        return next();
+      }
+    }
+
+    const userAgent = String(req.headers['user-agent'] || '');
+    // Regex consolidado de mercado para detecção de dispositivo móvel
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+    const host = String(req.headers.host || '').trim();
+
+    if (isProduction) {
+      if (isMobileDevice && !preferDesktop && host === 'digitalbordados.com.br') {
+        const targetUrl = `${req.protocol}://m.digitalbordados.com.br${req.originalUrl}`;
+        console.log(`[Mobile Redirect] Redirecting mobile user to ${targetUrl} via 302`);
+        res.writeHead(302, { Location: targetUrl });
+        return res.end();
+      }
+
+      if (!isMobileDevice && host === 'm.digitalbordados.com.br') {
+        const targetUrl = `${req.protocol}://digitalbordados.com.br${req.originalUrl}`;
+        console.log(`[Mobile Redirect] Redirecting desktop user to ${targetUrl} via 302`);
+        res.writeHead(302, { Location: targetUrl });
+        return res.end();
+      }
+    }
+
     next();
   });
 

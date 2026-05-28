@@ -44,6 +44,21 @@ function upsertCanonical(url: string) {
   node.setAttribute('href', url);
 }
 
+function upsertAlternate(url: string | null) {
+  let node = document.querySelector('link[rel="alternate"]') as HTMLLinkElement | null;
+  if (!url) {
+    if (node) node.remove();
+    return;
+  }
+  if (!node) {
+    node = document.createElement('link');
+    node.setAttribute('rel', 'alternate');
+    node.setAttribute('media', 'only screen and (max-width: 640px)');
+    document.head.appendChild(node);
+  }
+  node.setAttribute('href', url);
+}
+
 function upsertFavicon(url: string) {
   let node = document.querySelector('link[rel="icon"]') as HTMLLinkElement | null;
   if (!node) {
@@ -102,7 +117,19 @@ export function applySeo(input: SeoInput) {
   upsertMetaByName('twitter:description', description);
   upsertMetaByName('twitter:image', image);
 
-  upsertCanonical(canonical);
+  // Forçar canônico para o domínio desktop principal
+  const desktopCanonical = canonical.replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
+  upsertCanonical(desktopCanonical);
+  
+  // Se for o host desktop, adiciona alternate apontando para o mobile
+  const isMobileHost = window.location.hostname.startsWith('m.');
+  if (!isMobileHost) {
+    const mobileUrl = desktopCanonical.replace('https://digitalbordados.com.br', 'https://m.digitalbordados.com.br');
+    upsertAlternate(mobileUrl);
+  } else {
+    upsertAlternate(null); // Remove alternate se for o mobile
+  }
+
   upsertFavicon(favicon);
   if (input.jsonLd) upsertJsonLd(input.jsonLd);
 }

@@ -4,6 +4,7 @@ import type { ReactElement } from 'react';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import CookieConsentBanner from './components/CookieConsentBanner';
+import MobileRedirectBanner from './components/MobileRedirectBanner';
 
 // Lazy load pages
 const Home = lazy(() => import('./pages/Home'));
@@ -222,6 +223,7 @@ export default function App() {
             </Suspense>
               </div>
               <CookieConsentBanner />
+              <MobileRedirectBanner />
               <Footer />
             </div>
           } />
