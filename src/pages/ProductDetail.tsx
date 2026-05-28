@@ -218,17 +218,20 @@ export default function ProductDetail() {
   const resolveProductTemplate = (value: unknown) => {
     const template = String(value ?? '');
     const map: Record<string, string> = {
-      '{{nome_produto}}': String(product?.name || '').trim(),
-      '{{slug_produto}}': String(product?.slug || '').trim(),
-      '{{preco}}': String(product?.price ?? '').trim(),
-      '{{preco_promocional}}': String(product?.sale_price ?? product?.price ?? '').trim(),
-      '{{pontos}}': String(product?.stitch_count ?? '').trim(),
-      '{{cores}}': String(product?.colors || '').trim(),
-      '{{categoria_principal}}': String(product?.category_name || '').trim(),
-      '{{site_nome}}': siteDisplayName,
-      '{{site_name}}': siteDisplayName,
+      'site_nome': siteDisplayName,
+      'site_name': siteDisplayName,
+      'nome_produto': String(product?.name || '').trim(),
+      'slug_produto': String(product?.slug || '').trim(),
+      'preco': String(product?.price ?? '').trim(),
+      'preco_promocional': String(product?.sale_price ?? product?.price ?? '').trim(),
+      'pontos': String(product?.stitch_count ?? '').trim(),
+      'cores': String(product?.colors || '').trim(),
+      'categoria_principal': String(product?.category_name || '').trim(),
     };
-    return template.replace(/{{[a-z_]+}}/gi, (token) => map[token.toLowerCase()] ?? token);
+    return template.replace(/{{\s*([a-z_]+)\s*}}/gi, (match, key) => {
+      const cleanKey = key.toLowerCase();
+      return map[cleanKey] ?? match;
+    });
   };
   const resolveAltTemplate = (value: string) => resolveProductTemplate(value);
   const galleryAltMap = useMemo(() => {
@@ -252,10 +255,12 @@ export default function ProductDetail() {
     const siteName = siteDisplayName;
     const productTitle = String(resolveProductTemplate(product.seo_title || `${product.name} | ${siteName}`)).trim();
     const productDescription = String(
-      resolveProductTemplate(product.seo_description) ||
-        product.short_description ||
-        product.description ||
-        `Compre ${product.name} na ${siteName}.`,
+      resolveProductTemplate(
+        product.seo_description ||
+          product.short_description ||
+          product.description ||
+          `Compre ${product.name} na ${siteName}.`
+      )
     )
       .replace(/<[^>]*>/g, ' ')
       .replace(/\s+/g, ' ')
@@ -690,7 +695,7 @@ export default function ProductDetail() {
           {product.short_description && (
             <div 
               className="text-slate-500 text-sm font-medium mb-6 prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: formatShortDescription(product.short_description) }}
+              dangerouslySetInnerHTML={{ __html: formatShortDescription(resolveProductTemplate(product.short_description)) }}
             />
           )}
 
@@ -806,7 +811,7 @@ export default function ProductDetail() {
                 {product.description ? (
                   <div 
                     className="text-slate-600 leading-loose text-base prose prose-slate max-w-none"
-                    dangerouslySetInnerHTML={{ __html: product.description }}
+                    dangerouslySetInnerHTML={{ __html: resolveProductTemplate(product.description) }}
                   />
                 ) : (
                   <p className="text-slate-600 leading-loose text-base">

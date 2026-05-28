@@ -448,9 +448,9 @@ export default function AdminProductForm() {
     [],
   );
   const resolveSeoTemplate = (value: string) =>
-    String(value || '').replace(/{{[a-z_]+}}/gi, (token) => {
-      const normalized = token.toLowerCase();
-      return seoTemplateMap[normalized as keyof typeof seoTemplateMap] ?? token;
+    String(value || '').replace(/{{\s*([a-z_]+)\s*}}/gi, (match, key) => {
+      const normalized = `{{${key.toLowerCase()}}}`;
+      return seoTemplateMap[normalized as keyof typeof seoTemplateMap] ?? match;
     });
   const getSeoFieldRef = (field: SeoFieldKey) => {
     if (field === 'seo_title') return seoTitleInputRef;
