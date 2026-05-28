@@ -36,6 +36,7 @@ const AdminUserList = lazy(() => import('./pages/admin/AdminUserList'));
 const AdminReports = lazy(() => import('./pages/admin/AdminReports'));
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'));
 const AdminFiles = lazy(() => import('./pages/admin/AdminFiles'));
+const AdminReviews = lazy(() => import('./pages/admin/AdminReviews'));
 
 import AdminLayout from './layouts/AdminLayout';
 import { AuthProvider } from './contexts/AuthContext';
@@ -168,7 +169,8 @@ export default function App() {
                 <Route path="/categorias" element={<AdminCategoryList />} />
                 <Route path="/tags" element={<AdminTagList />} />
                 <Route path="/pedidos" element={<AdminOrderList />} />
-                                <Route path="/clientes" element={<AdminUserList />} />
+                <Route path="/clientes" element={<AdminUserList />} />
+                <Route path="/avaliacoes" element={<AdminReviews />} />
                 <Route path="/relatorios" element={<AdminReports />} />
                 <Route path="/arquivos" element={<AdminFiles />} />
                 <Route path="/configuracoes" element={<AdminSettings />} />

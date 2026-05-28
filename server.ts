@@ -8801,6 +8801,98 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
+  // -------------------------------- Admin Reviews --------------------------------
+  app.get('/api/admin/reviews', authenticate, isAdmin, async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string, 10) || 1;
+      const limit = parseInt(req.query.limit as string, 10) || 10;
+      const offset = (page - 1) * limit;
+      const statusFilter = req.query.status as string;
+      const search = req.query.q as string;
+
+      let whereClause = 'WHERE 1=1';
+      const params: any[] = [];
+
+      if (statusFilter && statusFilter !== 'all') {
+        whereClause += ' AND r.status = ?';
+        params.push(statusFilter);
+      }
+
+      if (search) {
+        whereClause += ' AND (r.comment LIKE ? OR u.name LIKE ? OR p.name LIKE ?)';
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      }
+
+      const reviews = await dbAsync.all(`
+        SELECT r.*, u.name as user_name, u.email as user_email, p.name as product_name, p.slug as product_slug
+        FROM reviews r
+        LEFT JOIN users u ON r.user_id = u.id
+        LEFT JOIN products p ON r.product_id = p.id
+        ${whereClause}
+        ORDER BY r.created_at DESC
+        LIMIT ? OFFSET ?
+      `, ...params, limit, offset) as any[];
+
+      const totalRow = await dbAsync.get(`
+        SELECT COUNT(*) as total
+        FROM reviews r
+        LEFT JOIN users u ON r.user_id = u.id
+        LEFT JOIN products p ON r.product_id = p.id
+        ${whereClause}
+      `, ...params) as any;
+
+      const total = totalRow?.total || 0;
+      const pages = Math.ceil(total / limit) || 1;
+
+      res.json({
+        reviews,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages
+        }
+      });
+    } catch (error) {
+      console.error('Fetch admin reviews error:', error);
+      res.status(500).json({ error: 'Erro ao buscar avaliaÃ§Ãµes no painel de controle' });
+    }
+  });
+
+  app.patch('/api/admin/reviews/:id/status', authenticate, isAdmin, async (req, res) => {
+    try {
+      const reviewId = Number(req.params.id);
+      const { status } = req.body;
+
+      if (!['approved', 'pending', 'rejected'].includes(status)) {
+        return res.status(400).json({ error: 'Status invÃ¡lido. Escolha: approved, pending ou rejected.' });
+      }
+
+      const review = await dbAsync.get('SELECT id FROM reviews WHERE id = ?', reviewId);
+      if (!review) return res.status(404).json({ error: 'AvaliaÃ§Ã£o nÃ£o encontrada' });
+
+      await dbAsync.run('UPDATE reviews SET status = ? WHERE id = ?', status, reviewId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Moderate review error:', error);
+      res.status(500).json({ error: 'Erro ao moderar status da avaliaÃ§Ã£o' });
+    }
+  });
+
+  app.delete('/api/admin/reviews/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const reviewId = Number(req.params.id);
+      const review = await dbAsync.get('SELECT id FROM reviews WHERE id = ?', reviewId);
+      if (!review) return res.status(404).json({ error: 'AvaliaÃ§Ã£o nÃ£o encontrada' });
+
+      await dbAsync.run('DELETE FROM reviews WHERE id = ?', reviewId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Delete review error:', error);
+      res.status(500).json({ error: 'Erro ao excluir avaliaÃ§Ã£o' });
+    }
+  });
+
 
 
   // -------------------------------- PayPal Utilities --------------------------------

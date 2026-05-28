@@ -14,7 +14,8 @@ import {
   Mail,
   Activity,
   ShieldCheck,
-  FolderOpen
+  FolderOpen,
+  Star
 } from 'lucide-react';
 import { useAppData } from '../contexts/AppDataContext';
 
@@ -36,6 +37,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { icon: Tag, label: 'Tags', path: '/admin/tags' },
     { icon: ShoppingCart, label: 'Pedidos', path: '/admin/pedidos' },
     { icon: Users, label: 'Clientes', path: '/admin/clientes' },
+    { icon: Star, label: 'Avaliações', path: '/admin/avaliacoes' },
     { icon: BarChart3, label: 'Relatórios', path: '/admin/relatorios' },
     { icon: FolderOpen, label: 'Arquivos', path: '/admin/arquivos' },
     { icon: Settings, label: 'Configurações', path: '/admin/configuracoes' },
