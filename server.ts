@@ -261,7 +261,7 @@ function sanitizeRichHtml(input: any): string {
     code: new Set(['class']),
     pre: new Set(['class']),
   };
-  const globalAllowedAttrs = new Set(['class', 'title', 'aria-label']);
+  const globalAllowedAttrs = new Set(['class', 'title', 'aria-label', 'style']);
 
   const escapeAttr = (value: string) =>
     String(value || '')
