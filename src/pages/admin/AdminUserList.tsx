@@ -12,7 +12,7 @@ import {
   Save,
   Download,
 } from 'lucide-react';
-
+import { normalizePublicMediaUrl } from '../../lib/utils';
 interface UserType {
   id: number;
   name: string;
@@ -838,9 +838,23 @@ export default function AdminUserList() {
                           {order.items && order.items.length > 0 ? (
                             order.items.map((item: any, idx: number) => (
                               <div key={idx} className="p-3.5 flex items-center justify-between text-xs font-bold text-slate-700 hover:bg-slate-100/30 transition-colors">
-                                <div className="flex flex-col min-w-0 pr-4">
-                                  <span className="text-slate-800 uppercase font-black truncate">{item.product_name || 'Produto sem nome'}</span>
-                                  {item.product_slug && <span className="text-[9px] text-slate-400 font-bold">Slug: {item.product_slug}</span>}
+                                <div className="flex items-center gap-3 min-w-0 pr-4">
+                                  {/* Imagem do Produto */}
+                                  <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-100 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                                    {item.product_image ? (
+                                      <img 
+                                        src={normalizePublicMediaUrl(item.product_image)} 
+                                        alt={item.product_name || ''} 
+                                        className="w-full h-full object-cover" 
+                                      />
+                                    ) : (
+                                      <ShoppingBag className="w-5 h-5 text-slate-300" />
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-slate-800 uppercase font-black truncate">{item.product_name || 'Produto sem nome'}</span>
+                                    {item.product_slug && <span className="text-[9px] text-slate-400 font-bold">Slug: {item.product_slug}</span>}
+                                  </div>
                                 </div>
                                 <div className="flex items-center gap-6 flex-shrink-0">
                                   <span className="text-slate-400 font-medium">Qtd: {item.quantity || 1}</span>

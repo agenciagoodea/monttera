@@ -6998,7 +6998,7 @@ async function startServer() {
       // Para cada pedido, buscar os itens comprados
       const ordersWithItems = await Promise.all(orders.map(async (order) => {
         const items = await dbAsync.all(`
-          SELECT oi.*, COALESCE(oi.product_name, p.name, 'Produto sem nome') as product_name
+          SELECT oi.*, COALESCE(oi.product_name, p.name, 'Produto sem nome') as product_name, p.image as product_image
           FROM order_items oi
           LEFT JOIN products p ON oi.product_id = p.id
           WHERE oi.order_id = ?
