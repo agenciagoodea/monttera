@@ -3534,44 +3534,54 @@ async function startServer() {
       `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextImageAlt, nextProductionSheet, nextSeoTitle, nextSeoDescription, nextSeoKeywords, nextCanonicalUrl, nextNoindex, productId);
 
       if (nextImagePath !== existingProduct.image && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.includes('/uploads/')) {
-        // Verificar se outro produto usa o mesmo arquivo antes de apagar
-        const otherProductWithSameImage = await dbAsync.get(
-          'SELECT id FROM products WHERE image = ? AND id <> ? LIMIT 1',
-          existingProduct.image, productId
-        );
-        if (!otherProductWithSameImage) {
-          const oldImageRelative = existingProduct.image.replace(/^https?:\/\/[^/]+/i, '');
-          const oldImageFsPath = path.join(process.cwd(), 'public', oldImageRelative.replace('/uploads/', 'uploads/'));
-          try {
-            if (fs.existsSync(oldImageFsPath)) {
-              fs.unlinkSync(oldImageFsPath);
+        // Verificar se os nomes físicos de arquivo base são diferentes antes de apagar
+        const oldBase = path.basename(existingProduct.image.split('?')[0]);
+        const newBase = nextImagePath ? path.basename(nextImagePath.split('?')[0]) : '';
+        if (oldBase !== newBase) {
+          // Verificar se outro produto usa o mesmo arquivo antes de apagar
+          const otherProductWithSameImage = await dbAsync.get(
+            'SELECT id FROM products WHERE image = ? AND id <> ? LIMIT 1',
+            existingProduct.image, productId
+          );
+          if (!otherProductWithSameImage) {
+            const oldImageRelative = existingProduct.image.replace(/^https?:\/\/[^/]+/i, '');
+            const oldImageFsPath = path.join(process.cwd(), 'public', oldImageRelative.replace('/uploads/', 'uploads/'));
+            try {
+              if (fs.existsSync(oldImageFsPath)) {
+                fs.unlinkSync(oldImageFsPath);
+              }
+            } catch (fileError) {
+              console.warn('Falha ao remover imagem antiga:', fileError);
             }
-          } catch (fileError) {
-            console.warn('Falha ao remover imagem antiga:', fileError);
+          } else {
+            console.info(`[PUT /products/${productId}] Imagem antiga compartilhada com produto #${(otherProductWithSameImage as any).id} — arquivo mantido.`);
           }
-        } else {
-          console.info(`[PUT /products/${productId}] Imagem antiga compartilhada com produto #${(otherProductWithSameImage as any).id} — arquivo mantido.`);
         }
       }
 
       if (nextProductionSheet !== existingProduct.production_sheet && existingProduct.production_sheet && typeof existingProduct.production_sheet === 'string' && existingProduct.production_sheet.includes('/uploads/')) {
-        // Verificar se outro produto usa o mesmo PDF antes de apagar
-        const otherProductWithSameSheet = await dbAsync.get(
-          'SELECT id FROM products WHERE production_sheet = ? AND id <> ? LIMIT 1',
-          existingProduct.production_sheet, productId
-        );
-        if (!otherProductWithSameSheet) {
-          const oldSheetRelative = existingProduct.production_sheet.replace(/^https?:\/\/[^/]+/i, '');
-          const oldSheetFsPath = path.join(process.cwd(), 'public', oldSheetRelative.replace('/uploads/', 'uploads/'));
-          try {
-            if (fs.existsSync(oldSheetFsPath)) {
-              fs.unlinkSync(oldSheetFsPath);
+        // Verificar se os nomes físicos de arquivo base são diferentes antes de apagar
+        const oldBase = path.basename(existingProduct.production_sheet.split('?')[0]);
+        const newBase = nextProductionSheet ? path.basename(nextProductionSheet.split('?')[0]) : '';
+        if (oldBase !== newBase) {
+          // Verificar se outro produto usa o mesmo PDF antes de apagar
+          const otherProductWithSameSheet = await dbAsync.get(
+            'SELECT id FROM products WHERE production_sheet = ? AND id <> ? LIMIT 1',
+            existingProduct.production_sheet, productId
+          );
+          if (!otherProductWithSameSheet) {
+            const oldSheetRelative = existingProduct.production_sheet.replace(/^https?:\/\/[^/]+/i, '');
+            const oldSheetFsPath = path.join(process.cwd(), 'public', oldSheetRelative.replace('/uploads/', 'uploads/'));
+            try {
+              if (fs.existsSync(oldSheetFsPath)) {
+                fs.unlinkSync(oldSheetFsPath);
+              }
+            } catch (fileError) {
+              console.warn('Falha ao remover folha de produção antiga:', fileError);
             }
-          } catch (fileError) {
-            console.warn('Falha ao remover folha de produção antiga:', fileError);
+          } else {
+            console.info(`[PUT /products/${productId}] PDF antigo compartilhado com produto #${(otherProductWithSameSheet as any).id} — arquivo mantido.`);
           }
-        } else {
-          console.info(`[PUT /products/${productId}] PDF antigo compartilhado com produto #${(otherProductWithSameSheet as any).id} — arquivo mantido.`);
         }
       }
 
