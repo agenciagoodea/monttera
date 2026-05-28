@@ -7000,7 +7000,10 @@ async function startServer() {
         const items = await dbAsync.all(`
           SELECT oi.*, COALESCE(oi.product_name, p.name, 'Produto sem nome') as product_name, p.image as product_image
           FROM order_items oi
-          LEFT JOIN products p ON oi.product_id = p.id
+          LEFT JOIN products p ON (
+            oi.product_id = p.id OR 
+            (oi.product_id IS NULL AND (oi.product_slug = p.slug OR oi.product_name = p.name))
+          )
           WHERE oi.order_id = ?
         `, order.id);
         return {
