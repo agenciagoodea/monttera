@@ -116,11 +116,12 @@ export default function HtmlRichEditor({ label, value, onChange, placeholder, ro
   }, []);
 
   useEffect(() => {
+    if (isCodeMode) return;
     if (!quillRef.current) return;
     if (value === currentHtmlRef.current) return;
     currentHtmlRef.current = value || '';
     applyHtmlToQuill(quillRef.current, value || '');
-  }, [value]);
+  }, [value, isCodeMode]);
 
   const toggleMode = () => {
     if (!isCodeMode && quillRef.current) {
@@ -158,7 +159,7 @@ export default function HtmlRichEditor({ label, value, onChange, placeholder, ro
         </button>
       </div>
 
-      {isCodeMode ? (
+      <div className={isCodeMode ? 'block' : 'hidden'}>
         <textarea
           rows={rows}
           value={value}
@@ -169,7 +170,9 @@ export default function HtmlRichEditor({ label, value, onChange, placeholder, ro
           className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all resize-y"
           placeholder={placeholder || 'Digite HTML'}
         />
-      ) : (
+      </div>
+
+      <div className={!isCodeMode ? 'block' : 'hidden'}>
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           {!ready && (
             <div className="px-6 py-4 text-xs text-slate-500">Carregando editor...</div>
@@ -182,7 +185,7 @@ export default function HtmlRichEditor({ label, value, onChange, placeholder, ro
             Use o botão de link na barra para inserir URLs.
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
