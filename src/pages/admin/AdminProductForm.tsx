@@ -114,6 +114,78 @@ export default function AdminProductForm() {
     return parts[parts.length - 1] || '';
   })();
 
+  // Função reutilizável para carregar dados de um produto existente
+  const loadProductData = async (productId: string) => {
+    const prodRes = await fetch(`/api/admin/products/${productId}`, { credentials: 'include' });
+    const prod = await prodRes.json();
+    setFormData(() => ({
+      name: prod.name,
+      slug: prod.slug || '',
+      short_description: prod.short_description || '',
+      description: prod.description || '',
+      price: prod.price.toString(),
+      sale_price: prod.sale_price?.toString() || '',
+      category_id: prod.category_id?.toString() || '',
+      stitch_count: prod.stitch_count?.toString() || '',
+      colors: prod.colors || '',
+      is_featured: !!prod.is_featured,
+      is_new: !!prod.is_new,
+      seo_title: prod.seo_title || '',
+      seo_description: prod.seo_description || '',
+      seo_keywords: prod.seo_keywords || '',
+      canonical_url: prod.canonical_url || '',
+      noindex: !!prod.noindex,
+    }));
+    const existingCategoryIds = Array.isArray(prod.category_ids) && prod.category_ids.length > 0
+      ? prod.category_ids
+      : (prod.category_id ? [prod.category_id] : []);
+    setSelectedCategoryIds(existingCategoryIds.map((value: any) => Number(value)).filter((value: number) => Number.isInteger(value) && value > 0));
+    const existingTagIds = Array.isArray(prod.tags)
+      ? prod.tags
+          .map((tag: any) => Number(tag.id))
+          .filter((value: number) => Number.isInteger(value) && value > 0)
+      : [];
+    setSelectedTagIds(existingTagIds);
+    if (Array.isArray(prod.tags) && prod.tags.length > 0) {
+      setAvailableTags((previous) => {
+        const map = new Map<number, TagType>(previous.map((tag) => [tag.id, tag]));
+        prod.tags.forEach((tag: any) => {
+          const numericId = Number(tag.id);
+          if (Number.isInteger(numericId) && numericId > 0) {
+            map.set(numericId, { id: numericId, name: tag.name, usage_count: tag.usage_count });
+          }
+        });
+        return Array.from(map.values()).sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'));
+      });
+    }
+    setProductionSheetUrl(prod.production_sheet || '');
+    setProductionSheetFile(null); // limpar arquivo temporário após recarregar
+    setProductionFiles([]);        // limpar novos arquivos de matriz após recarregar
+    setMainImage(null);            // limpar imagem temporária
+    setGallery([]);                // limpar novas imagens de galeria
+    setNewGalleryAlts([]);
+    setDownloadableFiles(
+      (prod.files || []).map((file: any) => ({
+        file_name: file.file_name,
+        file_path: file.file_path,
+        file_type: file.file_type || 'downloadable',
+      }))
+    );
+    const normalizedMainImage = getPublicAssetUrl(prod.image || '');
+    const normalizedGallery = Array.isArray(prod.images)
+      ? prod.images
+          .map((img: any) => getPublicAssetUrl(img?.full_url || img?.url || ''))
+          .filter(Boolean)
+      : [];
+    const loadedExistingGalleryAlts = Array.isArray(prod.images)
+      ? prod.images.map((img: any) => String(img?.alt_text || '').trim())
+      : [];
+    setPreviews({ main: normalizedMainImage || '', gallery: [...normalizedGallery] });
+    setMainImageAlt(String(prod.image_alt || '').trim());
+    setExistingGalleryUrls(normalizedGallery);
+    setExistingGalleryAlts(loadedExistingGalleryAlts);
+  };
+
   useEffect(() => {
     async function fetchData() {
       const parseResponseArray = async (res: Response, label: string) => {
@@ -147,76 +219,7 @@ export default function AdminProductForm() {
       setTopUsedTags(topTagsData as TagType[]);
 
       if (id) {
-        const prodRes = await fetch(`/api/admin/products/${id}`, { credentials: 'include' });
-        const prod = await prodRes.json();
-        setFormData(() => ({
-          name: prod.name,
-          slug: prod.slug || '',
-          short_description: prod.short_description || '',
-          description: prod.description || '',
-          price: prod.price.toString(),
-          sale_price: prod.sale_price?.toString() || '',
-          category_id: prod.category_id?.toString() || '',
-          stitch_count: prod.stitch_count?.toString() || '',
-          colors: prod.colors || '',
-          is_featured: !!prod.is_featured,
-          is_new: !!prod.is_new,
-          seo_title: prod.seo_title || '',
-          seo_description: prod.seo_description || '',
-          seo_keywords: prod.seo_keywords || '',
-          canonical_url: prod.canonical_url || '',
-          noindex: !!prod.noindex,
-        }));
-        const existingCategoryIds = Array.isArray(prod.category_ids) && prod.category_ids.length > 0
-          ? prod.category_ids
-          : (prod.category_id ? [prod.category_id] : []);
-        setSelectedCategoryIds(existingCategoryIds.map((value: any) => Number(value)).filter((value: number) => Number.isInteger(value) && value > 0));
-        const existingTagIds = Array.isArray(prod.tags)
-          ? prod.tags
-              .map((tag: any) => Number(tag.id))
-              .filter((value: number) => Number.isInteger(value) && value > 0)
-          : [];
-        setSelectedTagIds(existingTagIds);
-        if (Array.isArray(prod.tags) && prod.tags.length > 0) {
-          setAvailableTags((previous) => {
-            const map = new Map<number, TagType>(previous.map((tag) => [tag.id, tag]));
-            prod.tags.forEach((tag: any) => {
-              const numericId = Number(tag.id);
-              if (Number.isInteger(numericId) && numericId > 0) {
-                map.set(numericId, { id: numericId, name: tag.name, usage_count: tag.usage_count });
-              }
-            });
-            return Array.from(map.values()).sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'));
-          });
-        }
-        setProductionSheetUrl(prod.production_sheet || '');
-        setDownloadableFiles(
-          (prod.files || []).map((file: any) => ({
-            file_name: file.file_name,
-            file_path: file.file_path,
-            file_type: file.file_type || 'downloadable',
-          }))
-        );
-        const normalizedMainImage = getPublicAssetUrl(prod.image || '');
-        const normalizedGallery = Array.isArray(prod.images)
-          ? prod.images
-              .map((img: any) => getPublicAssetUrl(img?.full_url || img?.url || ''))
-              .filter(Boolean)
-          : [];
-        const loadedExistingGalleryAlts = Array.isArray(prod.images)
-          ? prod.images.map((img: any) => String(img?.alt_text || '').trim())
-          : [];
-        if (normalizedMainImage) setPreviews(p => ({ ...p, main: normalizedMainImage }));
-        setMainImageAlt(String(prod.image_alt || '').trim());
-        setExistingGalleryUrls(normalizedGallery);
-        setExistingGalleryAlts(loadedExistingGalleryAlts);
-        setNewGalleryAlts([]);
-        setPreviews(p => ({ ...p, gallery: [...normalizedGallery] }));
-        if (import.meta.env.DEV) {
-          console.debug('[AdminProductForm] production_sheet db/raw:', prod.production_sheet);
-          console.debug('[AdminProductForm] production_sheet normalized:', normalizePublicMediaUrl(prod.production_sheet || ''));
-          console.debug('[AdminProductForm] gallery normalized:', normalizedGallery);
-        }
+        await loadProductData(id);
       }
     }
     fetchData();
@@ -664,12 +667,21 @@ export default function AdminProductForm() {
       .map((value) => Number(value))
       .filter((value) => Number.isInteger(value) && value > 0);
     const primaryCategoryId = normalizedCategoryIds[0] ? String(normalizedCategoryIds[0]) : '';
-    const payload = { ...formData, category_id: primaryCategoryId };
 
     const data = new FormData();
-    Object.entries(payload).forEach(([key, value]) => {
-      data.append(key, String(value));
+
+    // Enviar apenas campos de texto/número — excluir booleanos que seriam convertidos
+    // em 'true'/'false' e poderiam confundir o servidor (is_featured e is_new não estão no UPDATE)
+    const textFields: Array<keyof typeof formData> = [
+      'name', 'slug', 'short_description', 'description',
+      'price', 'sale_price', 'stitch_count', 'colors',
+      'seo_title', 'seo_description', 'seo_keywords', 'canonical_url'
+    ];
+    textFields.forEach(key => {
+      data.append(key as string, String(formData[key] ?? ''));
     });
+    data.append('category_id', primaryCategoryId);
+    data.append('noindex', formData.noindex ? '1' : '0');
 
     if (mainImage) data.append('image', mainImage);
     data.append('image_alt', mainImageAlt);
@@ -677,11 +689,23 @@ export default function AdminProductForm() {
     data.append('gallery_urls', JSON.stringify(existingGalleryUrls));
     data.append('gallery_alts_existing', JSON.stringify(existingGalleryAlts));
     data.append('gallery_alts_new', JSON.stringify(newGalleryAlts));
+
+    // Se há novos arquivos de matriz para upload, enviar apenas eles (o servidor substituirá os existentes)
+    // Os downloadableFiles existentes só são reenviados se NÃO há novos arquivos físicos
     productionFiles.forEach(f => data.append('production_files', f));
+    if (productionFiles.length === 0) {
+      // Sem novos arquivos físicos: reenviar lista dos existentes para preservação
+      data.append('downloadable_files', JSON.stringify(downloadableFiles));
+    } else {
+      // Com novos arquivos físicos: não reenviar os existentes para evitar duplicação
+      // O servidor apagará os antigos e usará apenas os novos production_files
+      data.append('downloadable_files', JSON.stringify([]));
+    }
+
     data.append('tags', JSON.stringify(selectedTagIds));
-    data.append('promotional_price', payload.sale_price);
+    data.append('promotional_price', String(formData.sale_price ?? ''));
     data.append('category_ids', JSON.stringify(normalizedCategoryIds));
-    data.append('downloadable_files', JSON.stringify(downloadableFiles));
+
     if (productionSheetFile) {
       data.append('production_sheet', productionSheetFile);
     } else {
@@ -702,6 +726,9 @@ export default function AdminProductForm() {
         const responsePayload = await res.json().catch(() => ({} as any));
 
         if (id) {
+          // Recarregar os dados do servidor para sincronizar o estado do formulário
+          // Isso evita duplicação de arquivos em salvamentos subsequentes
+          await loadProductData(id);
           alert('Produto atualizado com sucesso.');
           return;
         }

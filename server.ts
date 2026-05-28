@@ -3532,26 +3532,44 @@ async function startServer() {
       `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextImageAlt, nextProductionSheet, nextSeoTitle, nextSeoDescription, nextSeoKeywords, nextCanonicalUrl, nextNoindex, productId);
 
       if (nextImagePath !== existingProduct.image && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.includes('/uploads/')) {
-        const oldImageRelative = existingProduct.image.replace(/^https?:\/\/[^/]+/i, '');
-        const oldImageFsPath = path.join(process.cwd(), 'public', oldImageRelative.replace('/uploads/', 'uploads/'));
-        try {
-          if (fs.existsSync(oldImageFsPath)) {
-            fs.unlinkSync(oldImageFsPath);
+        // Verificar se outro produto usa o mesmo arquivo antes de apagar
+        const otherProductWithSameImage = await dbAsync.get(
+          'SELECT id FROM products WHERE image = ? AND id <> ? LIMIT 1',
+          existingProduct.image, productId
+        );
+        if (!otherProductWithSameImage) {
+          const oldImageRelative = existingProduct.image.replace(/^https?:\/\/[^/]+/i, '');
+          const oldImageFsPath = path.join(process.cwd(), 'public', oldImageRelative.replace('/uploads/', 'uploads/'));
+          try {
+            if (fs.existsSync(oldImageFsPath)) {
+              fs.unlinkSync(oldImageFsPath);
+            }
+          } catch (fileError) {
+            console.warn('Falha ao remover imagem antiga:', fileError);
           }
-        } catch (fileError) {
-          console.warn('Falha ao remover imagem antiga:', fileError);
+        } else {
+          console.info(`[PUT /products/${productId}] Imagem antiga compartilhada com produto #${(otherProductWithSameImage as any).id} — arquivo mantido.`);
         }
       }
 
       if (nextProductionSheet !== existingProduct.production_sheet && existingProduct.production_sheet && typeof existingProduct.production_sheet === 'string' && existingProduct.production_sheet.includes('/uploads/')) {
-        const oldSheetRelative = existingProduct.production_sheet.replace(/^https?:\/\/[^/]+/i, '');
-        const oldSheetFsPath = path.join(process.cwd(), 'public', oldSheetRelative.replace('/uploads/', 'uploads/'));
-        try {
-          if (fs.existsSync(oldSheetFsPath)) {
-            fs.unlinkSync(oldSheetFsPath);
+        // Verificar se outro produto usa o mesmo PDF antes de apagar
+        const otherProductWithSameSheet = await dbAsync.get(
+          'SELECT id FROM products WHERE production_sheet = ? AND id <> ? LIMIT 1',
+          existingProduct.production_sheet, productId
+        );
+        if (!otherProductWithSameSheet) {
+          const oldSheetRelative = existingProduct.production_sheet.replace(/^https?:\/\/[^/]+/i, '');
+          const oldSheetFsPath = path.join(process.cwd(), 'public', oldSheetRelative.replace('/uploads/', 'uploads/'));
+          try {
+            if (fs.existsSync(oldSheetFsPath)) {
+              fs.unlinkSync(oldSheetFsPath);
+            }
+          } catch (fileError) {
+            console.warn('Falha ao remover folha de produção antiga:', fileError);
           }
-        } catch (fileError) {
-          console.warn('Falha ao remover folha de produção antiga:', fileError);
+        } else {
+          console.info(`[PUT /products/${productId}] PDF antigo compartilhado com produto #${(otherProductWithSameSheet as any).id} — arquivo mantido.`);
         }
       }
 
@@ -3812,6 +3830,26 @@ async function startServer() {
       const duplicatedSlug = await createUniqueProductSlug(duplicatedName);
 
       const duplicatedId = await dbAsync.transaction(async (conn) => {
+        // --- Copiar fisicamente a imagem principal para evitar compartilhamento de arquivo ---
+        let duplicatedImagePath: string | null = source.image || null;
+        if (source.image && typeof source.image === 'string' && source.image.includes('/uploads/')) {
+          try {
+            const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+            const ext = path.extname(source.image.split('?')[0]) || '.jpg';
+            // Nome temporário até termos o newId; usamos timestamp para unicidade
+            const tempCopyName = `copy_${Date.now()}${ext}`;
+            const srcFsPath = path.join(process.cwd(), 'public', source.image.replace(/^\//, ''));
+            const destFsPath = path.join(publicUploadsDir, tempCopyName);
+            if (fs.existsSync(srcFsPath)) {
+              fs.copyFileSync(srcFsPath, destFsPath);
+              duplicatedImagePath = `/uploads/${tempCopyName}`;
+            }
+          } catch (copyErr) {
+            console.warn('[duplicate] Falha ao copiar imagem:', copyErr);
+            // Manter referência original se falhar — será corrigida manualmente
+          }
+        }
+
         const [result] = await conn.execute(`
           INSERT INTO products (
             name, slug, description, short_description, price, sale_price,
@@ -3827,8 +3865,8 @@ async function startServer() {
           source.short_description || null,
           source.price || 0,
           source.sale_price ?? null,
-          source.image || null,
-          source.production_sheet || null,
+          duplicatedImagePath,
+          null, // production_sheet NAO copiado (arquivo ZIP é privado e seria compartilhado)
           source.category_id || null,
           source.type || 'simple',
           source.is_virtual ?? 1,
@@ -3846,6 +3884,24 @@ async function startServer() {
         ] as any);
         const newId = Number((result as any).insertId || 0);
         if (!newId) throw new Error('duplicate_insert_failed');
+
+        // Renomear a cópia da imagem para incluir o ID do novo produto (nome correto)
+        if (duplicatedImagePath && duplicatedImagePath.includes('/uploads/copy_')) {
+          try {
+            const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+            const ext = path.extname(duplicatedImagePath.split('?')[0]) || '.jpg';
+            const finalName = buildProductMediaName(duplicatedSlug, newId, ext);
+            const srcFsPath = path.join(publicUploadsDir, path.basename(duplicatedImagePath));
+            const destFsPath = path.join(publicUploadsDir, finalName);
+            if (fs.existsSync(srcFsPath)) {
+              fs.renameSync(srcFsPath, destFsPath);
+              duplicatedImagePath = `/uploads/${finalName}`;
+              await conn.execute('UPDATE products SET image = ? WHERE id = ?', [duplicatedImagePath, newId] as any);
+            }
+          } catch (renameErr) {
+            console.warn('[duplicate] Falha ao renomear cópia da imagem:', renameErr);
+          }
+        }
 
         await conn.execute(`
           INSERT INTO product_tag_relations (product_id, tag_id)
