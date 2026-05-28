@@ -6934,6 +6934,8 @@ async function startServer() {
       const offset = (page - 1) * limit;
       const searchTerm = String(req.query.search || '').trim().toLowerCase();
       const roleFilter = String(req.query.role || 'all').trim().toLowerCase();
+      const sortBy = String(req.query.sortBy || 'created_at').trim().toLowerCase();
+      const sortOrder = String(req.query.sortOrder || 'desc').trim().toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
       const { whereClause, params } = buildUsersBaseQuery({ searchTerm, roleFilter });
 
       const totalRow = await dbAsync.get(`
@@ -6942,6 +6944,15 @@ async function startServer() {
         ${whereClause}
       `, ...params) as any;
       const total = Number(totalRow?.total || 0);
+
+      let orderBy = 'u.created_at';
+      if (sortBy === 'order_count') {
+        orderBy = 'order_count';
+      } else if (sortBy === 'total_spent') {
+        orderBy = 'total_spent';
+      } else if (sortBy === 'name') {
+        orderBy = 'u.name';
+      }
 
       const users = await dbAsync.all(`
         SELECT 
@@ -6953,7 +6964,7 @@ async function startServer() {
         FROM users u
         LEFT JOIN customers c ON c.user_id = u.id
         ${whereClause}
-        ORDER BY u.created_at DESC
+        ORDER BY ${orderBy} ${sortOrder}
         LIMIT ? OFFSET ?
       `, ...params, limit, offset);
 
@@ -6969,6 +6980,39 @@ async function startServer() {
     } catch (error) {
       console.error('Admin Fetch Users Error:', error);
       res.status(500).json({ error: 'Erro ao buscar usuários' });
+    }
+  });
+
+  app.get('/api/admin/users/:id/orders', authenticate, isAdmin, async (req, res) => {
+    try {
+      const userId = Number(req.params.id);
+      
+      // Buscar todos os pedidos do usuário
+      const orders = await dbAsync.all(`
+        SELECT o.* 
+        FROM orders o
+        WHERE o.user_id = ?
+        ORDER BY o.created_at DESC
+      `, userId) as any[];
+
+      // Para cada pedido, buscar os itens comprados
+      const ordersWithItems = await Promise.all(orders.map(async (order) => {
+        const items = await dbAsync.all(`
+          SELECT oi.*, p.name as product_name
+          FROM order_items oi
+          LEFT JOIN products p ON oi.product_id = p.id
+          WHERE oi.order_id = ?
+        `, order.id);
+        return {
+          ...order,
+          items
+        };
+      }));
+
+      res.json(ordersWithItems);
+    } catch (error) {
+      console.error('Admin Fetch User Orders Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar pedidos do cliente' });
     }
   });
 

@@ -87,9 +87,19 @@ export default function AdminUserList() {
   const [exporting, setExporting] = useState<'csv' | 'excel' | null>(null);
   const [formData, setFormData] = useState<UserFormState>(emptyForm);
 
+  // Estados de Ordenação
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState('desc');
+
+  // Estados do Modal de Pedidos
+  const [showOrdersModal, setShowOrdersModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<UserType | null>(null);
+  const [userOrders, setUserOrders] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
   useEffect(() => {
     fetchUsers();
-  }, [page, limit, searchTerm, roleFilter]);
+  }, [page, limit, searchTerm, roleFilter, sortBy, sortOrder]);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -99,6 +109,8 @@ export default function AdminUserList() {
         limit: String(limit),
         search: searchTerm,
         role: roleFilter,
+        sortBy,
+        sortOrder,
       });
       const res = await fetch(`/api/admin/users?${params.toString()}`);
       const data = await res.json();
@@ -255,6 +267,8 @@ export default function AdminUserList() {
       }
 
       setShowModal(false);
+
+
       await fetchUsers();
     } catch (error) {
       console.error('Failed to save user:', error);
@@ -287,6 +301,24 @@ export default function AdminUserList() {
       if (res.ok) fetchUsers();
     } catch (error) {
       console.error('Failed to delete user:', error);
+    }
+  };
+
+  const handleOpenUserOrders = async (user: UserType) => {
+    setSelectedUser(user);
+    setShowOrdersModal(true);
+    setLoadingOrders(true);
+    setUserOrders([]);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}/orders`);
+      if (res.ok) {
+        const data = await res.json();
+        setUserOrders(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch user orders:', error);
+    } finally {
+      setLoadingOrders(false);
     }
   };
 
@@ -380,7 +412,22 @@ export default function AdminUserList() {
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Usuário</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Cargo</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Data Cadastro</th>
-                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pedidos</th>
+                <th 
+                  onClick={() => {
+                    const nextOrder = sortBy === 'order_count' && sortOrder === 'desc' ? 'asc' : 'desc';
+                    setSortBy('order_count');
+                    setSortOrder(nextOrder);
+                    setPage(1);
+                  }}
+                  className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest cursor-pointer hover:bg-slate-100/80 transition-colors select-none group/col"
+                >
+                  <div className="flex items-center gap-1">
+                    Pedidos
+                    <span className="text-[8px] font-black text-blue-500 transition-opacity">
+                      {sortBy === 'order_count' ? (sortOrder === 'desc' ? '▼' : '▲') : '⇅'}
+                    </span>
+                  </div>
+                </th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Gasto</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Ações</th>
               </tr>
@@ -421,10 +468,19 @@ export default function AdminUserList() {
                     {new Date(user.created_at).toLocaleDateString('pt-BR')}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-1 text-xs font-black text-slate-600">
+                    <button
+                      onClick={() => handleOpenUserOrders(user)}
+                      disabled={!user.order_count}
+                      className={`flex items-center gap-1.5 text-xs font-black rounded-xl px-2.5 py-1.5 border transition-all active:scale-95 ${
+                        user.order_count 
+                          ? 'text-blue-600 border-blue-150 bg-blue-50/40 hover:bg-blue-600 hover:text-white hover:border-blue-600 cursor-pointer' 
+                          : 'text-slate-400 border-slate-100 bg-slate-50 opacity-60 pointer-events-none'
+                      }`}
+                      title={user.order_count ? 'Visualizar histórico de compras' : 'Nenhum pedido realizado'}
+                    >
                       <ShoppingBag className="w-3.5 h-3.5" />
                       {user.order_count || 0}
-                    </div>
+                    </button>
                   </td>
                   <td className="px-6 py-4 text-xs font-black text-slate-800">
                     R$ {(user.total_spent || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -692,6 +748,134 @@ export default function AdminUserList() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Histórico de Pedidos */}
+      {showOrdersModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-4xl bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex flex-col">
+                <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-blue-600" />
+                  Histórico de Pedidos
+                </h2>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
+                  Cliente: {selectedUser?.name || 'Cliente'} ({selectedUser?.email})
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowOrdersModal(false)} 
+                className="p-2 rounded-xl hover:bg-slate-100 text-slate-500 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4 bg-slate-50/50">
+              {loadingOrders ? (
+                <div className="space-y-4">
+                  {[...Array(2)].map((_, i) => (
+                    <div key={i} className="animate-pulse bg-white p-6 rounded-3xl border border-slate-200 space-y-3">
+                      <div className="h-4 bg-slate-100 rounded w-1/4"></div>
+                      <div className="h-3 bg-slate-100 rounded w-1/2"></div>
+                      <div className="h-10 bg-slate-100 rounded w-full mt-2"></div>
+                    </div>
+                  ))}
+                </div>
+              ) : userOrders.length === 0 ? (
+                <div className="p-16 bg-white rounded-3xl border border-slate-200 text-center">
+                  <ShoppingBag className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                  <p className="text-slate-400 text-xs font-black uppercase tracking-widest">Este cliente não possui nenhum pedido cadastrado.</p>
+                </div>
+              ) : (
+                userOrders.map((order) => {
+                  const getStatusClass = (status: string) => {
+                    const s = String(status).toLowerCase();
+                    if (['paid', 'completed', 'success', 'pago', 'wc-completed', 'wc-processing', 'processing'].includes(s)) {
+                      return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+                    }
+                    if (['pending', 'pendente', 'aguardando'].includes(s)) {
+                      return 'bg-amber-50 text-amber-600 border-amber-100';
+                    }
+                    return 'bg-rose-50 text-rose-600 border-rose-100';
+                  };
+
+                  const getStatusLabel = (status: string) => {
+                    const s = String(status).toLowerCase();
+                    if (['paid', 'completed', 'success', 'pago', 'wc-completed'].includes(s)) return 'Pago';
+                    if (['pending', 'pendente'].includes(s)) return 'Pendente';
+                    if (['processing', 'processing', 'wc-processing'].includes(s)) return 'Processando';
+                    if (['failed', 'cancelado', 'rejeitado', 'failed', 'wc-cancelled', 'wc-failed'].includes(s)) return 'Cancelado';
+                    return status;
+                  };
+
+                  return (
+                    <div key={order.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4 hover:border-blue-100 transition-colors">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-black text-slate-800 uppercase tracking-tight">Pedido #{order.id}</span>
+                          <span className={`px-2.5 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest ${getStatusClass(order.status)}`}>
+                            {getStatusLabel(order.status)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          <span>Data: {new Date(order.created_at).toLocaleDateString('pt-BR')} {new Date(order.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                          {order.payment_method && (
+                            <span className="bg-slate-50 px-2 py-0.5 rounded border border-slate-100 ml-2">
+                              Método: {String(order.payment_method).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Itens Comprados */}
+                      <div className="space-y-2.5">
+                        <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-500">Itens Adquiridos:</h4>
+                        <div className="divide-y divide-slate-50 bg-slate-50/50 rounded-2xl border border-slate-100 overflow-hidden">
+                          {order.items && order.items.length > 0 ? (
+                            order.items.map((item: any, idx: number) => (
+                              <div key={idx} className="p-3.5 flex items-center justify-between text-xs font-bold text-slate-700 hover:bg-slate-100/30 transition-colors">
+                                <div className="flex flex-col min-w-0 pr-4">
+                                  <span className="text-slate-800 uppercase font-black truncate">{item.product_name || 'Produto sem nome'}</span>
+                                  {item.product_slug && <span className="text-[9px] text-slate-400 font-bold">Slug: {item.product_slug}</span>}
+                                </div>
+                                <div className="flex items-center gap-6 flex-shrink-0">
+                                  <span className="text-slate-400 font-medium">Qtd: {item.quantity || 1}</span>
+                                  <span className="text-slate-800 font-black">
+                                    R$ {Number(item.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="p-4 text-center text-slate-400 text-xs italic font-medium">Nenhum detalhe de produto disponível</div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 text-slate-800">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total do Pedido</span>
+                        <span className="text-sm font-black text-blue-600">
+                          R$ {Number(order.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end bg-slate-50/20">
+              <button
+                onClick={() => setShowOrdersModal(false)}
+                className="px-6 py-3 rounded-2xl bg-slate-100 text-slate-700 text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}
