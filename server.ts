@@ -7502,12 +7502,17 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const uploadsTarget = path.join(filesPath, 'public', 'uploads');
       copyDirectoryRecursive(uploadsSource, uploadsTarget);
 
+      // Adicionado: Backup da pasta privada de uploads de matrizes/arquivos (/uploads) na raiz
+      const rootUploadsSource = path.join(process.cwd(), 'uploads');
+      const rootUploadsTarget = path.join(filesPath, 'uploads');
+      copyDirectoryRecursive(rootUploadsSource, rootUploadsTarget);
+
       const metadata = {
         key: backupKey,
         mode,
         created_at: now.toISOString(),
         table_count: allTables.filter((name) => !ignoredTables.has(name)).length,
-        includes: ['database', 'public/uploads'],
+        includes: ['database', 'public/uploads', 'uploads'],
         node_env: process.env.NODE_ENV || 'development',
       };
       safeJsonWrite(path.join(snapshotPath, 'metadata.json'), metadata);
