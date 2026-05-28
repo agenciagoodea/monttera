@@ -3849,7 +3849,23 @@ async function startServer() {
             // Manter referência original se falhar — será corrigida manualmente
           }
         }
-
+        // --- Copiar fisicamente o PDF (Folha de Produção) para evitar compartilhamento ---
+        let duplicatedSheetPath: string | null = source.production_sheet || null;
+        if (source.production_sheet && typeof source.production_sheet === 'string' && source.production_sheet.includes('/uploads/')) {
+          try {
+            const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+            const ext = path.extname(source.production_sheet.split('?')[0]) || '.pdf';
+            const tempCopyName = `copy_sheet_${Date.now()}${ext}`;
+            const srcFsPath = path.join(process.cwd(), 'public', source.production_sheet.replace(/^\//, ''));
+            const destFsPath = path.join(publicUploadsDir, tempCopyName);
+            if (fs.existsSync(srcFsPath)) {
+              fs.copyFileSync(srcFsPath, destFsPath);
+              duplicatedSheetPath = `/uploads/${tempCopyName}`;
+            }
+          } catch (copyErr) {
+            console.warn('[duplicate] Falha ao copiar PDF:', copyErr);
+          }
+        }
         const [result] = await conn.execute(`
           INSERT INTO products (
             name, slug, description, short_description, price, sale_price,
@@ -3866,7 +3882,7 @@ async function startServer() {
           source.price || 0,
           source.sale_price ?? null,
           duplicatedImagePath,
-          null, // production_sheet NAO copiado (arquivo ZIP é privado e seria compartilhado)
+          duplicatedSheetPath, // PDF copiado fisicamente (caminho único)
           source.category_id || null,
           source.type || 'simple',
           source.is_virtual ?? 1,
@@ -3885,7 +3901,7 @@ async function startServer() {
         const newId = Number((result as any).insertId || 0);
         if (!newId) throw new Error('duplicate_insert_failed');
 
-        // Renomear a cópia da imagem para incluir o ID do novo produto (nome correto)
+        // Renomear a cópia da imagem para incluir o ID do novo produto (nome definitivo)
         if (duplicatedImagePath && duplicatedImagePath.includes('/uploads/copy_')) {
           try {
             const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
@@ -3900,6 +3916,24 @@ async function startServer() {
             }
           } catch (renameErr) {
             console.warn('[duplicate] Falha ao renomear cópia da imagem:', renameErr);
+          }
+        }
+
+        // Renomear a cópia do PDF para incluir o ID do novo produto (nome definitivo)
+        if (duplicatedSheetPath && duplicatedSheetPath.includes('/uploads/copy_sheet_')) {
+          try {
+            const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+            const ext = path.extname(duplicatedSheetPath.split('?')[0]) || '.pdf';
+            const finalName = buildProductMediaName(duplicatedSlug, newId, ext);
+            const srcFsPath = path.join(publicUploadsDir, path.basename(duplicatedSheetPath));
+            const destFsPath = path.join(publicUploadsDir, finalName);
+            if (fs.existsSync(srcFsPath)) {
+              fs.renameSync(srcFsPath, destFsPath);
+              duplicatedSheetPath = `/uploads/${finalName}`;
+              await conn.execute('UPDATE products SET production_sheet = ? WHERE id = ?', [duplicatedSheetPath, newId] as any);
+            }
+          } catch (renameErr) {
+            console.warn('[duplicate] Falha ao renomear cópia do PDF:', renameErr);
           }
         }
 
