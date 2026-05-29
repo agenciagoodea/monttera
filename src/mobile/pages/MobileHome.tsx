@@ -12,7 +12,7 @@ export default function MobileHome() {
   const pageParam = parseInt(searchParams.get('page') || '1');
   const categoryParam = searchParams.get('category') || '';
 
-  const { categories } = useAppData();
+  const { categories, settings } = useAppData();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
@@ -22,6 +22,26 @@ export default function MobileHome() {
     currentPage: 1
   });
   const [activeParentForSubcategories, setActiveParentForSubcategories] = useState<any>(null);
+  const [currentBrandIndex, setCurrentBrandIndex] = useState(0);
+
+  const brandLogos = React.useMemo(() => {
+    try {
+      return JSON.parse((settings && settings.brand_logos) || '[]');
+    } catch {
+      return [];
+    }
+  }, [settings]);
+
+  useEffect(() => {
+    if (brandLogos.length <= 2) return;
+    const interval = setInterval(() => {
+      setCurrentBrandIndex((prev) => {
+        const next = prev + 2;
+        return next >= brandLogos.length ? 0 : next;
+      });
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [brandLogos]);
 
   // Filtrar apenas categorias pai ativas
   const parentCategories = React.useMemo(() => {
@@ -278,6 +298,56 @@ export default function MobileHome() {
           </div>
         )}
       </section>
+
+      {/* Seção Marcas Parceiras (Compatível com as principais máquinas) */}
+      {brandLogos.length > 0 && (
+        <section className="mt-4 mb-6 py-8 border-t border-slate-100/80 flex flex-col items-center gap-4 bg-white/50 backdrop-blur-md rounded-[2.5rem] p-6 shadow-sm border border-slate-100">
+          <div className="flex flex-col items-center gap-1.5 mb-2">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.25em] text-center">
+              Compatível com as principais máquinas
+            </span>
+            <div className="h-0.5 w-8 bg-blue-600 rounded-full" />
+          </div>
+
+          <div className="relative w-full overflow-hidden">
+            <div 
+              className="flex gap-4 transition-transform duration-700 ease-in-out"
+              style={{ transform: `translateX(-${(currentBrandIndex / 2) * 100}%)` }}
+            >
+              {brandLogos.map((url, idx) => (
+                <div 
+                  key={idx} 
+                  className="w-[calc(50%-8px)] h-16 bg-white border border-slate-50 rounded-2xl flex-shrink-0 flex items-center justify-center p-3 shadow-[0_4px_16px_rgba(0,0,0,0.01)]"
+                >
+                  <img 
+                    src={url} 
+                    alt="Logo Máquina de Bordar" 
+                    className="max-w-full max-h-full object-contain filter grayscale opacity-75 hover:grayscale-0 hover:opacity-100 transition-all duration-300"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Dots de Paginação */}
+          {brandLogos.length > 2 && (
+            <div className="flex justify-center gap-1.5 mt-2">
+              {Array.from({ length: Math.ceil(brandLogos.length / 2) }).map((_, i) => (
+                <button
+                  key={i}
+                  onClick={() => setCurrentBrandIndex(i * 2)}
+                  className={`w-1.5 h-1.5 rounded-full transition-all duration-300 ${
+                    Math.floor(currentBrandIndex / 2) === i 
+                      ? 'bg-blue-600 w-3' 
+                      : 'bg-slate-200'
+                  }`}
+                  aria-label={`Ir para marcas página ${i + 1}`}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Drawer de Subcategorias */}
       {activeParentForSubcategories && (
