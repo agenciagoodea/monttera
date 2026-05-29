@@ -2277,7 +2277,7 @@ async function startServer() {
   // Middleware de Redirecionamento Automático Mobile <-> Desktop
   app.use((req, res, next) => {
     // Permite desligar via variável de ambiente para emergências ou testes
-    const enableRedirect = String(process.env.ENABLE_MOBILE_REDIRECT || 'false').toLowerCase() === 'true';
+    const enableRedirect = String(process.env.ENABLE_MOBILE_REDIRECT || 'true').toLowerCase() === 'true';
     if (!enableRedirect) return next();
 
     const path = String(req.path || '');
