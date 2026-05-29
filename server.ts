@@ -2466,14 +2466,32 @@ async function startServer() {
 
       const searchTerm = `%${queryStr.trim()}%`;
       
-      // Busca direta e simples
+      // Busca avançada abrangendo categorias, subcategorias (filhas) e com limite expandido de 100 itens
       const products = await dbAsync.all(`
-        SELECT id, name, slug, price, sale_price, image 
-        FROM products 
-        WHERE (name LIKE ? OR slug LIKE ? OR description LIKE ?)
-        AND status IN ('active', 'ativo')
-        LIMIT 10
-      `, searchTerm, searchTerm, searchTerm);
+        SELECT DISTINCT p.id, p.name, p.slug, p.price, p.sale_price, p.image 
+        FROM products p
+        WHERE (
+          p.name LIKE ? 
+          OR p.slug LIKE ? 
+          OR p.description LIKE ?
+          OR EXISTS (
+            SELECT 1
+            FROM product_category_relations pcr
+            JOIN product_categories c ON c.id = pcr.category_id
+            LEFT JOIN product_categories parent ON parent.id = c.parent_id
+            WHERE pcr.product_id = p.id
+              AND (
+                c.name LIKE ?
+                OR c.slug LIKE ?
+                OR parent.name LIKE ?
+                OR parent.slug LIKE ?
+              )
+          )
+        )
+        AND p.status IN ('active', 'ativo')
+        ORDER BY p.id DESC
+        LIMIT 100
+      `, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
 
       return res.json(products);
     } catch (error: any) {
