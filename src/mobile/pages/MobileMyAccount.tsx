@@ -66,6 +66,8 @@ export default function MobileMyAccount() {
     firstName: '',
     lastName: '',
     email: '',
+    phone: '',
+    cpf: '',
     avatarUrl: '',
   });
 
@@ -118,6 +120,8 @@ export default function MobileMyAccount() {
             firstName: uData.first_name || firstName || '',
             lastName: uData.last_name || rest.join(' ') || '',
             email: uData.email || user?.email || '',
+            phone: uData.phone || '',
+            cpf: uData.cpf || '',
             avatarUrl: uData.avatar_url || '',
           });
 
@@ -193,6 +197,8 @@ export default function MobileMyAccount() {
           last_name: profile.lastName,
           display_name: `${profile.firstName} ${profile.lastName}`.trim(),
           email: profile.email,
+          phone: profile.phone,
+          cpf: profile.cpf,
         }),
       });
       const data = await res.json();
@@ -781,6 +787,31 @@ export default function MobileMyAccount() {
                         onChange={(e) => setProfile(prev => ({ ...prev, email: e.target.value }))}
                         className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
                       />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3.5">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Telefone / WhatsApp</label>
+                        <input
+                          type="text"
+                          required
+                          value={profile.phone}
+                          onChange={(e) => setProfile(prev => ({ ...prev, phone: e.target.value }))}
+                          className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                          placeholder="(00) 00000-0000"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">CPF</label>
+                        <input
+                          type="text"
+                          required
+                          value={profile.cpf}
+                          onChange={(e) => setProfile(prev => ({ ...prev, cpf: e.target.value }))}
+                          className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                          placeholder="000.000.000-00"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
