@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
-import { User, ShieldCheck, Download, ShoppingBag, MapPin, Lock, LogOut, Loader2, Check, AlertCircle, FileText, ChevronDown } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { User, ShieldCheck, Download, ShoppingBag, MapPin, Lock, LogOut, Loader2, Check, AlertCircle, FileText, ChevronDown, Heart, ExternalLink } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
 
-type TabType = 'downloads' | 'orders' | 'address' | 'profile';
+type TabType = 'downloads' | 'orders' | 'address' | 'profile' | 'favorites';
 
 export default function MobileMyAccount() {
   const { user, logout } = useAuth();
@@ -19,7 +19,10 @@ export default function MobileMyAccount() {
     firstName: '',
     lastName: '',
     email: '',
+    avatarUrl: '',
   });
+
+  const [favorites, setFavorites] = useState<any[]>([]);
 
   const [passwordState, setPasswordState] = useState({
     currentPassword: '',
@@ -44,18 +47,21 @@ export default function MobileMyAccount() {
     async function loadAccountData() {
       setLoading(true);
       try {
-        const [accRes, ordersRes, downloadsRes] = await Promise.all([
+        const [accRes, ordersRes, downloadsRes, favsRes] = await Promise.all([
           fetch('/api/customer/account'),
           fetch('/api/customer/orders'),
           fetch('/api/customer/downloads'),
+          fetch('/api/favorites'),
         ]);
 
         const accData = accRes.ok ? await accRes.json() : null;
         const ordersData = ordersRes.ok ? await ordersRes.json() : [];
         const downloadsData = downloadsRes.ok ? await downloadsRes.json() : [];
+        const favsData = favsRes.ok ? await favsRes.json() : { favorites: [] };
 
         setOrders(ordersData);
         setDownloads(downloadsData);
+        setFavorites(favsData.favorites || []);
 
         const uData = accData?.user ?? accData;
         if (uData && !uData.error) {
@@ -64,6 +70,7 @@ export default function MobileMyAccount() {
             firstName: uData.first_name || firstName || '',
             lastName: uData.last_name || rest.join(' ') || '',
             email: uData.email || user?.email || '',
+            avatarUrl: uData.avatar_url || '',
           });
 
           setAddress({
@@ -110,11 +117,12 @@ export default function MobileMyAccount() {
     setStatusType('');
     try {
       const res = await fetch('/api/customer/profile', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          firstName: profile.firstName,
-          lastName: profile.lastName,
+          first_name: profile.firstName,
+          last_name: profile.lastName,
+          display_name: `${profile.firstName} ${profile.lastName}`.trim(),
           email: profile.email,
         }),
       });
@@ -143,11 +151,12 @@ export default function MobileMyAccount() {
     }
     try {
       const res = await fetch('/api/customer/password', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          currentPassword: passwordState.currentPassword,
-          newPassword: passwordState.newPassword,
+          current_password: passwordState.currentPassword,
+          new_password: passwordState.newPassword,
+          confirm_new_password: passwordState.confirmPassword,
         }),
       });
       const data = await res.json();
@@ -170,16 +179,21 @@ export default function MobileMyAccount() {
     setStatusMessage('');
     setStatusType('');
     try {
+      const billingPayload = {
+        address: address.street,
+        number: address.number,
+        neighborhood: address.neighborhood,
+        city: address.city,
+        state: address.state,
+        zip: address.zip_code.replace(/\D/g, ''),
+        country: 'BR',
+      };
       const res = await fetch('/api/customer/addresses', {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          billing_zip: address.zip_code,
-          billing_address: address.street,
-          billing_number: address.number,
-          billing_neighborhood: address.neighborhood,
-          billing_city: address.city,
-          billing_state: address.state,
+          billing: billingPayload,
+          shipping: billingPayload,
         }),
       });
       const data = await res.json();
@@ -232,9 +246,13 @@ export default function MobileMyAccount() {
       <section className="bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-700 text-white rounded-[2.5rem] p-6 shadow-xl shadow-blue-500/10 relative overflow-hidden flex items-center gap-4">
         <div className="absolute -top-10 -right-10 w-28 h-28 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
         
-        {/* Avatar Redondo Otimizado */}
-        <div className="w-16 h-16 rounded-3xl bg-white/20 backdrop-blur-md border border-white/20 flex items-center justify-center text-xl font-black text-white shadow-md">
-          {getUserInitials()}
+        {/* Avatar Redondo - Exibe imagem real se disponível */}
+        <div className="w-16 h-16 rounded-3xl bg-white/20 backdrop-blur-md border border-white/20 flex items-center justify-center text-xl font-black text-white shadow-md overflow-hidden flex-shrink-0">
+          {profile.avatarUrl ? (
+            <img src={profile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+          ) : (
+            <span>{getUserInitials()}</span>
+          )}
         </div>
 
         <div className="flex flex-col gap-1 min-w-0">
@@ -291,7 +309,7 @@ export default function MobileMyAccount() {
               {downloads.length > 0 ? (
                 <div className="flex flex-col gap-3.5">
                   {downloads.map((item) => (
-                    <div key={item.id} className="bg-white rounded-2xl border border-slate-50 p-4 shadow-sm flex items-center gap-3">
+                    <div key={item.id} className="bg-white rounded-2xl border border-slate-50 p-4 shadow-sm flex items-start gap-3">
                       <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-2xl overflow-hidden flex-shrink-0">
                         <img src={item.product_image || ''} alt={item.product_name} className="w-full h-full object-cover" />
                       </div>
@@ -302,12 +320,24 @@ export default function MobileMyAccount() {
                         <span className="text-[8px] font-extrabold text-slate-400 block mt-0.5 uppercase">
                           Pedido: #{item.order_id} • Formatos inclusos
                         </span>
-                        <a
-                          href={`/api/customer/download-file?path=${encodeURIComponent(item.file_path || '')}`}
-                          className="mt-2.5 w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-md shadow-emerald-50 active:scale-95 transition-all text-center"
-                        >
-                          <Download className="w-3.5 h-3.5" /> Baixar ZIP
-                        </a>
+                        <div className="mt-2.5 flex flex-col gap-2">
+                          <a
+                            href={`/api/customer/download-file?path=${encodeURIComponent(item.file_path || '')}`}
+                            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-md shadow-emerald-50 active:scale-95 transition-all text-center"
+                          >
+                            <Download className="w-3.5 h-3.5" /> Baixar ZIP
+                          </a>
+                          {item.production_sheet && (
+                            <a
+                              href={item.production_sheet}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full bg-rose-500 hover:bg-rose-600 text-white py-2 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-md shadow-rose-50 active:scale-95 transition-all text-center"
+                            >
+                              <FileText className="w-3.5 h-3.5" /> Folha de Produção
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -390,7 +420,69 @@ export default function MobileMyAccount() {
           )}
         </div>
 
-        {/* 3. SEÇÃO: ENDEREÇO */}
+        {/* 3. SEÇÃO: FAVORITOS */}
+        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-[0_4px_16px_rgba(0,0,0,0.01)] overflow-hidden transition-all duration-300">
+          <button
+            onClick={() => toggleSection('favorites')}
+            className="w-full px-5 py-4.5 flex items-center justify-between text-left active:bg-slate-50 transition-colors focus:outline-none"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center">
+                <Heart className="w-5 h-5" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[11px] font-black text-slate-800 uppercase tracking-tight">Meus Favoritos</span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Matrizes salvas</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <span className="text-[9px] font-black bg-rose-50 text-rose-500 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                {favorites.length} Itens
+              </span>
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${activeTab === 'favorites' ? 'rotate-180 text-rose-500' : ''}`} />
+            </div>
+          </button>
+
+          {activeTab === 'favorites' && (
+            <div className="p-5 border-t border-slate-50 bg-slate-50/20 flex flex-col gap-4 animate-fade-in duration-200">
+              {favorites.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  {favorites.map((item) => (
+                    <Link
+                      key={item.product_id}
+                      to={`/produto/${item.product_slug || item.product_id}?mobile=true`}
+                      className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden active:scale-[0.97] transition-transform"
+                    >
+                      <div className="w-full aspect-square bg-slate-50 overflow-hidden">
+                        <img src={item.product_image || ''} alt={item.product_name} className="w-full h-full object-cover" />
+                      </div>
+                      <div className="p-2.5">
+                        <span className="text-[9px] font-black text-slate-700 uppercase tracking-tight line-clamp-2 leading-tight block">
+                          {item.product_name}
+                        </span>
+                        <span className="text-[8px] font-black text-blue-600 mt-1 block">
+                          {formatCurrency(Number(item.product_price || 0))}
+                        </span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-10 bg-white rounded-2xl border border-slate-100 p-6 flex flex-col items-center">
+                  <Heart className="w-10 h-10 text-slate-200 mb-2" />
+                  <p className="text-slate-500 font-black uppercase tracking-wider text-[9px] mb-1">
+                    Nenhum favorito salvo.
+                  </p>
+                  <p className="text-slate-400 font-medium text-[8px]">
+                    Toque no coração em qualquer produto para salvar aqui!
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 4. SEÇÃO: ENDEREÇO */}
         <div className="bg-white rounded-[2rem] border border-slate-100 shadow-[0_4px_16px_rgba(0,0,0,0.01)] overflow-hidden transition-all duration-300">
           <button
             onClick={() => toggleSection('address')}

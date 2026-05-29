@@ -22,16 +22,18 @@ export default function MobileHome() {
     currentPage: 1
   });
 
-  // Sincroniza a categoria selecionada com o parâmetro da URL
+  // Sincroniza selectedCategory (UI) com o param da URL quando categories carregam
   useEffect(() => {
-    if (categoryParam) {
+    if (categoryParam && categories.length > 0) {
       const cat = categories.find(c => c.slug === categoryParam);
       if (cat) {
         setSelectedCategory(cat.id);
-        return;
+      } else {
+        setSelectedCategory(null);
       }
+    } else if (!categoryParam) {
+      setSelectedCategory(null);
     }
-    setSelectedCategory(null);
   }, [categoryParam, categories]);
 
   useEffect(() => {
@@ -39,12 +41,13 @@ export default function MobileHome() {
       setLoading(true);
       try {
         const url = new URL('/api/products', window.location.origin);
+        // Sempre reseta para página 1 quando muda de categoria
         url.searchParams.append('page', pageParam.toString());
-        url.searchParams.append('limit', '12'); // Limite menor no mobile para maior velocidade de carregamento
+        url.searchParams.append('limit', '12');
 
-        if (selectedCategory) {
-          const cat = categories.find(c => c.id === selectedCategory);
-          if (cat) url.searchParams.append('category', cat.slug);
+        // Usa o slug diretamente da URL (não depende de categories carregado)
+        if (categoryParam) {
+          url.searchParams.append('category', categoryParam);
         }
         
         if (searchQuery) {
@@ -67,7 +70,7 @@ export default function MobileHome() {
       }
     }
     fetchProducts();
-  }, [selectedCategory, categories, searchQuery, pageParam]);
+  }, [categoryParam, searchQuery, pageParam]);
 
   const handlePageChange = (newPage: number) => {
     const params = new URLSearchParams(searchParams);

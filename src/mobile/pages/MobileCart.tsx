@@ -480,8 +480,7 @@ export default function MobileCart() {
           
           <div className="flex flex-col gap-1 w-full">
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Valor do Pedido:</span>
-            <span className="text-2xl font-black text-slate-900">{formatCurrency(totalPrice * 0.95)}</span>
-            <span className="text-[8px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded uppercase tracking-wider w-max mx-auto mt-0.5">5% de desconto PIX aplicado</span>
+            <span className="text-2xl font-black text-slate-900">{formatCurrency(totalPrice)}</span>
           </div>
 
           <button
@@ -719,7 +718,7 @@ export default function MobileCart() {
                 : 'bg-slate-50 border-slate-100 text-slate-500'
             }`}
           >
-            PIX (5% OFF)
+            PIX
           </button>
           <button
             type="button"
