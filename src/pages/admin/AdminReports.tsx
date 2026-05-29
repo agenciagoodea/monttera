@@ -16,6 +16,7 @@ import {
 import { ShoppingBag, Users, Download, Filter, RefreshCcw, FileText, ChevronRight, DollarSign } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { normalizePublicMediaUrl } from '../../lib/utils';
 
 interface ReportStats {
   revenue: { total: number; average: number; gross?: number; net?: number };
@@ -25,6 +26,7 @@ interface ReportStats {
   topProducts: any[];
   paymentMethods: any[];
   categoryUsage: any[];
+  soldProducts?: any[];
 }
 
 export default function AdminReports() {
@@ -113,6 +115,12 @@ export default function AdminReports() {
     lines.push('Produtos Mais Vendidos');
     lines.push('Produto,Vendas');
     (stats.topProducts || []).forEach((row: any) => lines.push(`"${String(row.name || '').replace(/"/g, '""')}",${Number(row.sales || 0)}`));
+    
+    lines.push('');
+    lines.push('Detalhamento de Vendas por Matriz');
+    lines.push('Produto,Quantidade Vendida,Receita Total (R$)');
+    (stats.soldProducts || []).forEach((row: any) => lines.push(`"${String(row.name || '').replace(/"/g, '""')}",${Number(row.quantity || 0)},${Number(row.total_revenue || 0).toFixed(2)}`));
+
     const csv = lines.join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -310,6 +318,83 @@ export default function AdminReports() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Detalhamento de Produtos Vendidos no Periodo */}
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/30">
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Matrizes Vendidas no Periodo</h3>
+              <p className="text-[10px] text-slate-400 font-semibold mt-1">Lista completa de matrizes vendidas no periodo selecionado, ordenadas por quantidade e receita.</p>
+            </div>
+            <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-3.5 py-1.5 rounded-full uppercase tracking-widest">
+              {stats?.soldProducts?.length || 0} Matrizes
+            </span>
+          </div>
+
+          {stats?.soldProducts && stats.soldProducts.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest pl-2">Foto</th>
+                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Nome da Matriz</th>
+                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Quantidade Vendida</th>
+                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right pr-2">Faturamento</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.soldProducts.map((prod: any, idx: number) => (
+                    <tr 
+                      key={prod.id || idx}
+                      className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors"
+                    >
+                      <td className="py-4 pl-2">
+                        <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 flex items-center justify-center shadow-sm">
+                          {prod.image ? (
+                            <img 
+                              src={normalizePublicMediaUrl(prod.image)} 
+                              alt={prod.name} 
+                              className="w-full h-full object-cover" 
+                            />
+                          ) : (
+                            <ShoppingBag className="w-4 h-4 text-slate-300" />
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-4 font-bold text-xs text-slate-800">
+                        {prod.slug ? (
+                          <a 
+                            href={`/produto/${prod.slug}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="hover:text-blue-600 transition-colors inline-block"
+                          >
+                            {prod.name}
+                          </a>
+                        ) : (
+                          <span>{prod.name}</span>
+                        )}
+                      </td>
+                      <td className="py-4 text-center">
+                        <span className="inline-block bg-blue-50 text-blue-600 text-[10px] font-black px-3 py-1 rounded-full">
+                          {prod.quantity}x
+                        </span>
+                      </td>
+                      <td className="py-4 text-right font-black text-xs text-emerald-600 pr-2">
+                        R$ {(prod.total_revenue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 text-center space-y-3">
+              <ShoppingBag className="w-10 h-10 text-slate-200" />
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nenhuma venda registrada no periodo selecionado</p>
+            </div>
+          )}
         </div>
       </div>
     </div>

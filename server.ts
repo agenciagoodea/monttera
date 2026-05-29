@@ -8329,6 +8329,23 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         LIMIT 12
       `);
 
+      const soldProducts = await dbAsync.all(`
+        SELECT
+          oi.product_id as id,
+          COALESCE(p.name, oi.product_name, 'Produto Indefinido') as name,
+          p.slug,
+          p.image,
+          COUNT(oi.id) as quantity,
+          SUM(oi.price * oi.quantity) as total_revenue
+        FROM order_items oi
+        LEFT JOIN products p ON oi.product_id = p.id
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.status IN (${paidStatuses})
+          AND ${whereCurrent.split('created_at').join('o.created_at')}
+        GROUP BY oi.product_id, name, p.slug, p.image
+        ORDER BY quantity DESC, total_revenue DESC
+      `);
+
       const calcTrend = (current: number, previous: number) => {
         const c = Number(current || 0);
         const p = Number(previous || 0);
@@ -8363,6 +8380,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         topProducts,
         paymentMethods,
         categoryUsage,
+        soldProducts,
       });
     } catch (error) {
       console.error('Reports Stats Error:', error);
