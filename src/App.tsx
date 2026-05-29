@@ -7,6 +7,7 @@ import MobileLogin from './mobile/pages/MobileLogin';
 import MobileRegister from './mobile/pages/MobileRegister';
 import MobileCart from './mobile/pages/MobileCart';
 import MobileMyAccount from './mobile/pages/MobileMyAccount';
+import MobileProductDetail from './mobile/pages/MobileProductDetail';
 import { formatCurrency } from './lib/utils';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactElement } from 'react';
@@ -274,7 +275,7 @@ export default function App() {
                             <Route path="/carrinho" element={<RequireRegisteredUser><MobileCart /></RequireRegisteredUser>} />
                             <Route path="/favoritos" element={<Suspense fallback={<PageLoader />}><FavoritesPage /></Suspense>} />
                             <Route path="/minha-conta/*" element={<RequireRegisteredUser><MobileMyAccount /></RequireRegisteredUser>} />
-                            <Route path="/produto/:slug" element={<Suspense fallback={<PageLoader />}><ProductDetail /></Suspense>} />
+                            <Route path="/produto/:slug" element={<MobileProductDetail />} />
                             <Route path="/politica" element={<Suspense fallback={<PageLoader />}><PrivacyPolicy /></Suspense>} />
                             <Route path="/ajuda" element={<Suspense fallback={<PageLoader />}><HelpPage /></Suspense>} />
                             <Route path="/nossa-empresa" element={<Suspense fallback={<PageLoader />}><CompanyPage /></Suspense>} />
