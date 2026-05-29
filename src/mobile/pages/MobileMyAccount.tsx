@@ -4,6 +4,53 @@ import { useNavigate, Link } from 'react-router-dom';
 import { User, ShieldCheck, Download, ShoppingBag, MapPin, Lock, LogOut, Loader2, Check, AlertCircle, FileText, ChevronDown, Heart, ExternalLink } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
 
+const parseLegacyAddress = (rawValue: string | null | undefined) => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return { address: '', number: '', complement: '' };
+
+  let base = raw;
+  let complement = '';
+  const complementMatch = raw.match(/^(.*?)(?:\s+-\s+)(.+)$/);
+  if (complementMatch) {
+    base = complementMatch[1].trim();
+    complement = complementMatch[2].trim();
+  }
+
+  let address = base;
+  let number = '';
+  const numberMatch = base.match(/^(.*?)(?:,\s*)([0-9A-Za-z\-\/]+)$/);
+  if (numberMatch) {
+    address = numberMatch[1].trim();
+    number = numberMatch[2].trim();
+    const escapedNumber = number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const duplicatedSuffix = new RegExp(`^(.*?)(?:,\\s*${escapedNumber})$`);
+    while (duplicatedSuffix.test(address)) {
+      address = address.replace(duplicatedSuffix, '$1').trim();
+    }
+  }
+
+  return { address, number, complement };
+};
+
+const composeAddress = (form: { street: string; number?: string; complement?: string }) => {
+  const street = String(form.street || '').trim();
+  const number = String(form.number || '').trim();
+  const complement = String(form.complement || '').trim();
+  if (!street) return '';
+
+  let value = street;
+  const escapedNumber = number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (number && !new RegExp(`,\\s*${escapedNumber}$`).test(value)) {
+    value += `, ${number}`;
+  }
+  const escapedComplement = complement.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (complement && !new RegExp(`-\\s*${escapedComplement}$`).test(value)) {
+    value += ` - ${complement}`;
+  }
+
+  return value;
+};
+
 type TabType = 'downloads' | 'orders' | 'address' | 'profile' | 'favorites';
 
 export default function MobileMyAccount() {
@@ -34,6 +81,7 @@ export default function MobileMyAccount() {
     zip_code: '',
     street: '',
     number: '',
+    complement: '',
     neighborhood: '',
     city: '',
     state: '',
@@ -73,10 +121,12 @@ export default function MobileMyAccount() {
             avatarUrl: uData.avatar_url || '',
           });
 
+          const parsed = parseLegacyAddress(uData.billing_address || '');
           setAddress({
             zip_code: uData.billing_zip || '',
-            street: uData.billing_address || '',
-            number: uData.billing_number || '',
+            street: parsed.address || '',
+            number: parsed.number || '',
+            complement: parsed.complement || '',
             neighborhood: uData.billing_neighborhood || '',
             city: uData.billing_city || '',
             state: uData.billing_state || '',
@@ -111,10 +161,29 @@ export default function MobileMyAccount() {
     }
   };
 
-  const handleUpdateProfile = async (e: React.FormEvent) => {
+  const handleRemoveFavorite = async (productId: number) => {
+    try {
+      const res = await fetch(`/api/favorites/${productId}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setFavorites(prev => prev.filter(item => item.product_id !== productId));
+      }
+    } catch (error) {
+      console.error('Erro ao remover favorito:', error);
+    }
+  };
+
+  const handleCombinedSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatusMessage('');
     setStatusType('');
+    
+    let profileSuccess = false;
+    let passwordSuccess = false;
+    let passwordAttempted = false;
+
+    // 1. Atualizar Perfil
     try {
       const res = await fetch('/api/customer/profile', {
         method: 'PUT',
@@ -132,45 +201,58 @@ export default function MobileMyAccount() {
         setStatusType('error');
         return;
       }
-      setStatusMessage('Perfil atualizado com sucesso!');
-      setStatusType('success');
+      profileSuccess = true;
     } catch {
       setStatusMessage('Erro ao atualizar perfil.');
       setStatusType('error');
-    }
-  };
-
-  const handleUpdatePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setStatusMessage('');
-    setStatusType('');
-    if (passwordState.newPassword !== passwordState.confirmPassword) {
-      setStatusMessage('As senhas não coincidem.');
-      setStatusType('error');
       return;
     }
-    try {
-      const res = await fetch('/api/customer/password', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          current_password: passwordState.currentPassword,
-          new_password: passwordState.newPassword,
-          confirm_new_password: passwordState.confirmPassword,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setStatusMessage(data.error || 'Erro ao alterar senha.');
+
+    // 2. Se preencheu algum campo de senha, atualizar Senha
+    if (passwordState.currentPassword || passwordState.newPassword || passwordState.confirmPassword) {
+      passwordAttempted = true;
+      if (passwordState.newPassword !== passwordState.confirmPassword) {
+        setStatusMessage('As novas senhas não coincidem.');
         setStatusType('error');
         return;
       }
-      setStatusMessage('Senha alterada com sucesso!');
+      if (!passwordState.currentPassword) {
+        setStatusMessage('Informe a senha atual para alterá-la.');
+        setStatusType('error');
+        return;
+      }
+      try {
+        const res = await fetch('/api/customer/password', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            current_password: passwordState.currentPassword,
+            new_password: passwordState.newPassword,
+            confirm_new_password: passwordState.confirmPassword,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setStatusMessage(data.error || 'Erro ao alterar senha.');
+          setStatusType('error');
+          return;
+        }
+        passwordSuccess = true;
+        setPasswordState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      } catch {
+        setStatusMessage('Erro ao alterar senha.');
+        setStatusType('error');
+        return;
+      }
+    }
+
+    // Sucesso!
+    if (passwordAttempted && passwordSuccess && profileSuccess) {
+      setStatusMessage('Dados e senha atualizados com sucesso!');
       setStatusType('success');
-      setPasswordState({ currentPassword: '', newPassword: '', confirmPassword: '' });
-    } catch {
-      setStatusMessage('Erro ao alterar senha.');
-      setStatusType('error');
+    } else if (profileSuccess) {
+      setStatusMessage('Dados pessoais atualizados com sucesso!');
+      setStatusType('success');
     }
   };
 
@@ -180,8 +262,7 @@ export default function MobileMyAccount() {
     setStatusType('');
     try {
       const billingPayload = {
-        address: address.street,
-        number: address.number,
+        address: composeAddress(address),
         neighborhood: address.neighborhood,
         city: address.city,
         state: address.state,
@@ -446,25 +527,66 @@ export default function MobileMyAccount() {
           {activeTab === 'favorites' && (
             <div className="p-5 border-t border-slate-50 bg-slate-50/20 flex flex-col gap-4 animate-fade-in duration-200">
               {favorites.length > 0 ? (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-3">
                   {favorites.map((item) => (
-                    <Link
+                    <div
                       key={item.product_id}
-                      to={`/produto/${item.product_slug || item.product_id}?mobile=true`}
-                      className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden active:scale-[0.97] transition-transform"
+                      className="bg-white rounded-2xl border border-slate-100 shadow-sm p-3 flex items-center justify-between gap-3 active:scale-[0.99] transition-transform"
                     >
-                      <div className="w-full aspect-square bg-slate-50 overflow-hidden">
-                        <img src={item.product_image || ''} alt={item.product_name} className="w-full h-full object-cover" />
+                      <Link
+                        to={`/produto/${item.slug || item.product_id}?mobile=true`}
+                        className="flex items-center gap-3 flex-1 min-w-0"
+                      >
+                        <div className="w-14 h-14 rounded-xl bg-slate-50 overflow-hidden flex-shrink-0 border border-slate-50">
+                          <img
+                            src={item.image || ''}
+                            alt={item.name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = '/assets/placeholder.png';
+                            }}
+                          />
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight truncate">
+                            {item.name}
+                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            {item.sale_price && Number(item.sale_price) < Number(item.price) ? (
+                              <>
+                                <span className="text-[8px] font-bold text-slate-400 line-through">
+                                  {formatCurrency(Number(item.price))}
+                                </span>
+                                <span className="text-[9px] font-black text-blue-600">
+                                  {formatCurrency(Number(item.sale_price))}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-[9px] font-black text-blue-600">
+                                {formatCurrency(Number(item.price || 0))}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </Link>
+
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/produto/${item.slug || item.product_id}?mobile=true`}
+                          className="p-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-xl transition-colors flex items-center justify-center"
+                        >
+                          <span className="text-[9px] font-black uppercase tracking-wider px-1">Ver</span>
+                        </Link>
+                        
+                        <button
+                          onClick={() => handleRemoveFavorite(item.product_id)}
+                          className="p-2 bg-rose-50 text-rose-500 hover:bg-rose-100 rounded-xl transition-colors flex items-center justify-center"
+                          title="Remover"
+                        >
+                          <Heart className="w-4 h-4 fill-rose-500" />
+                        </button>
                       </div>
-                      <div className="p-2.5">
-                        <span className="text-[9px] font-black text-slate-700 uppercase tracking-tight line-clamp-2 leading-tight block">
-                          {item.product_name}
-                        </span>
-                        <span className="text-[8px] font-black text-blue-600 mt-1 block">
-                          {formatCurrency(Number(item.product_price || 0))}
-                        </span>
-                      </div>
-                    </Link>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -618,109 +740,101 @@ export default function MobileMyAccount() {
           </button>
 
           {activeTab === 'profile' && (
-            <div className="p-5 border-t border-slate-50 bg-slate-50/20 flex flex-col gap-6 animate-fade-in duration-200">
-              {/* Dados Pessoais */}
-              <form onSubmit={handleUpdateProfile} className="flex flex-col gap-4">
-                <h4 className="text-[10px] font-black text-slate-700 uppercase tracking-wider border-b border-slate-50 pb-2 flex items-center gap-1">
-                  <User className="w-4 h-4 text-blue-600" /> Alterar Dados Pessoais
-                </h4>
+            <div className="p-5 border-t border-slate-50 bg-slate-50/20 animate-fade-in duration-200">
+              <form onSubmit={handleCombinedSubmit} className="flex flex-col gap-6">
+                {/* Dados Pessoais */}
+                <div className="flex flex-col gap-4">
+                  <h4 className="text-[10px] font-black text-slate-700 uppercase tracking-wider border-b border-slate-50 pb-2 flex items-center gap-1">
+                    <User className="w-4 h-4 text-blue-600" /> Alterar Dados Pessoais
+                  </h4>
 
-                <div className="flex flex-col gap-3.5">
-                  <div className="grid grid-cols-2 gap-3.5">
+                  <div className="flex flex-col gap-3.5">
+                    <div className="grid grid-cols-2 gap-3.5">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome</label>
+                        <input
+                          type="text"
+                          required
+                          value={profile.firstName}
+                          onChange={(e) => setProfile(prev => ({ ...prev, firstName: e.target.value }))}
+                          className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Sobrenome</label>
+                        <input
+                          type="text"
+                          required
+                          value={profile.lastName}
+                          onChange={(e) => setProfile(prev => ({ ...prev, lastName: e.target.value }))}
+                          className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        />
+                      </div>
+                    </div>
+
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome</label>
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">E-mail</label>
                       <input
-                        type="text"
+                        type="email"
                         required
-                        value={profile.firstName}
-                        onChange={(e) => setProfile(prev => ({ ...prev, firstName: e.target.value }))}
+                        value={profile.email}
+                        onChange={(e) => setProfile(prev => ({ ...prev, email: e.target.value }))}
                         className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
                       />
                     </div>
+                  </div>
+                </div>
+
+                {/* Segurança/Senha */}
+                <div className="flex flex-col gap-4 pt-4 border-t border-slate-100">
+                  <h4 className="text-[10px] font-black text-slate-700 uppercase tracking-wider border-b border-slate-50 pb-2 flex items-center gap-1">
+                    <Lock className="w-4 h-4 text-blue-600" /> Alterar Senha (Opcional)
+                  </h4>
+
+                  <div className="flex flex-col gap-3.5">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Sobrenome</label>
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Senha Atual</label>
                       <input
-                        type="text"
-                        required
-                        value={profile.lastName}
-                        onChange={(e) => setProfile(prev => ({ ...prev, lastName: e.target.value }))}
+                        type="password"
+                        value={passwordState.currentPassword}
+                        onChange={(e) => setPasswordState(prev => ({ ...prev, currentPassword: e.target.value }))}
                         className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder="Deixe em branco para não alterar"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Nova Senha</label>
+                      <input
+                        type="password"
+                        value={passwordState.newPassword}
+                        onChange={(e) => setPasswordState(prev => ({ ...prev, newPassword: e.target.value }))}
+                        className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder="Mínimo 6 caracteres"
+                        minLength={6}
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Confirmar Nova Senha</label>
+                      <input
+                        type="password"
+                        value={passwordState.confirmPassword}
+                        onChange={(e) => setPasswordState(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                        className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder="Confirmar nova senha"
+                        minLength={6}
                       />
                     </div>
                   </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">E-mail</label>
-                    <input
-                      type="email"
-                      required
-                      value={profile.email}
-                      onChange={(e) => setProfile(prev => ({ ...prev, email: e.target.value }))}
-                      className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-md shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all mt-2"
-                  >
-                    Salvar Alterações
-                  </button>
                 </div>
-              </form>
 
-              {/* Segurança/Senha */}
-              <form onSubmit={handleUpdatePassword} className="flex flex-col gap-4 pt-4 border-t border-slate-100">
-                <h4 className="text-[10px] font-black text-slate-700 uppercase tracking-wider border-b border-slate-50 pb-2 flex items-center gap-1">
-                  <Lock className="w-4 h-4 text-blue-600" /> Alterar Senha
-                </h4>
-
-                <div className="flex flex-col gap-3.5">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Senha Atual</label>
-                    <input
-                      type="password"
-                      required
-                      value={passwordState.currentPassword}
-                      onChange={(e) => setPasswordState(prev => ({ ...prev, currentPassword: e.target.value }))}
-                      className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
-                      placeholder="••••••••"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Nova Senha</label>
-                    <input
-                      type="password"
-                      required
-                      value={passwordState.newPassword}
-                      onChange={(e) => setPasswordState(prev => ({ ...prev, newPassword: e.target.value }))}
-                      className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
-                      placeholder="Mínimo 6 caracteres"
-                      minLength={6}
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Confirmar Nova Senha</label>
-                    <input
-                      type="password"
-                      required
-                      value={passwordState.confirmPassword}
-                      onChange={(e) => setPasswordState(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                      className="w-full px-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
-                      placeholder="Confirmar senha"
-                      minLength={6}
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-md shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all mt-2"
-                  >
-                    Atualizar Senha
-                  </button>
-                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-md shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all mt-2"
+                >
+                  Salvar Alterações
+                </button>
               </form>
             </div>
           )}
