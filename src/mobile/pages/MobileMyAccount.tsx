@@ -56,7 +56,7 @@ type TabType = 'downloads' | 'orders' | 'address' | 'profile' | 'favorites';
 export default function MobileMyAccount() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<TabType | null>('downloads');
+  const [activeTab, setActiveTab] = useState<TabType | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState('');
   const [statusType, setStatusType] = useState<'success' | 'error' | ''>('');
@@ -401,10 +401,10 @@ export default function MobileMyAccount() {
                         <span className="text-[8px] font-extrabold text-slate-400 block mt-0.5 uppercase">
                           Pedido: #{item.order_id} • Formatos inclusos
                         </span>
-                        <div className="mt-2.5 flex flex-col gap-2">
+                        <div className="mt-2.5 flex gap-2 w-full">
                           <a
                             href={`/api/customer/download-file?path=${encodeURIComponent(item.file_path || '')}`}
-                            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-md shadow-emerald-50 active:scale-95 transition-all text-center"
+                            className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-md shadow-emerald-50 active:scale-95 transition-all text-center"
                           >
                             <Download className="w-3.5 h-3.5" /> Baixar ZIP
                           </a>
@@ -413,7 +413,7 @@ export default function MobileMyAccount() {
                               href={item.production_sheet}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="w-full bg-rose-500 hover:bg-rose-600 text-white py-2 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-md shadow-rose-50 active:scale-95 transition-all text-center"
+                              className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-2 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-md shadow-rose-50 active:scale-95 transition-all text-center"
                             >
                               <FileText className="w-3.5 h-3.5" /> Folha de Produção
                             </a>

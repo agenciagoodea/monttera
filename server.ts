@@ -2488,6 +2488,8 @@ async function startServer() {
       lastName,
       email,
       password,
+      phone,
+      cpf,
       terms_accepted,
       privacy_accepted,
       cookie_accepted,
@@ -2531,12 +2533,15 @@ async function startServer() {
 
       const userId = await dbAsync.transaction(async (conn) => {
         const [userInsert] = await conn.execute(
-          `INSERT INTO users (name, email, password, role, email_verified_at)
-           VALUES (?, ?, ?, 'customer', ?)`,
-          [name, normalizedEmail, hashedPassword, emailVerifiedAt] as any,
+          `INSERT INTO users (name, first_name, last_name, email, password, role, email_verified_at)
+           VALUES (?, ?, ?, ?, ?, 'customer', ?)`,
+          [name, trimmedFirstName, trimmedLastName, normalizedEmail, hashedPassword, emailVerifiedAt] as any,
         );
         const createdUserId = Number((userInsert as any).insertId || 0);
-        await conn.execute('INSERT INTO customers (user_id) VALUES (?)', [createdUserId] as any);
+        await conn.execute(
+          'INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)',
+          [createdUserId, phone ? String(phone).trim() : null, cpf ? String(cpf).trim() : null] as any,
+        );
         return createdUserId;
       });
 
