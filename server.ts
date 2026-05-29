@@ -2307,7 +2307,7 @@ async function startServer() {
 
     const userAgent = String(req.headers['user-agent'] || '');
     // Regex consolidado de mercado para detecção de dispositivo móvel
-    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Mobi/i.test(userAgent);
 
     if (isProduction) {
       if (isMobileDevice && !preferDesktop && hostname === 'digitalbordados.com.br') {

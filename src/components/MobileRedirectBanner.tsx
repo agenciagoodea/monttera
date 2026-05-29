@@ -33,7 +33,7 @@ export default function MobileRedirectBanner() {
     const isMobileHost = hostname.startsWith('m.');
     const preferDesktop = getCookie('prefer_desktop') === 'true';
     const userAgent = navigator.userAgent || '';
-    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Mobi/i.test(userAgent);
 
     if (isMobileHost) {
       // Estamos na versão mobile. Oferecer opção de ir para o desktop.
