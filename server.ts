@@ -2352,6 +2352,16 @@ async function startServer() {
       if (!origin || allowedOrigins.has(origin)) {
         return callback(null, true);
       }
+      
+      // Permitir dinamicamente o subdomínio mobile oficial e outros subdomínios autorizados
+      try {
+        const originUrl = new URL(origin);
+        const domainPattern = /digitalbordados\.com\.br$/i;
+        if (domainPattern.test(originUrl.hostname) || originUrl.hostname === 'm.digitalbordados.com.br') {
+          return callback(null, true);
+        }
+      } catch {}
+
       return callback(new Error('Origin not allowed by CORS'));
     },
     credentials: true,
