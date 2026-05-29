@@ -125,20 +125,16 @@ export default function MobileProductCard({ product }: MobileProductCardProps) {
               }
             }}
             disabled={isInCart}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95 border ${
+            className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-md active:scale-95 border flex-shrink-0 ${
               isInCart
                 ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-100'
                 : 'bg-blue-600 border-blue-600 text-white shadow-blue-100 hover:bg-blue-700'
             }`}
           >
             {isInCart ? (
-              <>
-                <Check className="w-3.5 h-3.5" /> Ok
-              </>
+              <Check className="w-4 h-4 stroke-[2.5]" />
             ) : (
-              <>
-                <ShoppingCart className="w-3.5 h-3.5" /> Comprar
-              </>
+              <ShoppingCart className="w-4 h-4 stroke-[2.5]" />
             )}
           </button>
         </div>

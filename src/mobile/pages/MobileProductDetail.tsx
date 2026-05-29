@@ -717,16 +717,16 @@ export default function MobileProductDetail() {
         
         {/* Bloco de Preços */}
         <div className="flex flex-col min-w-0">
-          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Total à Vista</span>
-          <div className="flex items-baseline gap-1.5">
+          {product.sale_price && (
+            <span className="text-[10px] text-slate-400 line-through font-bold leading-none mb-1.5 block">
+              {formatCurrency(product.price)}
+            </span>
+          )}
+          <div className="flex flex-col">
             <span className="text-xl font-black text-emerald-600 tracking-tight leading-none">
               {formatCurrency(currentPrice)}
             </span>
-            {product.sale_price && (
-              <span className="text-[10px] text-slate-400 line-through font-bold leading-none">
-                {formatCurrency(product.price)}
-              </span>
-            )}
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">Total à Vista</span>
           </div>
         </div>
 
@@ -751,7 +751,7 @@ export default function MobileProductDetail() {
             </>
           ) : (
             <>
-              <ShoppingCart className="w-4 h-4 stroke-[2.5]" /> Comprar Agora
+              <ShoppingCart className="w-4 h-4 stroke-[2.5]" /> Comprar
             </>
           )}
         </button>

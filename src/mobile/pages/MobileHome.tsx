@@ -133,7 +133,7 @@ export default function MobileHome() {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">
-            Categorias em Destaque
+            Categorias:
           </h3>
           {selectedCategory !== null && (
             <button 
@@ -220,7 +220,7 @@ export default function MobileHome() {
             ) : selectedCategory ? (
               categories.find(c => c.id === selectedCategory)?.name
             ) : (
-              'Nossas Coleções'
+              'Nossas Matrizes'
             )}
           </h3>
 
