@@ -57,11 +57,14 @@ export default function MobileRegister() {
         cookie_accepted: cookieAccepted,
         marketing_accepted: marketingAccepted,
       });
+      const searchParamsObj = new URLSearchParams(window.location.search);
+      const isMobile = searchParamsObj.get('mobile') === 'true';
       const redirectTo = searchParams.get('redirect');
       if (redirectTo && redirectTo.startsWith('/')) {
-        navigate(redirectTo);
+        const separator = redirectTo.includes('?') ? '&' : '?';
+        navigate(isMobile && !redirectTo.includes('mobile=') ? `${redirectTo}${separator}mobile=true` : redirectTo);
       } else {
-        navigate('/minha-conta');
+        navigate(isMobile ? '/minha-conta?mobile=true' : '/minha-conta');
       }
     } catch (err: any) {
       setError(err.message || 'Erro ao criar conta. Verifique seus dados.');
@@ -215,7 +218,12 @@ export default function MobileRegister() {
       <div className="text-center mt-4">
         <p className="text-xs font-bold text-slate-500">
           Já tem uma conta?{' '}
-          <Link to="/login" className="text-blue-600 hover:underline">Faça login</Link>
+          <Link 
+            to={searchParams.get('redirect') ? `/login?redirect=${encodeURIComponent(searchParams.get('redirect')!)}${window.location.search.includes('mobile=true') ? '&mobile=true' : ''}` : `/login${window.location.search.includes('mobile=true') ? '?mobile=true' : ''}`} 
+            className="text-blue-600 hover:underline"
+          >
+            Faça login
+          </Link>
         </p>
       </div>
     </div>

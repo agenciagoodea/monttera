@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Lock, Mail, AlertCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export default function MobileLogin() {
@@ -13,6 +13,7 @@ export default function MobileLogin() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,11 +31,17 @@ export default function MobileLogin() {
         return;
       }
       
-      // Se for admin, redirecionar para a área administrativa, se não para a área do cliente móvel
+      const searchParamsObj = new URLSearchParams(window.location.search);
+      const isMobile = searchParamsObj.get('mobile') === 'true';
+      const redirectTo = searchParams.get('redirect');
+
       if (user.type === 'user') {
         navigate('/admin');
+      } else if (redirectTo && redirectTo.startsWith('/')) {
+        const separator = redirectTo.includes('?') ? '&' : '?';
+        navigate(isMobile && !redirectTo.includes('mobile=') ? `${redirectTo}${separator}mobile=true` : redirectTo);
       } else {
-        navigate('/minha-conta');
+        navigate(isMobile ? '/minha-conta?mobile=true' : '/minha-conta');
       }
     } catch (err: any) {
       setError(err.message || 'Erro ao fazer login. Verifique seus dados.');
@@ -127,7 +134,12 @@ export default function MobileLogin() {
       <div className="text-center mt-6">
         <p className="text-xs font-bold text-slate-500">
           Ainda não tem uma conta?{' '}
-          <Link to="/cadastro" className="text-blue-600 hover:underline">Cadastre-se grátis</Link>
+          <Link 
+            to={searchParams.get('redirect') ? `/cadastro?redirect=${encodeURIComponent(searchParams.get('redirect')!)}${window.location.search.includes('mobile=true') ? '&mobile=true' : ''}` : `/cadastro${window.location.search.includes('mobile=true') ? '?mobile=true' : ''}`}
+            className="text-blue-600 hover:underline"
+          >
+            Cadastre-se grátis
+          </Link>
         </p>
       </div>
     </div>

@@ -9,6 +9,204 @@ type TabType = 'downloads' | 'orders' | 'address' | 'profile';
 export default function MobileMyAccount() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState<TabType | null>('downloads');
+  const [loading, setLoading] = useState(true);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [statusType, setStatusType] = useState<'success' | 'error' | ''>('');
+
+  // Estados dos dados do usuário
+  const [profile, setProfile] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+  });
+
+  const [passwordState, setPasswordState] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+
+  const [address, setAddress] = useState({
+    zip_code: '',
+    street: '',
+    number: '',
+    neighborhood: '',
+    city: '',
+    state: '',
+  });
+
+  const [downloads, setDownloads] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+
+  // Carregar todos os dados de faturamento, pedidos e downloads
+  useEffect(() => {
+    async function loadAccountData() {
+      setLoading(true);
+      try {
+        const [accRes, ordersRes, downloadsRes] = await Promise.all([
+          fetch('/api/customer/account'),
+          fetch('/api/customer/orders'),
+          fetch('/api/customer/downloads'),
+        ]);
+
+        const accData = accRes.ok ? await accRes.json() : null;
+        const ordersData = ordersRes.ok ? await ordersRes.json() : [];
+        const downloadsData = downloadsRes.ok ? await downloadsRes.json() : [];
+
+        setOrders(ordersData);
+        setDownloads(downloadsData);
+
+        const uData = accData?.user ?? accData;
+        if (uData && !uData.error) {
+          const [firstName, ...rest] = String(uData.name || '').split(' ');
+          setProfile({
+            firstName: uData.first_name || firstName || '',
+            lastName: uData.last_name || rest.join(' ') || '',
+            email: uData.email || user?.email || '',
+          });
+
+          setAddress({
+            zip_code: uData.billing_zip || '',
+            street: uData.billing_address || '',
+            number: uData.billing_number || '',
+            neighborhood: uData.billing_neighborhood || '',
+            city: uData.billing_city || '',
+            state: uData.billing_state || '',
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load customer account data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (user) loadAccountData();
+  }, [user]);
+
+  const handleCepBlur = async () => {
+    const cep = address.zip_code.replace(/\D/g, '');
+    if (cep.length === 8) {
+      try {
+        const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+        const data = await res.json();
+        if (!data.erro) {
+          setAddress(prev => ({
+            ...prev,
+            street: data.logradouro || prev.street,
+            neighborhood: data.bairro || prev.neighborhood,
+            city: data.localidade || prev.city,
+            state: data.uf || prev.state,
+          }));
+        }
+      } catch (e) {}
+    }
+  };
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatusMessage('');
+    setStatusType('');
+    try {
+      const res = await fetch('/api/customer/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          email: profile.email,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatusMessage(data.error || 'Erro ao atualizar perfil.');
+        setStatusType('error');
+        return;
+      }
+      setStatusMessage('Perfil atualizado com sucesso!');
+      setStatusType('success');
+    } catch {
+      setStatusMessage('Erro ao atualizar perfil.');
+      setStatusType('error');
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatusMessage('');
+    setStatusType('');
+    if (passwordState.newPassword !== passwordState.confirmPassword) {
+      setStatusMessage('As senhas não coincidem.');
+      setStatusType('error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/customer/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentPassword: passwordState.currentPassword,
+          newPassword: passwordState.newPassword,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatusMessage(data.error || 'Erro ao alterar senha.');
+        setStatusType('error');
+        return;
+      }
+      setStatusMessage('Senha alterada com sucesso!');
+      setStatusType('success');
+      setPasswordState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch {
+      setStatusMessage('Erro ao alterar senha.');
+      setStatusType('error');
+    }
+  };
+
+  const handleUpdateAddress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatusMessage('');
+    setStatusType('');
+    try {
+      const res = await fetch('/api/customer/addresses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          billing_zip: address.zip_code,
+          billing_address: address.street,
+          billing_number: address.number,
+          billing_neighborhood: address.neighborhood,
+          billing_city: address.city,
+          billing_state: address.state,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatusMessage(data.error || 'Erro ao salvar endereço.');
+        setStatusType('error');
+        return;
+      }
+      setStatusMessage('Endereço salvo com sucesso!');
+      setStatusType('success');
+    } catch {
+      setStatusMessage('Erro ao salvar endereço.');
+      setStatusType('error');
+    }
+  };
+
+  const handleLogoutClick = async () => {
+    await logout();
+    navigate('/login');
+  };
+
+  const getUserInitials = () => {
+    const first = profile.firstName ? profile.firstName[0] : '';
+    const last = profile.lastName ? profile.lastName[0] : '';
+    return (first + last).toUpperCase() || 'U';
+  };
+
   const toggleSection = (tab: TabType) => {
     if (activeTab === tab) {
       setActiveTab(null);
@@ -18,6 +216,15 @@ export default function MobileMyAccount() {
     setStatusMessage('');
     setStatusType('');
   };
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center py-20 min-h-[60vh]">
+        <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Carregando Painel...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6 py-2">

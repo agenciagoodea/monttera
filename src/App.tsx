@@ -70,8 +70,12 @@ function RequireRegisteredUser({ children }: { children: ReactElement }) {
 
   if (loading) return <PageLoader />;
   if (!user) {
+    const isMobile = location.search.includes('mobile=true') || window.location.hostname === 'm.digitalbordados.com.br';
     const redirect = encodeURIComponent(`${location.pathname}${location.search}`);
-    return <Navigate to={`/cadastro?redirect=${redirect}`} replace />;
+    const target = isMobile 
+      ? `/cadastro?redirect=${redirect}&mobile=true` 
+      : `/cadastro?redirect=${redirect}`;
+    return <Navigate to={target} replace />;
   }
   return children;
 }

@@ -13,7 +13,13 @@ export default function MobileCategories() {
   }, [categories]);
 
   const handleCategoryClick = (slug: string) => {
-    navigate(`/?category=${slug}`);
+    const searchParams = new URLSearchParams(window.location.search);
+    const isMobile = searchParams.get('mobile') === 'true';
+    if (isMobile) {
+      navigate(`/?category=${slug}&mobile=true`);
+    } else {
+      navigate(`/?category=${slug}`);
+    }
   };
 
   return (
