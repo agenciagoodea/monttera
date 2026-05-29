@@ -2291,10 +2291,16 @@ async function startServer() {
 
     // Verificação de cookie de escape "prefer_desktop=true"
     const preferDesktop = String(req.cookies?.prefer_desktop || '').trim().toLowerCase() === 'true';
+    
+    // Obter o hostname limpo sem portas (ex: 'm.digitalbordados.com.br' ou 'digitalbordados.com.br')
+    // req.hostname respeita a diretiva 'trust proxy' e extrai apenas o domínio.
+    const rawHost = String(req.headers.host || '').trim();
+    const hostname = (req.hostname || rawHost.split(':')[0]).toLowerCase();
+
     if (preferDesktop) {
       // Se estiver forçando o desktop mas acessar o subdomínio mobile, deve conseguir navegar
-      const host = String(req.headers.host || '').trim();
-      if (host === 'digitalbordados.com.br') {
+      if (hostname === 'digitalbordados.com.br') {
+        console.log(`[Mobile Redirect Log] Hostname: ${hostname} | User-Agent: N/A (Prefer Desktop) | isMobile: N/A | prefer_desktop: true | Decisão: next() (Skip redirect por cookie escape)`);
         return next();
       }
     }
@@ -2302,23 +2308,25 @@ async function startServer() {
     const userAgent = String(req.headers['user-agent'] || '');
     // Regex consolidado de mercado para detecção de dispositivo móvel
     const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
-    const host = String(req.headers.host || '').trim();
 
     if (isProduction) {
-      if (isMobileDevice && !preferDesktop && host === 'digitalbordados.com.br') {
+      if (isMobileDevice && !preferDesktop && hostname === 'digitalbordados.com.br') {
         const targetUrl = `${req.protocol}://m.digitalbordados.com.br${req.originalUrl}`;
-        console.log(`[Mobile Redirect] Redirecting mobile user to ${targetUrl} via 302`);
+        console.log(`[Mobile Redirect Log] Hostname: ${hostname} | User-Agent: ${userAgent} | isMobile: true | prefer_desktop: ${preferDesktop} | Decisão: REDIRECIONAR PARA MOBILE -> ${targetUrl} via 302`);
         res.writeHead(302, { Location: targetUrl });
         return res.end();
       }
 
-      if (!isMobileDevice && host === 'm.digitalbordados.com.br') {
+      if (!isMobileDevice && hostname === 'm.digitalbordados.com.br') {
         const targetUrl = `${req.protocol}://digitalbordados.com.br${req.originalUrl}`;
-        console.log(`[Mobile Redirect] Redirecting desktop user to ${targetUrl} via 302`);
+        console.log(`[Mobile Redirect Log] Hostname: ${hostname} | User-Agent: ${userAgent} | isMobile: false | prefer_desktop: ${preferDesktop} | Decisão: REDIRECIONAR PARA DESKTOP -> ${targetUrl} via 302`);
         res.writeHead(302, { Location: targetUrl });
         return res.end();
       }
     }
+
+    // Log temporário detalhado para requisições que passam direto
+    console.log(`[Mobile Redirect Log] Hostname: ${hostname} | User-Agent: ${userAgent.slice(0, 60)}... | isMobile: ${isMobileDevice} | prefer_desktop: ${preferDesktop} | Decisão: next() (Sem redirecionamento)`);
 
     next();
   });
