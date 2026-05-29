@@ -82,11 +82,6 @@ export default function MobileProductCard({ product }: MobileProductCardProps) {
           loading="lazy"
           className="w-full h-full object-cover"
         />
-        {promoDiscount > 0 && (
-          <div className="absolute bottom-3 right-3 bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded-lg shadow-lg z-10">
-            {promoDiscount}% OFF
-          </div>
-        )}
       </Link>
 
       {/* Conteúdo do Card */}
