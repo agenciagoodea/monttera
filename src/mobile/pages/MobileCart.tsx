@@ -566,7 +566,7 @@ export default function MobileCart() {
         </p>
       </div>
 
-      {/* Formulário Compacto de Dados do Comprador */}
+      {/* Formulário Completo de Dados do Comprador e Endereço */}
       <div className="bg-white rounded-[2.5rem] border border-slate-100 p-5 shadow-sm flex flex-col gap-4">
         <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider border-b border-slate-50 pb-2 flex items-center gap-1.5">
           <ShieldCheck className="w-4 h-4 text-blue-600" />
@@ -626,7 +626,9 @@ export default function MobileCart() {
             />
           </div>
 
-          {/* Endereço Rápido (Autopreenchimento CEP) */}
+          <h4 className="text-[10px] font-black text-slate-800 uppercase tracking-wider pt-2 border-t border-slate-50">Endereço</h4>
+
+          {/* CEP e Rua */}
           <div className="grid grid-cols-3 gap-3">
             <div className="flex flex-col gap-1 col-span-1">
               <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">CEP</label>
@@ -634,13 +636,13 @@ export default function MobileCart() {
                 type="text"
                 placeholder="00000-000"
                 value={payer.zip_code}
-                onChange={(e) => setPayer(prev => ({ ...prev, zip_code: maskCPF(e.target.value.replace(/\D/g, '').slice(0, 8).replace(/^(\d{5})(\d)/, '$1-$2')) }))}
+                onChange={(e) => setPayer(prev => ({ ...prev, zip_code: e.target.value.replace(/\D/g, '').slice(0, 8).replace(/^(\d{5})(\d)/, '$1-$2') }))}
                 onBlur={handleCepBlur}
                 className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all text-center"
               />
             </div>
             <div className="flex flex-col gap-1 col-span-2">
-              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Endereço</label>
+              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Rua/Avenida</label>
               <input
                 type="text"
                 placeholder="Nome da rua"
@@ -650,10 +652,58 @@ export default function MobileCart() {
               />
             </div>
           </div>
+
+          {/* Número e Bairro */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="flex flex-col gap-1 col-span-1">
+              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Número</label>
+              <input
+                type="text"
+                placeholder="123"
+                value={payer.number}
+                onChange={(e) => setPayer(prev => ({ ...prev, number: e.target.value }))}
+                className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+              />
+            </div>
+            <div className="flex flex-col gap-1 col-span-2">
+              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Bairro</label>
+              <input
+                type="text"
+                placeholder="Nome do bairro"
+                value={payer.neighborhood}
+                onChange={(e) => setPayer(prev => ({ ...prev, neighborhood: e.target.value }))}
+                className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+              />
+            </div>
+          </div>
+
+          {/* Cidade e Estado */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="flex flex-col gap-1 col-span-2">
+              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Cidade</label>
+              <input
+                type="text"
+                placeholder="Sua cidade"
+                value={payer.city}
+                onChange={(e) => setPayer(prev => ({ ...prev, city: e.target.value }))}
+                className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+              />
+            </div>
+            <div className="flex flex-col gap-1 col-span-1">
+              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Estado</label>
+              <input
+                type="text"
+                placeholder="UF"
+                value={payer.state}
+                onChange={(e) => setPayer(prev => ({ ...prev, state: e.target.value.toUpperCase().slice(0, 2) }))}
+                className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all text-center"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Formas de Pagamento Mobile */}
+      {/* Formas de Pagamento Mobile Quádrupla */}
       <div className="bg-white rounded-[2.5rem] border border-slate-100 p-5 shadow-sm flex flex-col gap-4">
         <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider border-b border-slate-50 pb-2">
           Método de Pagamento
@@ -663,10 +713,10 @@ export default function MobileCart() {
           <button
             type="button"
             onClick={() => setCheckoutMethod('pix')}
-            className={`px-3 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 border transition-all ${
+            className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
               checkoutMethod === 'pix'
                 ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10 scale-[1.02]'
-                : 'bg-white border-slate-100 text-slate-500'
+                : 'bg-slate-50 border-slate-100 text-slate-500'
             }`}
           >
             PIX (5% OFF)
@@ -674,18 +724,42 @@ export default function MobileCart() {
           <button
             type="button"
             onClick={() => setCheckoutMethod('credit_card')}
-            className={`px-3 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 border transition-all ${
+            className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
               checkoutMethod === 'credit_card'
                 ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10 scale-[1.02]'
-                : 'bg-white border-slate-100 text-slate-500'
+                : 'bg-slate-50 border-slate-100 text-slate-500'
             }`}
           >
-            <CreditCard className="w-3.5 h-3.5" /> Cartão
+            <CreditCard className="w-3.5 h-3.5" /> Crédito
           </button>
+          <button
+            type="button"
+            onClick={() => setCheckoutMethod('debit_card')}
+            className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
+              checkoutMethod === 'debit_card'
+                ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10 scale-[1.02]'
+                : 'bg-slate-50 border-slate-100 text-slate-500'
+            }`}
+          >
+            <CreditCard className="w-3.5 h-3.5" /> Débito
+          </button>
+          {paypalConfig?.enabled && (
+            <button
+              type="button"
+              onClick={() => setCheckoutMethod('paypal')}
+              className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
+                checkoutMethod === 'paypal'
+                  ? 'bg-[#0070ba] border-[#0070ba] text-white shadow-md shadow-blue-500/10 scale-[1.02]'
+                  : 'bg-slate-50 border-slate-100 text-slate-500'
+              }`}
+            >
+              PayPal
+            </button>
+          )}
         </div>
 
-        {/* Formulário do Cartão - Integrado do Mercado Pago */}
-        <div className={checkoutMethod === 'credit_card' ? 'block' : 'hidden'}>
+        {/* Formulário do Cartão - Integrado do Mercado Pago (Crédito & Débito) */}
+        <div className={(checkoutMethod === 'credit_card' || checkoutMethod === 'debit_card') ? 'block' : 'hidden'}>
           <form id="form-checkout" className="flex flex-col gap-3.5 pt-2">
             <div className="flex flex-col gap-1">
               <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Número do Cartão</label>
@@ -746,6 +820,53 @@ export default function MobileCart() {
             </button>
           </form>
         </div>
+
+        {/* PayPal UI - visível apenas quando método = paypal */}
+        {paypalConfig?.enabled && (
+          <div className={checkoutMethod === 'paypal' ? 'space-y-4 pt-2' : 'hidden'}>
+            {requireCheckoutConsent && (
+              <label className="flex items-start gap-2.5 rounded-xl border border-slate-100 bg-slate-50 p-3 text-[10px] font-semibold text-slate-600 mt-2">
+                <input
+                  type="checkbox"
+                  checked={checkoutConsent}
+                  onChange={(e) => setCheckoutConsent(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>Autorizo o processamento dos meus dados para concluir esta compra.</span>
+              </label>
+            )}
+            <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-100 text-[11px] text-blue-800 font-medium leading-relaxed">
+              <strong>Recebimento PayPal em {paypalConfig?.currency || 'USD'}.</strong><br />
+              O valor é convertido automaticamente conforme a moeda padrão configurada.
+            </div>
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1.5 text-[10px] font-semibold text-slate-600">
+              <div className="flex justify-between">
+                <span>Total em BRL:</span>
+                <span className="text-slate-800 font-black">R$ {totalPrice.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Cotação:</span>
+                <span>
+                  1 {paypalConfig?.currency || 'USD'} = R$ {Number(paypalConfig?.currency === 'BRL' ? 1 : (paypalConfig?.brl_usd_rate ?? 5.2)).toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1.5">
+                <span>Estimado em {paypalConfig?.currency || 'USD'}:</span>
+                <span className="text-blue-700 font-black">
+                  {paypalConfig?.currency === 'BRL' ? 'R$' : '$'}{' '}
+                  {Number(paypalConfig?.currency === 'BRL' ? totalPrice : totalPrice / (paypalConfig?.brl_usd_rate ?? 5.2)).toFixed(2)}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={handlePayPalCheckout}
+              disabled={loadingCheckout || (requireCheckoutConsent && !checkoutConsent)}
+              className="w-full bg-[#0070ba] text-white py-4.5 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 shadow-md shadow-blue-500/10 active:scale-95 transition-all"
+            >
+              {loadingCheckout ? 'Processando...' : 'Pagar com PayPal'}
+            </button>
+          </div>
+        )}
 
         {/* Botão para o PIX */}
         {checkoutMethod === 'pix' && (

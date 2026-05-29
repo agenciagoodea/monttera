@@ -10,6 +10,7 @@ export default function MobileHome() {
   const [searchParams, setSearchParams] = useSearchParams();
   const searchQuery = searchParams.get('q') || '';
   const pageParam = parseInt(searchParams.get('page') || '1');
+  const categoryParam = searchParams.get('category') || '';
 
   const { categories } = useAppData();
   const [products, setProducts] = useState<Product[]>([]);
@@ -20,6 +21,18 @@ export default function MobileHome() {
     pages: 1,
     currentPage: 1
   });
+
+  // Sincroniza a categoria selecionada com o parâmetro da URL
+  useEffect(() => {
+    if (categoryParam) {
+      const cat = categories.find(c => c.slug === categoryParam);
+      if (cat) {
+        setSelectedCategory(cat.id);
+        return;
+      }
+    }
+    setSelectedCategory(null);
+  }, [categoryParam, categories]);
 
   useEffect(() => {
     async function fetchProducts() {
@@ -66,6 +79,12 @@ export default function MobileHome() {
   const handleCategorySelect = (id: number | null) => {
     setSelectedCategory(id);
     const params = new URLSearchParams(searchParams);
+    if (id === null) {
+      params.delete('category');
+    } else {
+      const cat = categories.find(c => c.id === id);
+      if (cat) params.set('category', cat.slug);
+    }
     params.set('page', '1');
     setSearchParams(params);
   };

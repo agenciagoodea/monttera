@@ -13,7 +13,7 @@ export default function MobileLayout({ children }: MobileLayoutProps) {
       <MobileHeader />
 
       {/* Conteúdo Principal com Rolagem Suave */}
-      <main className="flex-1 w-full pt-16 pb-20 px-4 max-w-md mx-auto">
+      <main className="flex-1 w-full pt-20 pb-20 px-4 max-w-md mx-auto">
         <div className="animate-fade-in duration-300">
           {children}
         </div>

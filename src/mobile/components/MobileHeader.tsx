@@ -26,12 +26,12 @@ export default function MobileHeader() {
   }, []);
 
   return (
-    <header className="fixed top-0 left-0 right-0 h-16 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-4 z-[100] transition-all duration-200">
+    <header className="fixed top-0 left-0 right-0 h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-4 z-[100] transition-all duration-200">
       <div className="max-w-md w-full mx-auto flex items-center justify-between gap-4">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 group">
           {logoUrl ? (
-            <img src={logoUrl} alt="Logo" className="h-9 w-auto object-contain" />
+            <img src={logoUrl} alt="Logo" className="h-12 w-auto object-contain" />
           ) : (
             <div className="flex flex-col">
               <span className="text-xl font-black text-blue-600 tracking-tighter uppercase leading-none">
@@ -43,14 +43,14 @@ export default function MobileHeader() {
         </Link>
 
         {/* Ações da Direita (Favoritos & Carrinho) */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           {/* Link para Favoritos */}
           <Link 
             to="/favoritos" 
-            className="p-2 text-slate-500 hover:text-red-500 active:scale-95 transition-all rounded-full hover:bg-slate-50"
+            className="p-2 text-slate-500 hover:text-red-500 active:scale-95 transition-all rounded-full hover:bg-slate-50 flex items-center justify-center"
             aria-label="Favoritos"
           >
-            <Heart className="w-5 h-5" />
+            <Heart className="w-7 h-7" />
           </Link>
 
           {/* Carrinho de Compras com badge dinâmico */}
@@ -59,9 +59,9 @@ export default function MobileHeader() {
             className="relative p-2 text-slate-700 active:scale-95 transition-all rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center hover:border-blue-200"
             aria-label="Carrinho"
           >
-            <ShoppingCart className="w-5 h-5 text-slate-700" />
+            <ShoppingCart className="w-7 h-7 text-slate-700" />
             {totalItems > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-blue-600 text-white font-extrabold text-[9px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white shadow-md animate-bounce-short">
+              <span className="absolute -top-1 -right-1 bg-blue-600 text-white font-extrabold text-[10px] w-5.5 h-5.5 rounded-full flex items-center justify-center border-2 border-white shadow-md animate-bounce-short">
                 {totalItems}
               </span>
             )}

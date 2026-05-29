@@ -56,11 +56,6 @@ export default function MobileProductCard({ product }: MobileProductCardProps) {
             Novo
           </span>
         )}
-        {promoDiscount > 0 && (
-          <span className="bg-red-500 text-white text-[8px] font-black px-2 py-0.5 rounded-lg shadow-sm tracking-wider">
-            {promoDiscount}% OFF
-          </span>
-        )}
       </div>
 
       {/* Botão de Favorito */}
@@ -87,61 +82,45 @@ export default function MobileProductCard({ product }: MobileProductCardProps) {
           loading="lazy"
           className="w-full h-full object-cover"
         />
+        {promoDiscount > 0 && (
+          <div className="absolute bottom-3 right-3 bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded-lg shadow-lg z-10">
+            {promoDiscount}% OFF
+          </div>
+        )}
       </Link>
 
       {/* Conteúdo do Card */}
       <div className="flex-grow flex flex-col justify-between mt-3">
-        {/* Título & Formatos */}
+        {/* Título */}
         <div className="flex-1 min-w-0">
           <Link to={`/produto/${product.slug}`} className="block">
             <h3 className="text-xs font-black text-slate-800 line-clamp-2 min-h-[32px] mb-2 leading-snug uppercase tracking-tight hover:text-blue-600 transition-colors">
               {product.name}
             </h3>
           </Link>
-
-          {/* Formatos Disponíveis (Sem EMP) */}
-          <div className="flex flex-wrap gap-1 mb-3">
-            {allowedFormats.map(fmt => (
-              <span key={fmt} className="text-[7.5px] font-extrabold px-1.5 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-400 uppercase tracking-tight">
-                {fmt}
-              </span>
-            ))}
-          </div>
         </div>
 
-        {/* Bloco de Preços & Parcelamento */}
-        <div className="pt-2 border-t border-slate-50 flex flex-col gap-1.5">
+        {/* Bloco de Preços & Botão Comprar Inline */}
+        <div className="pt-2 border-t border-slate-50 flex items-center justify-between mt-auto">
           <div className="flex flex-col">
             {/* Preço de Tabela Riscado se em Promoção */}
             {product.sale_price ? (
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-[10px] text-slate-400 line-through font-bold leading-none">
+              <>
+                <span className="text-[10px] text-slate-400 line-through font-bold leading-none mb-0.5">
                   {formatCurrency(product.price)}
                 </span>
-                <span className="text-[13px] font-black text-blue-600 leading-none">
+                <span className="text-emerald-600 font-black text-sm leading-none">
                   {formatCurrency(product.sale_price)}
                 </span>
-              </div>
+              </>
             ) : (
-              <span className="text-[13px] font-black text-slate-900 leading-none">
+              <span className="text-blue-600 font-black text-sm leading-none">
                 {formatCurrency(product.price)}
               </span>
             )}
-            
-            {/* Preço com Desconto no PIX */}
-            <div className="flex items-center gap-1 mt-1">
-              <span className="text-[9px] font-extrabold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded uppercase tracking-wider">
-                {formatCurrency(pixPrice)} no PIX (5% OFF)
-              </span>
-            </div>
-
-            {/* Parcelamento em Destaque */}
-            <span className="text-[8.5px] font-black text-slate-400 mt-1 uppercase tracking-tight leading-none">
-              ou 3x de {formatCurrency(installPrice)} s/ juros
-            </span>
           </div>
 
-          {/* Botão de Compra Integrado com Toque Amigável */}
+          {/* Botão de Compra Compacto e Elegante */}
           <button
             onClick={(e) => {
               e.preventDefault();
@@ -151,7 +130,7 @@ export default function MobileProductCard({ product }: MobileProductCardProps) {
               }
             }}
             disabled={isInCart}
-            className={`w-full py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 border ${
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95 border ${
               isInCart
                 ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-100'
                 : 'bg-blue-600 border-blue-600 text-white shadow-blue-100 hover:bg-blue-700'
@@ -159,7 +138,7 @@ export default function MobileProductCard({ product }: MobileProductCardProps) {
           >
             {isInCart ? (
               <>
-                <Check className="w-3.5 h-3.5" /> Adicionado
+                <Check className="w-3.5 h-3.5" /> Ok
               </>
             ) : (
               <>

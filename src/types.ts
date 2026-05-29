@@ -7,6 +7,7 @@ export interface Category {
   description?: string;
   status: string;
   sort_order: number;
+  product_count?: number;
 }
 
 export interface Product {

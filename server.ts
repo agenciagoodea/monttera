@@ -8439,7 +8439,19 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const cached = apiCache.get('public_categories');
       if (cached) return res.json(cached);
 
-      const categories = await dbAsync.all("SELECT * FROM product_categories WHERE status = 'active' ORDER BY sort_order ASC, name ASC");
+      const categories = await dbAsync.all(`
+        SELECT 
+          c.*,
+          (
+            SELECT COUNT(DISTINCT pcr.product_id)
+            FROM product_category_relations pcr
+            JOIN products p ON pcr.product_id = p.id
+            WHERE pcr.category_id = c.id AND p.status IN ('active', 'ativo')
+          ) AS product_count
+        FROM product_categories c
+        WHERE c.status = 'active'
+        ORDER BY c.sort_order ASC, c.name ASC
+      `);
       apiCache.set('public_categories', categories, 600); // 10 minutes cache
       res.json(categories);
     } catch (error) {
