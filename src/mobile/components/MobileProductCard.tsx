@@ -33,8 +33,7 @@ export default function MobileProductCard({ product }: MobileProductCardProps) {
   // Preço base
   const basePrice = Number(product.sale_price || product.price);
   
-  // Preço com desconto no PIX (à vista menor) - 5% de desconto padrão
-  const pixPrice = basePrice * 0.95;
+
 
   // Parcelamento em destaque (até 3x sem juros)
   const installPrice = basePrice / 3;

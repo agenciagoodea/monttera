@@ -786,7 +786,7 @@ export default function ProductDetail() {
               activeTab === 'description' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
             }`}
           >
-            Descrição
+            Dicas para Bordar
           </button>
           <button 
             onClick={() => setActiveTab('reviews')}

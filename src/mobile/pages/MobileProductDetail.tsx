@@ -437,7 +437,7 @@ export default function MobileProductDetail() {
           >
             <span className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-blue-600" />
-              Descrição do Produto
+              Dicas para Bordar
             </span>
             <ChevronDown 
               className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${

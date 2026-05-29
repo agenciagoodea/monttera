@@ -963,7 +963,7 @@ export default function MobileCart() {
               disabled={loadingCheckout || !canSubmitPayer || (requireCheckoutConsent && !checkoutConsent)}
               className="w-full bg-blue-600 text-white py-4.5 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 shadow-md shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1.5"
             >
-              {loadingCheckout ? 'Gerando PIX...' : `Pagar R$ ${(totalPrice * 0.95).toFixed(2)} com PIX`}
+              {loadingCheckout ? 'Gerando PIX...' : `Pagar R$ ${totalPrice.toFixed(2)} com PIX`}
             </button>
           </div>
         )}
