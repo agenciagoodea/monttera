@@ -1,4 +1,7 @@
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
+import MobileLayout from './mobile/layout/MobileLayout';
+import MobileHome from './mobile/pages/MobileHome';
+import { formatCurrency } from './lib/utils';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import Header from './components/Header';
@@ -147,7 +150,159 @@ function GlobalFaviconSync() {
   return null;
 }
 
+import { Link } from 'react-router-dom';
+
+function LinkToCategories() {
+  const { categories } = useAppData();
+  return (
+    <>
+      {categories.map((cat) => (
+        <Link
+          key={cat.id}
+          to={`/?category=${cat.slug}&page=1&mobile=true`}
+          className="p-4 bg-white border border-slate-100 rounded-2xl flex flex-col items-center justify-center text-center active:scale-95 transition-transform"
+        >
+          <span className="text-[10px] font-black text-slate-800 uppercase tracking-wider">{cat.name}</span>
+        </Link>
+      ))}
+    </>
+  );
+}
+
+import { Search, Loader2 } from 'lucide-react';
+
+function MobileSearchBox() {
+  const [search, setSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (search.trim().length >= 2) {
+        setIsSearching(true);
+        try {
+          const response = await fetch(`/api/products/search?q=${encodeURIComponent(search.trim())}`);
+          const data = await response.json();
+          setSearchResults(Array.isArray(data) ? data : (data.products || []));
+        } catch (error) {
+          console.error('Erro na busca:', error);
+          setSearchResults([]);
+        } finally {
+          setIsSearching(false);
+        }
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="relative">
+        <input
+          type="text"
+          placeholder="Pesquisar matrizes (ex: flores, infantil, times)..."
+          className="w-full pl-5 pr-12 py-3.5 bg-white border border-slate-200 rounded-2xl text-xs font-medium placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-300"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <div className="absolute right-3 top-2.5 p-2 bg-blue-600 text-white rounded-xl shadow-md">
+          {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+        </div>
+      </div>
+
+      {search.trim().length >= 2 && (
+        <div className="flex flex-col gap-2">
+          {searchResults.length > 0 ? (
+            searchResults.map((prod) => (
+              <Link
+                key={prod.id}
+                to={`/produto/${prod.slug}?mobile=true`}
+                onClick={() => setSearch('')}
+                className="flex items-center gap-3 p-2 bg-white border border-slate-50 rounded-xl active:scale-[0.99] transition-transform"
+              >
+                <img src={prod.image} alt={prod.name} className="w-12 h-12 rounded-lg object-cover bg-slate-50" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-black text-slate-800 truncate">{prod.name}</p>
+                  <p className="text-[9px] font-bold text-slate-400 uppercase">{prod.category_name}</p>
+                </div>
+                <span className="text-xs font-black text-slate-900">{formatCurrency(Number(prod.sale_price || prod.price))}</span>
+              </Link>
+            ))
+          ) : !isSearching ? (
+            <p className="text-center py-6 text-xs text-slate-400 font-bold">Nenhum resultado encontrado.</p>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
+  const isMobileHost = window.location.hostname === 'm.digitalbordados.com.br' || window.location.search.includes('mobile=true');
+
+  if (isMobileHost) {
+    return (
+      <Router>
+        <AuthProvider>
+          <AppDataProvider>
+            <FavoritesProvider>
+              <CartProvider>
+                <GlobalFaviconSync />
+                <Suspense fallback={<PageLoader />}>
+                  <Routes>
+                    <Route path="/*" element={
+                      <MobileLayout>
+                        <RouteSeoDefaults />
+                        <Suspense fallback={<PageLoader />}>
+                          <Routes>
+                            <Route path="/" element={<MobileHome />} />
+                            <Route path="/categorias" element={
+                              <div className="py-2">
+                                <h2 className="text-xs font-black uppercase text-slate-400 tracking-wider mb-3">Escolha uma Categoria</h2>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <LinkToCategories />
+                                </div>
+                              </div>
+                            } />
+                            <Route path="/busca" element={
+                              <div className="py-2 flex flex-col gap-4">
+                                <h2 className="text-xs font-black uppercase text-slate-400 tracking-wider">Busca de Matrizes</h2>
+                                <MobileSearchBox />
+                              </div>
+                            } />
+                            <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
+                            <Route path="/cadastro" element={<Suspense fallback={<PageLoader />}><Register /></Suspense>} />
+                            <Route path="/esqueci-senha" element={<Suspense fallback={<PageLoader />}><ForgotPassword /></Suspense>} />
+                            <Route path="/redefinir-senha" element={<Suspense fallback={<PageLoader />}><ResetPassword /></Suspense>} />
+                            <Route path="/carrinho" element={<RequireRegisteredUser><Suspense fallback={<PageLoader />}><CartPage /></Suspense></RequireRegisteredUser>} />
+                            <Route path="/favoritos" element={<Suspense fallback={<PageLoader />}><FavoritesPage /></Suspense>} />
+                            <Route path="/minha-conta/*" element={<RequireRegisteredUser><Suspense fallback={<PageLoader />}><MyAccount /></Suspense></RequireRegisteredUser>} />
+                            <Route path="/produto/:slug" element={<Suspense fallback={<PageLoader />}><ProductDetail /></Suspense>} />
+                            <Route path="/politica" element={<Suspense fallback={<PageLoader />}><PrivacyPolicy /></Suspense>} />
+                            <Route path="/ajuda" element={<Suspense fallback={<PageLoader />}><HelpPage /></Suspense>} />
+                            <Route path="/nossa-empresa" element={<Suspense fallback={<PageLoader />}><CompanyPage /></Suspense>} />
+                            <Route path="/orcamento" element={<Suspense fallback={<PageLoader />}><BudgetPage /></Suspense>} />
+                            <Route path="/contato" element={<Suspense fallback={<PageLoader />}><ContactPage /></Suspense>} />
+                            <Route path="/checkout/paypal/success" element={<PayPalSuccess />} />
+                            <Route path="/checkout/paypal/cancel" element={<PayPalCancel />} />
+                            <Route path="/obrigado-compra" element={<ThankYouPage />} />
+                            <Route path="*" element={<Navigate to="/" replace />} />
+                          </Routes>
+                        </Suspense>
+                      </MobileLayout>
+                    } />
+                  </Routes>
+                </Suspense>
+              </CartProvider>
+            </FavoritesProvider>
+          </AppDataProvider>
+        </AuthProvider>
+      </Router>
+    );
+  }
 
   return (
     <Router>
