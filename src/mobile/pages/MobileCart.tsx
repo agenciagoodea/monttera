@@ -440,7 +440,7 @@ export default function MobileCart() {
         <p className="text-slate-500 font-medium text-[11px] max-w-[250px] mb-8 leading-relaxed">
           Parece que você ainda não adicionou nenhuma matriz de bordado.
         </p>
-        <Link to="/" className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/10 active:scale-95 transition-all text-center">
+        <Link to={window.location.search.includes('mobile=true') ? '/?mobile=true' : '/'} className="w-full bg-blue-600 text-white py-4.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all text-center">
           Explorar Coleções
         </Link>
       </div>
@@ -814,7 +814,7 @@ export default function MobileCart() {
             <button
               type="submit"
               disabled={loadingCheckout || !canSubmitPayer || (requireCheckoutConsent && !checkoutConsent)}
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4.5 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 shadow-md shadow-blue-500/10 active:scale-95 transition-all mt-2"
+              className="w-full bg-blue-600 text-white py-4.5 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 shadow-md shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all mt-2"
             >
               {loadingCheckout ? 'Processando...' : 'Finalizar Pagamento'}
             </button>
@@ -886,7 +886,7 @@ export default function MobileCart() {
             <button
               onClick={handlePixCheckout}
               disabled={loadingCheckout || !canSubmitPayer || (requireCheckoutConsent && !checkoutConsent)}
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4.5 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 shadow-md shadow-blue-500/10 active:scale-95 transition-all flex items-center justify-center gap-1.5"
+              className="w-full bg-blue-600 text-white py-4.5 rounded-2xl font-black text-xs uppercase tracking-widest disabled:opacity-50 shadow-md shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all flex items-center justify-center gap-1.5"
             >
               {loadingCheckout ? 'Gerando PIX...' : `Pagar R$ ${(totalPrice * 0.95).toFixed(2)} com PIX`}
             </button>

@@ -492,7 +492,7 @@ export default function MobileMyAccount() {
 
                   <button
                     type="submit"
-                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-md shadow-blue-500/10 active:scale-95 transition-all mt-2"
+                    className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-md shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all mt-2"
                   >
                     Salvar Endereço
                   </button>
@@ -570,7 +570,7 @@ export default function MobileMyAccount() {
 
                   <button
                     type="submit"
-                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-md shadow-blue-500/10 active:scale-95 transition-all mt-2"
+                    className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-md shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all mt-2"
                   >
                     Salvar Alterações
                   </button>
@@ -624,7 +624,7 @@ export default function MobileMyAccount() {
 
                   <button
                     type="submit"
-                    className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-md shadow-blue-500/10 active:scale-95 transition-all mt-2"
+                    className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-md shadow-blue-500/10 hover:bg-blue-700 active:scale-95 transition-all mt-2"
                   >
                     Atualizar Senha
                   </button>
