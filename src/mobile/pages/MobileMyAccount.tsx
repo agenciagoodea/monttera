@@ -398,8 +398,8 @@ export default function MobileMyAccount() {
                           </span>
                         </div>
                         <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase tracking-wider pt-2 border-t border-slate-50">
-                          <span>Total: <strong className="text-slate-800 font-black">{formatCurrency(Number(order.total_price))}</strong></span>
-                          <span>Método: {String(order.payment_method).toUpperCase()}</span>
+                          <span>Total: <strong className="text-slate-800 font-black">{formatCurrency(parseFloat(order.total || order.total_price || '0') || 0)}</strong></span>
+                          <span>Método: {String(order.payment_method || 'N/A').toUpperCase()}</span>
                         </div>
                       </div>
                     );
