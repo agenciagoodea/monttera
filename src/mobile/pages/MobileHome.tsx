@@ -106,10 +106,10 @@ export default function MobileHome() {
             <Sparkles className="w-3 h-3 text-amber-300 fill-amber-300" /> Matrizes Digitais
           </div>
           <h2 className="text-xl font-black leading-tight uppercase tracking-tight mt-1">
-            Qualidade Extra <br/>para seus Bordados
+            Variadas Matrizes <br/>para sua máquina de bordar
           </h2>
           <p className="text-[10px] text-blue-100 font-bold max-w-[80%] leading-relaxed">
-            Desenhos profissionais testados e aprovados. Download instantâneo logo após o pagamento!
+            Muitas opções para você escolher e baixar. Download imediato após a compra.
           </p>
         </div>
       </section>

@@ -4,6 +4,34 @@ import { useNavigate, Link } from 'react-router-dom';
 import { User, ShieldCheck, Download, ShoppingBag, MapPin, Lock, LogOut, Loader2, Check, AlertCircle, FileText, ChevronDown, Heart, ExternalLink } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
 
+const translateStatus = (status: string) => {
+  const clean = String(status || '').trim().toLowerCase();
+  switch (clean) {
+    case 'approved':
+    case 'completed':
+    case 'paid':
+      return 'PAGO';
+    case 'pending':
+      return 'PENDENTE';
+    case 'cancelled':
+    case 'canceled':
+      return 'CANCELADO';
+    case 'failed':
+      return 'FALHOU';
+    case 'refunded':
+      return 'REEMBOLSADO';
+    default:
+      return clean.toUpperCase();
+  }
+};
+
+const statusClass = (status: string) => {
+  const clean = String(status || '').trim().toLowerCase();
+  if (['approved', 'completed', 'paid'].includes(clean)) return 'bg-emerald-50 text-emerald-600';
+  if (['pending'].includes(clean)) return 'bg-amber-50 text-amber-600';
+  return 'bg-rose-50 text-rose-600';
+};
+
 const parseLegacyAddress = (rawValue: string | null | undefined) => {
   const raw = String(rawValue || '').trim();
   if (!raw) return { address: '', number: '', complement: '' };
@@ -412,7 +440,7 @@ export default function MobileMyAccount() {
                             href={`/api/customer/download-file?path=${encodeURIComponent(item.file_path || '')}`}
                             className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-md shadow-emerald-50 active:scale-95 transition-all text-center"
                           >
-                            <Download className="w-3.5 h-3.5" /> Baixar ZIP
+                            <Download className="w-3.5 h-3.5" /> ZIP
                           </a>
                           {item.production_sheet && (
                             <a
@@ -421,7 +449,7 @@ export default function MobileMyAccount() {
                               rel="noopener noreferrer"
                               className="flex-1 bg-rose-500 hover:bg-rose-600 text-white py-2 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5 shadow-md shadow-rose-50 active:scale-95 transition-all text-center"
                             >
-                              <FileText className="w-3.5 h-3.5" /> Folha de Produção
+                              <FileText className="w-3.5 h-3.5" /> PDF
                             </a>
                           )}
                         </div>
@@ -472,18 +500,40 @@ export default function MobileMyAccount() {
               {orders.length > 0 ? (
                 <div className="flex flex-col gap-3.5">
                   {orders.map((order) => {
-                    const isApproved = order.status === 'approved' || order.status === 'completed';
-                    const isPending = order.status === 'pending';
                     return (
                       <div key={order.id} className="bg-white rounded-2xl border border-slate-50 p-4 shadow-sm flex flex-col gap-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight">Pedido #{order.id}</span>
-                          <span className={`text-[8px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                            isApproved ? 'bg-emerald-50 text-emerald-600' : isPending ? 'bg-amber-50 text-amber-600' : 'bg-rose-50 text-rose-600'
-                          }`}>
-                            {isApproved ? 'Aprovado' : isPending ? 'Pendente' : order.status}
+                          <span className={`text-[8px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider ${statusClass(order.status)}`}>
+                            {translateStatus(order.status)}
                           </span>
                         </div>
+
+                        {/* Itens do Pedido (Imagens, nomes e valores) */}
+                        {Array.isArray(order.items) && order.items.length > 0 && (
+                          <div className="flex flex-col gap-2.5 pt-2 pb-1 border-t border-slate-50">
+                            {order.items.map((item: any) => (
+                              <div key={item.id} className="flex items-center gap-2.5">
+                                <div className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl overflow-hidden shrink-0">
+                                  <img 
+                                    src={item.product_image || '/uploads/placeholder-product.jpg'} 
+                                    alt={item.product_name} 
+                                    className="w-full h-full object-cover" 
+                                  />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-[9px] font-black text-slate-700 uppercase tracking-tight truncate">
+                                    {item.product_name}
+                                  </p>
+                                  <p className="text-[8px] font-bold text-blue-600 mt-0.5">
+                                    {formatCurrency(parseFloat(item.price) || 0)} x {item.quantity || 1}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
                         <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase tracking-wider pt-2 border-t border-slate-50">
                           <span>Total: <strong className="text-slate-800 font-black">{formatCurrency(parseFloat(order.total || order.total_price || '0') || 0)}</strong></span>
                           <span>Método: {String(order.payment_method || 'N/A').toUpperCase()}</span>

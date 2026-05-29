@@ -4433,8 +4433,8 @@ async function startServer() {
       const payerPhone = String((payer as any)?.phone || '').trim();
       const payerCity = String((payer as any)?.city || '').trim();
       const payerState = String((payer as any)?.state || '').trim();
-      const payerPostalCode = String((payer as any)?.postal_code || (payer as any)?.zip || '').trim();
-      const payerAddress = String((payer as any)?.address || '').trim();
+      const payerPostalCode = String((payer as any)?.postal_code || (payer as any)?.zip || (payer as any)?.zip_code || '').trim();
+      const payerAddress = String((payer as any)?.address || (payer as any)?.street || '').trim();
       const payerNumber = String((payer as any)?.number || '').trim();
       const payerNeighborhood = String((payer as any)?.neighborhood || '').trim();
       const payerComplement = String((payer as any)?.complement || '').trim();
@@ -4889,6 +4889,28 @@ async function startServer() {
         GROUP BY o.id
         ORDER BY o.created_at DESC
       `, user.id) as any[];
+
+      for (const order of orders) {
+        const items = await dbAsync.all(`
+          SELECT 
+            oi.id,
+            oi.product_id,
+            oi.product_name,
+            oi.product_slug,
+            oi.price,
+            oi.quantity,
+            p.image AS product_image
+          FROM order_items oi
+          LEFT JOIN products p ON p.id = oi.product_id
+          WHERE oi.order_id = ?
+        `, order.id) as any[];
+        
+        order.items = items.map(item => ({
+          ...item,
+          product_image: normalizePublicMediaUrl(item.product_image)
+        }));
+      }
+
       return res.json(orders);
     } catch (error) {
       console.error('Customer Orders Error:', error);

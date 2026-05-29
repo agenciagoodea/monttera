@@ -54,6 +54,53 @@ function formatSeconds(totalSeconds: number) {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+const parseLegacyAddress = (rawValue: string | null | undefined) => {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return { address: '', number: '', complement: '' };
+
+  let base = raw;
+  let complement = '';
+  const complementMatch = raw.match(/^(.*?)(?:\s+-\s+)(.+)$/);
+  if (complementMatch) {
+    base = complementMatch[1].trim();
+    complement = complementMatch[2].trim();
+  }
+
+  let address = base;
+  let number = '';
+  const numberMatch = base.match(/^(.*?)(?:,\s*)([0-9A-Za-z\-\/]+)$/);
+  if (numberMatch) {
+    address = numberMatch[1].trim();
+    number = numberMatch[2].trim();
+    const escapedNumber = number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const duplicatedSuffix = new RegExp(`^(.*?)(?:,\\s*${escapedNumber})$`);
+    while (duplicatedSuffix.test(address)) {
+      address = address.replace(duplicatedSuffix, '$1').trim();
+    }
+  }
+
+  return { address, number, complement };
+};
+
+const composeAddress = (form: { street: string; number?: string; complement?: string }) => {
+  const street = String(form.street || '').trim();
+  const number = String(form.number || '').trim();
+  const complement = String(form.complement || '').trim();
+  if (!street) return '';
+
+  let value = street;
+  const escapedNumber = number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (number && !new RegExp(`,\\s*${escapedNumber}$`).test(value)) {
+    value += `, ${number}`;
+  }
+  const escapedComplement = complement.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (complement && !new RegExp(`-\\s*${escapedComplement}$`).test(value)) {
+    value += ` - ${complement}`;
+  }
+
+  return value;
+};
+
 export default function MobileCart() {
   const { items, removeFromCart, totalPrice, totalItems, clearCart } = useCart();
   const { user } = useAuth();
@@ -144,6 +191,9 @@ export default function MobileCart() {
           const profile = data?.user ?? data;
           if (profile && !profile.error) {
             const [firstName, ...rest] = String(profile.name || '').split(' ');
+            const rawStreet = String(profile.billing_address || profile.address || '');
+            const parsed = parseLegacyAddress(rawStreet);
+
             setPayer(prev => ({
               ...prev,
               email: String(profile.email || user.email || prev.email),
@@ -151,7 +201,8 @@ export default function MobileCart() {
               last_name: String(profile.last_name || rest.join(' ') || prev.last_name),
               cpf: String(profile.cpf || prev.cpf),
               zip_code: String(profile.billing_zip || prev.zip_code),
-              street: String(profile.billing_address || prev.street),
+              street: parsed.address || prev.street,
+              number: parsed.number || prev.number,
               neighborhood: String(profile.billing_neighborhood || prev.neighborhood),
               city: String(profile.billing_city || prev.city),
               state: String(profile.billing_state || prev.state),
@@ -206,105 +257,126 @@ export default function MobileCart() {
   // Inicializa o Mercado Pago SDK
   useEffect(() => {
     if (!publicKey || !(window as any).MercadoPago) return;
-    if (checkoutMethod === 'pix' || checkoutMethod === 'paypal') return;
+
+    if (checkoutMethod === 'pix' || checkoutMethod === 'paypal') {
+      if (cardFormRef.current?.unmount) {
+        try {
+          cardFormRef.current.unmount();
+        } catch (e) {}
+      }
+      cardFormRef.current = null;
+      sdkMountedRef.current = false;
+      return;
+    }
+
     if (sdkMountedRef.current) return;
-
     sdkMountedRef.current = true;
-    try {
-      const mp = new (window as any).MercadoPago(publicKey, { locale: 'pt-BR' });
-      mpInstanceRef.current = mp;
 
-      cardFormRef.current = mp.cardForm({
-        amount: String(totalPrice.toFixed(2)),
-        autoMount: true,
-        form: {
-          id: 'form-checkout',
-          cardNumber: { id: 'form-checkout__cardNumber', placeholder: 'Número do cartão' },
-          expirationDate: { id: 'form-checkout__expirationDate', placeholder: 'MM/AA' },
-          securityCode: { id: 'form-checkout__securityCode', placeholder: 'CVV' },
-          cardholderName: { id: 'form-checkout__cardholderName', placeholder: 'Nome no cartão' },
-          issuer: { id: 'form-checkout__issuer' },
-          installments: { id: 'form-checkout__installments' },
-          identificationType: { id: 'form-checkout__identificationType' },
-          identificationNumber: { id: 'form-checkout__identificationNumber', placeholder: 'CPF' },
-          cardholderEmail: { id: 'form-checkout__email', placeholder: 'E-mail' },
-        },
-        callbacks: {
-          onFormMounted: (error: any) => {
-            if (error) console.warn('CardForm montado com aviso:', error);
+    const timer = setTimeout(() => {
+      try {
+        const mp = new (window as any).MercadoPago(publicKey, { locale: 'pt-BR' });
+        mpInstanceRef.current = mp;
+
+        cardFormRef.current = mp.cardForm({
+          amount: String(totalPrice.toFixed(2)),
+          autoMount: true,
+          form: {
+            id: 'form-checkout',
+            cardNumber: { id: 'form-checkout__cardNumber', placeholder: 'Número do cartão' },
+            expirationDate: { id: 'form-checkout__expirationDate', placeholder: 'MM/AA' },
+            securityCode: { id: 'form-checkout__securityCode', placeholder: 'CVV' },
+            cardholderName: { id: 'form-checkout__cardholderName', placeholder: 'Nome no cartão' },
+            issuer: { id: 'form-checkout__issuer' },
+            installments: { id: 'form-checkout__installments' },
+            identificationType: { id: 'form-checkout__identificationType' },
+            identificationNumber: { id: 'form-checkout__identificationNumber', placeholder: 'CPF' },
+            cardholderEmail: { id: 'form-checkout__email', placeholder: 'E-mail' },
           },
-          onSubmit: async (event: Event) => {
-            event.preventDefault();
-            if (!cardFormRef.current) return;
-            const currentPayer = payerRef.current;
-            const currentItems = itemsRef.current;
-            const currentMethod = checkoutMethodRef.current;
-            const currentConsent = checkoutConsentRef.current;
-            
-            setLoadingCheckout(true);
-            setStatusMessage('');
-            
-            try {
-              const cardData = cardFormRef.current.getCardFormData();
-              const cardPayerEmail = cardData?.cardholderEmail || currentPayer.email;
-              const cardPayerCpf = cardData?.identificationNumber || currentPayer.cpf;
+          callbacks: {
+            onFormMounted: (error: any) => {
+              if (error) console.warn('CardForm montado com aviso:', error);
+            },
+            onSubmit: async (event: Event) => {
+              event.preventDefault();
+              if (!cardFormRef.current) return;
+              const currentPayer = payerRef.current;
+              const currentItems = itemsRef.current;
+              const currentMethod = checkoutMethodRef.current;
+              const currentConsent = checkoutConsentRef.current;
               
-              if (!isValidEmail(cardPayerEmail) || !isValidCPF(cardPayerCpf)) {
-                setStatusMessage('E-mail ou CPF inválido para pagamento.');
+              setLoadingCheckout(true);
+              setStatusMessage('');
+              
+              try {
+                const cardData = cardFormRef.current.getCardFormData();
+                const cardPayerEmail = cardData?.cardholderEmail || currentPayer.email;
+                const cardPayerCpf = cardData?.identificationNumber || currentPayer.cpf;
+                
+                if (!isValidEmail(cardPayerEmail) || !isValidCPF(cardPayerCpf)) {
+                  setStatusMessage('E-mail ou CPF inválido para pagamento.');
+                  setLoadingCheckout(false);
+                  return;
+                }
+
+                const cardHolderName = cardData?.cardholderName || `${currentPayer.first_name} ${currentPayer.last_name}`;
+                const [firstName, ...restName] = String(cardHolderName).trim().split(' ');
+                const lastName = restName.join(' ') || currentPayer.last_name;
+
+                const res = await fetch('/api/checkout', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    items: currentItems,
+                    payment_method: currentMethod,
+                    checkout_data_processing_accepted: currentConsent,
+                    payer: {
+                      email: cardPayerEmail,
+                      first_name: firstName || currentPayer.first_name,
+                      last_name: lastName || currentPayer.last_name,
+                      cpf: cardPayerCpf,
+                      address: currentPayer.street,
+                      number: currentPayer.number,
+                      neighborhood: currentPayer.neighborhood,
+                      city: currentPayer.city,
+                      state: currentPayer.state,
+                      postal_code: currentPayer.zip_code,
+                    },
+                    card_token: cardData?.token,
+                    installments: currentMethod === 'debit_card' ? 1 : Number(cardData?.installments || 1),
+                    issuer_id: cardData?.issuerId || null,
+                    payment_method_id: cardData?.paymentMethodId || undefined,
+                  }),
+                });
+
+                const data = await res.json();
+                if (!res.ok) {
+                  setStatusMessage(data?.error || 'Falha ao processar pagamento com cartão');
+                  setLoadingCheckout(false);
+                  return;
+                }
+
+                setCheckoutResult(data);
+                if (data.status === 'approved') {
+                  clearCartRef.current();
+                  navigateRef.current(`/obrigado-compra?order_id=${encodeURIComponent(String(data.order_id || ''))}&payment_method=${encodeURIComponent(currentMethod)}`);
+                } else {
+                  setStatusMessage(`Pagamento pendente ou em análise: status ${data.status}`);
+                }
+              } catch (err) {
+                setStatusMessage('Erro ao processar pagamento.');
+              } finally {
                 setLoadingCheckout(false);
-                return;
               }
-
-              const cardHolderName = cardData?.cardholderName || `${currentPayer.first_name} ${currentPayer.last_name}`;
-              const [firstName, ...restName] = String(cardHolderName).trim().split(' ');
-              const lastName = restName.join(' ') || currentPayer.last_name;
-
-              const res = await fetch('/api/checkout', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  items: currentItems,
-                  payment_method: currentMethod,
-                  checkout_data_processing_accepted: currentConsent,
-                  payer: {
-                    email: cardPayerEmail,
-                    first_name: firstName || currentPayer.first_name,
-                    last_name: lastName || currentPayer.last_name,
-                    cpf: cardPayerCpf,
-                  },
-                  card_token: cardData?.token,
-                  installments: currentMethod === 'debit_card' ? 1 : Number(cardData?.installments || 1),
-                  issuer_id: cardData?.issuerId || null,
-                  payment_method_id: cardData?.paymentMethodId || undefined,
-                }),
-              });
-
-              const data = await res.json();
-              if (!res.ok) {
-                setStatusMessage(data?.error || 'Falha ao processar pagamento com cartão');
-                setLoadingCheckout(false);
-                return;
-              }
-
-              setCheckoutResult(data);
-              if (data.status === 'approved') {
-                clearCartRef.current();
-                navigateRef.current(`/obrigado-compra?order_id=${encodeURIComponent(String(data.order_id || ''))}&payment_method=${encodeURIComponent(currentMethod)}`);
-              } else {
-                setStatusMessage(`Pagamento pendente ou em análise: status ${data.status}`);
-              }
-            } catch (err) {
-              setStatusMessage('Erro ao processar pagamento.');
-            } finally {
-              setLoadingCheckout(false);
             }
           }
-        }
-      });
-    } catch (e) {
-      console.error('Erro ao iniciar CardForm:', e);
-      sdkMountedRef.current = false;
-    }
+        });
+      } catch (e) {
+        console.error('Erro ao iniciar CardForm:', e);
+        sdkMountedRef.current = false;
+      }
+    }, 150);
+
+    return () => clearTimeout(timer);
   }, [checkoutMethod, publicKey, totalPrice]);
 
   useEffect(() => {
@@ -371,7 +443,11 @@ export default function MobileCart() {
           items,
           payment_method: 'pix',
           checkout_data_processing_accepted: checkoutConsent,
-          payer,
+          payer: {
+            ...payer,
+            address: payer.street,
+            postal_code: payer.zip_code,
+          },
         }),
       });
       const data = await res.json();
@@ -762,17 +838,17 @@ export default function MobileCart() {
           <form id="form-checkout" className="flex flex-col gap-3.5 pt-2">
             <div className="flex flex-col gap-1">
               <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Número do Cartão</label>
-              <div id="form-checkout__cardNumber" className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none min-h-[46px]" />
+              <input type="text" id="form-checkout__cardNumber" className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none min-h-[46px]" />
             </div>
 
             <div className="grid grid-cols-2 gap-3.5">
               <div className="flex flex-col gap-1">
                 <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Validade</label>
-                <div id="form-checkout__expirationDate" className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none min-h-[46px]" />
+                <input type="text" id="form-checkout__expirationDate" className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none min-h-[46px]" />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">CVV</label>
-                <div id="form-checkout__securityCode" className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none min-h-[46px]" />
+                <input type="text" id="form-checkout__securityCode" className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold focus:outline-none min-h-[46px]" />
               </div>
             </div>
 

@@ -37,7 +37,7 @@ export default function MobileProductDetail() {
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   
   // Accordion state
-  const [openSection, setOpenSection] = useState<'desc' | 'specs' | 'reviews' | null>('desc');
+  const [openSection, setOpenSection] = useState<'desc' | 'specs' | 'reviews' | null>(null);
   
   // Reviews state
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -405,6 +405,34 @@ export default function MobileProductDetail() {
         </section>
       )}
 
+      {/* Botão Folha de Produção PDF se disponível (Destaque Ativo) */}
+      {productionSheetHref && (
+        <section className="flex flex-col gap-2">
+          <a
+            href={productionSheetHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl flex items-center justify-center gap-2 font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-red-500/10 active:scale-95 text-center"
+          >
+            <FileText className="w-4 h-4 fill-white/10" />
+            Visualizar Folha de Produção (PDF)
+          </a>
+        </section>
+      )}
+
+      {/* Breve Descrição (Ativa e sempre visível) */}
+      {product.short_description && (
+        <section className="bg-white border border-slate-100 rounded-[2rem] p-5 shadow-[0_4px_24px_rgba(0,0,0,0.01)] flex flex-col gap-2.5">
+          <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-50 pb-2 flex items-center gap-1.5">
+            <Info className="w-4 h-4 text-blue-600" /> Breve Descrição
+          </h3>
+          <div 
+            className="text-slate-600 text-[11px] font-bold leading-relaxed prose-sm max-w-none"
+            dangerouslySetInnerHTML={{ __html: formatShortDescription(resolveProductTemplate(product.short_description)) }}
+          />
+        </section>
+      )}
+
       {/* Especificações Adicionais em Acordeão Inteligente (Sanfona) */}
       <section className="flex flex-col bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.01)]">
         
@@ -444,12 +472,6 @@ export default function MobileProductDetail() {
                     <p className="text-slate-600">
                       Este produto consiste em um arquivo de bordado digital de alta qualidade, pronto e testado em bastidor, desenvolvido para ser utilizado em máquinas de bordar computadorizadas domésticas a industriais.
                     </p>
-                  )}
-                  {product.short_description && (
-                    <div 
-                      className="mt-4 pt-4 border-t border-slate-50 font-bold"
-                      dangerouslySetInnerHTML={{ __html: formatShortDescription(resolveProductTemplate(product.short_description)) }}
-                    />
                   )}
                 </div>
               </motion.div>
