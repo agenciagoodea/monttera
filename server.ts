@@ -2394,10 +2394,21 @@ async function startServer() {
 
     if (!isSensitiveApi) return next();
 
-    if (origin && !allowedOrigins.has(origin)) {
+    const isDomainAllowed = (val: string): boolean => {
+      if (!val) return true;
+      if (allowedOrigins.has(val)) return true;
+      try {
+        const u = new URL(val);
+        return u.hostname === 'm.digitalbordados.com.br' || u.hostname === 'novo.digitalbordados.com.br' || u.hostname.endsWith('.digitalbordados.com.br');
+      } catch {
+        return false;
+      }
+    };
+
+    if (origin && !isDomainAllowed(origin)) {
       return res.status(403).json({ error: 'Origin bloqueada por politica de seguranca' });
     }
-    if (!origin && refererOrigin && !allowedOrigins.has(refererOrigin)) {
+    if (!origin && refererOrigin && !isDomainAllowed(refererOrigin)) {
       return res.status(403).json({ error: 'Referer bloqueado por politica de seguranca' });
     }
     if (hasAuthCookie && (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader)) {

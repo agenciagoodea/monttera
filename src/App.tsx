@@ -1,8 +1,14 @@
 import { useEffect, useState, lazy, Suspense } from 'react';
 import MobileLayout from './mobile/layout/MobileLayout';
 import MobileHome from './mobile/pages/MobileHome';
+import MobileCategories from './mobile/pages/MobileCategories';
+import MobileSearch from './mobile/pages/MobileSearch';
+import MobileLogin from './mobile/pages/MobileLogin';
+import MobileRegister from './mobile/pages/MobileRegister';
+import MobileCart from './mobile/pages/MobileCart';
+import MobileMyAccount from './mobile/pages/MobileMyAccount';
 import { formatCurrency } from './lib/utils';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -259,27 +265,15 @@ export default function App() {
                         <Suspense fallback={<PageLoader />}>
                           <Routes>
                             <Route path="/" element={<MobileHome />} />
-                            <Route path="/categorias" element={
-                              <div className="py-2">
-                                <h2 className="text-xs font-black uppercase text-slate-400 tracking-wider mb-3">Escolha uma Categoria</h2>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <LinkToCategories />
-                                </div>
-                              </div>
-                            } />
-                            <Route path="/busca" element={
-                              <div className="py-2 flex flex-col gap-4">
-                                <h2 className="text-xs font-black uppercase text-slate-400 tracking-wider">Busca de Matrizes</h2>
-                                <MobileSearchBox />
-                              </div>
-                            } />
-                            <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
-                            <Route path="/cadastro" element={<Suspense fallback={<PageLoader />}><Register /></Suspense>} />
+                            <Route path="/categorias" element={<MobileCategories />} />
+                            <Route path="/busca" element={<MobileSearch />} />
+                            <Route path="/login" element={<MobileLogin />} />
+                            <Route path="/cadastro" element={<MobileRegister />} />
                             <Route path="/esqueci-senha" element={<Suspense fallback={<PageLoader />}><ForgotPassword /></Suspense>} />
                             <Route path="/redefinir-senha" element={<Suspense fallback={<PageLoader />}><ResetPassword /></Suspense>} />
-                            <Route path="/carrinho" element={<RequireRegisteredUser><Suspense fallback={<PageLoader />}><CartPage /></Suspense></RequireRegisteredUser>} />
+                            <Route path="/carrinho" element={<RequireRegisteredUser><MobileCart /></RequireRegisteredUser>} />
                             <Route path="/favoritos" element={<Suspense fallback={<PageLoader />}><FavoritesPage /></Suspense>} />
-                            <Route path="/minha-conta/*" element={<RequireRegisteredUser><Suspense fallback={<PageLoader />}><MyAccount /></Suspense></RequireRegisteredUser>} />
+                            <Route path="/minha-conta/*" element={<RequireRegisteredUser><MobileMyAccount /></RequireRegisteredUser>} />
                             <Route path="/produto/:slug" element={<Suspense fallback={<PageLoader />}><ProductDetail /></Suspense>} />
                             <Route path="/politica" element={<Suspense fallback={<PageLoader />}><PrivacyPolicy /></Suspense>} />
                             <Route path="/ajuda" element={<Suspense fallback={<PageLoader />}><HelpPage /></Suspense>} />

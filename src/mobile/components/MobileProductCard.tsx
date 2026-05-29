@@ -9,6 +9,7 @@ import { Link, useNavigate } from 'react-router-dom';
 
 interface MobileProductCardProps {
   product: Product;
+  key?: React.Key;
 }
 
 export default function MobileProductCard({ product }: MobileProductCardProps) {
@@ -109,27 +110,33 @@ export default function MobileProductCard({ product }: MobileProductCardProps) {
         </div>
 
         {/* Bloco de Preços & Parcelamento */}
-        <div className="pt-2 border-t border-slate-50 flex flex-col gap-2">
+        <div className="pt-2 border-t border-slate-50 flex flex-col gap-1.5">
           <div className="flex flex-col">
             {/* Preço de Tabela Riscado se em Promoção */}
-            {product.sale_price && (
-              <span className="text-[9px] text-slate-400 line-through font-bold leading-none mb-0.5">
+            {product.sale_price ? (
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[10px] text-slate-400 line-through font-bold leading-none">
+                  {formatCurrency(product.price)}
+                </span>
+                <span className="text-[13px] font-black text-blue-600 leading-none">
+                  {formatCurrency(product.sale_price)}
+                </span>
+              </div>
+            ) : (
+              <span className="text-[13px] font-black text-slate-900 leading-none">
                 {formatCurrency(product.price)}
               </span>
             )}
             
-            {/* Preço Principal À Vista no PIX */}
-            <div className="flex items-baseline gap-1">
-              <span className="text-[13px] font-black text-slate-900 leading-none">
-                {formatCurrency(pixPrice)}
-              </span>
-              <span className="text-[8px] font-black text-emerald-600 uppercase tracking-widest leading-none">
-                no PIX
+            {/* Preço com Desconto no PIX */}
+            <div className="flex items-center gap-1 mt-1">
+              <span className="text-[9px] font-extrabold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                {formatCurrency(pixPrice)} no PIX (5% OFF)
               </span>
             </div>
 
             {/* Parcelamento em Destaque */}
-            <span className="text-[8.5px] font-black text-slate-500 mt-1 uppercase tracking-tight leading-none">
+            <span className="text-[8.5px] font-black text-slate-400 mt-1 uppercase tracking-tight leading-none">
               ou 3x de {formatCurrency(installPrice)} s/ juros
             </span>
           </div>
