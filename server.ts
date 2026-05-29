@@ -2309,14 +2309,16 @@ async function startServer() {
     // Regex consolidado de mercado para detecção de dispositivo móvel
     const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Mobi/i.test(userAgent);
 
+    const isDesktopHost = hostname === 'digitalbordados.com.br' || hostname === 'www.digitalbordados.com.br';
+
     if (isProduction) {
-      if (isMobileDevice && !preferDesktop && hostname === 'digitalbordados.com.br') {
+      if (isMobileDevice && !preferDesktop && isDesktopHost) {
         let cleanUrl = req.originalUrl;
         if (cleanUrl.startsWith('/index.html')) {
           cleanUrl = '/' + cleanUrl.substring('/index.html'.length);
           if (cleanUrl === '') cleanUrl = '/';
         }
-        const targetUrl = `${req.protocol}://m.digitalbordados.com.br${cleanUrl}`;
+        const targetUrl = `https://m.digitalbordados.com.br${cleanUrl}`;
         console.log(`[Mobile Redirect Log] Hostname: ${hostname} | User-Agent: ${userAgent} | isMobile: true | prefer_desktop: ${preferDesktop} | Decisão: REDIRECIONAR PARA MOBILE -> ${targetUrl} via 302`);
         res.writeHead(302, { Location: targetUrl });
         return res.end();
@@ -2328,7 +2330,7 @@ async function startServer() {
           cleanUrl = '/' + cleanUrl.substring('/index.html'.length);
           if (cleanUrl === '') cleanUrl = '/';
         }
-        const targetUrl = `${req.protocol}://digitalbordados.com.br${cleanUrl}`;
+        const targetUrl = `https://digitalbordados.com.br${cleanUrl}`;
         console.log(`[Mobile Redirect Log] Hostname: ${hostname} | User-Agent: ${userAgent} | isMobile: false | prefer_desktop: ${preferDesktop} | Decisão: REDIRECIONAR PARA DESKTOP -> ${targetUrl} via 302`);
         res.writeHead(302, { Location: targetUrl });
         return res.end();
