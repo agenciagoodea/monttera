@@ -3,7 +3,7 @@ import { useAppData } from '../../contexts/AppDataContext';
 import { Product } from '../../types';
 import MobileProductCard from '../components/MobileProductCard';
 import { useSearchParams } from 'react-router-dom';
-import { Search, ChevronLeft, ChevronRight, Sparkles, Filter, AlertCircle } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, Sparkles, Filter, AlertCircle, Plus, X } from 'lucide-react';
 import { formatCurrency } from '../../lib/utils';
 
 export default function MobileHome() {
@@ -21,6 +21,12 @@ export default function MobileHome() {
     pages: 1,
     currentPage: 1
   });
+  const [activeParentForSubcategories, setActiveParentForSubcategories] = useState<any>(null);
+
+  // Filtrar apenas categorias pai ativas
+  const parentCategories = React.useMemo(() => {
+    return categories.filter(cat => !cat.parent_id && cat.status === 'active');
+  }, [categories]);
 
   // Sincroniza selectedCategory (UI) com o param da URL quando categories carregam
   useEffect(() => {
@@ -144,19 +150,54 @@ export default function MobileHome() {
           </button>
 
           {/* Categorias Dinâmicas */}
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => handleCategorySelect(cat.id)}
-              className={`flex-shrink-0 snap-start px-5 py-2.5 rounded-2xl font-black text-[10px] uppercase tracking-wider border transition-all ${
-                selectedCategory === cat.id
-                  ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10'
-                  : 'bg-white border-slate-100 text-slate-600 active:bg-slate-50'
-              }`}
-            >
-              {cat.name}
-            </button>
-          ))}
+          {parentCategories.map((cat) => {
+            const subcats = categories.filter(c => c.parent_id === cat.id && c.status === 'active');
+            const hasSubs = subcats.length > 0;
+            const isSelected = selectedCategory === cat.id;
+            const isSubSelected = categories.some(c => c.id === selectedCategory && c.parent_id === cat.id);
+            const activeColorClass = isSelected || isSubSelected
+              ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10'
+              : 'bg-white border-slate-100 text-slate-600 active:bg-slate-50';
+
+            if (hasSubs) {
+              return (
+                <div key={cat.id} className="flex-shrink-0 snap-start flex items-stretch">
+                  {/* Botão Principal da Categoria Pai */}
+                  <button
+                    onClick={() => handleCategorySelect(cat.id)}
+                    className={`px-5 py-2.5 rounded-l-2xl font-black text-[10px] uppercase tracking-wider border transition-all ${
+                      isSelected || isSubSelected
+                        ? 'bg-blue-600 border-blue-600 text-white border-r-0'
+                        : 'bg-white border-slate-100 text-slate-600 active:bg-slate-50 border-r-0'
+                    }`}
+                  >
+                    {cat.name}
+                  </button>
+                  {/* Botão de Mais para Subcategorias */}
+                  <button
+                    onClick={() => setActiveParentForSubcategories(cat)}
+                    className={`px-3.5 rounded-r-2xl border transition-all flex items-center justify-center ${
+                      isSelected || isSubSelected
+                        ? 'bg-blue-700 border-blue-700 text-blue-100 border-l-blue-500/30'
+                        : 'bg-slate-50 border-slate-100 text-slate-500 active:bg-slate-100 border-l-slate-100/50'
+                    }`}
+                  >
+                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <button
+                key={cat.id}
+                onClick={() => handleCategorySelect(cat.id)}
+                className={`flex-shrink-0 snap-start px-5 py-2.5 rounded-2xl font-black text-[10px] uppercase tracking-wider border transition-all ${activeColorClass}`}
+              >
+                {cat.name}
+              </button>
+            );
+          })}
         </div>
       </section>
 
@@ -237,6 +278,87 @@ export default function MobileHome() {
           </div>
         )}
       </section>
+
+      {/* Drawer de Subcategorias */}
+      {activeParentForSubcategories && (
+        <>
+          {/* Overlay Escuro com Blur */}
+          <div 
+            onClick={() => setActiveParentForSubcategories(null)}
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 transition-opacity animate-in fade-in duration-200"
+          />
+          {/* Painel da Gaveta (Drawer) */}
+          <div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[2.5rem] p-6 pb-10 z-50 shadow-2xl flex flex-col gap-4 max-h-[75vh] overflow-y-auto animate-in slide-in-from-bottom duration-300">
+            {/* Indicador de gesto de deslizar */}
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-1 flex-shrink-0" />
+            
+            <div className="flex items-start justify-between gap-4 mt-2">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[9px] font-black tracking-widest uppercase text-slate-400">Subcategorias de</span>
+                <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">
+                  {activeParentForSubcategories.name}
+                </h4>
+              </div>
+              <button
+                onClick={() => setActiveParentForSubcategories(null)}
+                className="p-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2.5 mt-2">
+              {/* Opção para Ver Toda a Categoria Pai */}
+              <button
+                onClick={() => {
+                  handleCategorySelect(activeParentForSubcategories.id);
+                  setActiveParentForSubcategories(null);
+                }}
+                className={`w-full p-4 rounded-2xl border text-left flex items-center justify-between transition-all active:scale-[0.99] ${
+                  selectedCategory === activeParentForSubcategories.id
+                    ? 'bg-blue-50 border-blue-100 text-blue-700'
+                    : 'bg-white border-slate-100 text-slate-700'
+                }`}
+              >
+                <span className="text-xs font-black uppercase tracking-tight">
+                  Ver Todas de {activeParentForSubcategories.name}
+                </span>
+                <span className="text-[9px] font-extrabold uppercase tracking-wider px-2 py-1 rounded-full bg-slate-100 text-slate-500">
+                  {activeParentForSubcategories.product_count || 0} Itens
+                </span>
+              </button>
+
+              {/* Subcategorias Dinâmicas */}
+              {categories
+                .filter(c => c.parent_id === activeParentForSubcategories.id && c.status === 'active')
+                .map((subcat) => {
+                  const isSubSelected = selectedCategory === subcat.id;
+                  return (
+                    <button
+                      key={subcat.id}
+                      onClick={() => {
+                        handleCategorySelect(subcat.id);
+                        setActiveParentForSubcategories(null);
+                      }}
+                      className={`w-full p-4 rounded-2xl border text-left flex items-center justify-between transition-all active:scale-[0.99] ${
+                        isSubSelected
+                          ? 'bg-blue-50 border-blue-100 text-blue-700'
+                          : 'bg-white border-slate-100 text-slate-700 active:bg-slate-50'
+                      }`}
+                    >
+                      <span className="text-xs font-bold uppercase tracking-tight">
+                        {subcat.name}
+                      </span>
+                      <span className="text-[9px] font-extrabold uppercase tracking-wider px-2 py-1 rounded-full bg-slate-100 text-slate-500">
+                        {subcat.product_count || 0} Itens
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

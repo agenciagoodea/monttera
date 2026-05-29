@@ -290,13 +290,6 @@ export default function MobileProductDetail() {
             ))}
           </div>
 
-          {/* Badge de Desconto */}
-          {discount > 0 && (
-            <div className="absolute bottom-6 right-6 z-20 bg-red-600 text-white px-3.5 py-1.5 rounded-2xl text-[10px] font-black shadow-lg shadow-red-200">
-              {discount}% OFF
-            </div>
-          )}
-
           {/* Lupa para Abrir Lightbox */}
           <button
             type="button"
