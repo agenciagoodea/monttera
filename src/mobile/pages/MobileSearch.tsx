@@ -14,12 +14,12 @@ export default function MobileSearch() {
 
   // Tags populares sugeridas
   const popularTags = [
-    { label: 'Flores', query: 'floral' },
-    { label: 'Times', query: 'time' },
-    { label: 'Infantil', query: 'infantil' },
-    { label: 'Animais', query: 'animal' },
-    { label: 'Bandeiras', query: 'bandeira' },
-    { label: 'Brasões', query: 'brasao' }
+    { label: 'Enfermagem', query: 'enfermagem' },
+    { label: 'Fisioterapia', query: 'fisioterapia' },
+    { label: 'Universidade', query: 'universidade' },
+    { label: 'Carros', query: 'carros' },
+    { label: 'Desenhos', query: 'desenhos' },
+    { label: 'Militar', query: 'militar' }
   ];
 
   // Carregar produtos de sugestão na inicialização
