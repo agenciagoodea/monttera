@@ -8331,19 +8331,22 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       const soldProducts = await dbAsync.all(`
         SELECT
+          o.id as order_id,
+          COALESCE(o.customer_name, u.name, 'Cliente Indefinido') as customer_name,
           oi.product_id as id,
           COALESCE(p.name, oi.product_name, 'Produto Indefinido') as name,
           p.slug,
           p.image,
-          COUNT(oi.id) as quantity,
-          SUM(oi.price * oi.quantity) as total_revenue
+          oi.quantity,
+          (oi.price * oi.quantity) as total_revenue,
+          o.created_at
         FROM order_items oi
         LEFT JOIN products p ON oi.product_id = p.id
         JOIN orders o ON oi.order_id = o.id
+        LEFT JOIN users u ON o.user_id = u.id
         WHERE o.status IN (${paidStatuses})
           AND ${whereCurrent.split('created_at').join('o.created_at')}
-        GROUP BY oi.product_id, name, p.slug, p.image
-        ORDER BY quantity DESC, total_revenue DESC
+        ORDER BY o.id DESC
       `);
 
       const calcTrend = (current: number, previous: number) => {

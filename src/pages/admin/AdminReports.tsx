@@ -118,8 +118,8 @@ export default function AdminReports() {
     
     lines.push('');
     lines.push('Detalhamento de Vendas por Matriz');
-    lines.push('Produto,Quantidade Vendida,Receita Total (R$)');
-    (stats.soldProducts || []).forEach((row: any) => lines.push(`"${String(row.name || '').replace(/"/g, '""')}",${Number(row.quantity || 0)},${Number(row.total_revenue || 0).toFixed(2)}`));
+    lines.push('Pedido,Cliente,Produto,Quantidade Vendida,Receita Total (R$)');
+    (stats.soldProducts || []).forEach((row: any) => lines.push(`${row.order_id},"${String(row.customer_name || '').replace(/"/g, '""')}","${String(row.name || '').replace(/"/g, '""')}",${Number(row.quantity || 0)},${Number(row.total_revenue || 0).toFixed(2)}`));
 
     const csv = lines.join('\n');
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -337,10 +337,12 @@ export default function AdminReports() {
               <table className="w-full border-collapse text-left">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest pl-2">Foto</th>
+                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest pl-2">Pedido</th>
+                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Cliente</th>
+                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Foto</th>
                     <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Nome da Matriz</th>
-                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Quantidade Vendida</th>
-                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right pr-2">Faturamento</th>
+                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Qtd.</th>
+                    <th className="pb-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right pr-2">Valor</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -349,7 +351,13 @@ export default function AdminReports() {
                       key={prod.id || idx}
                       className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors"
                     >
-                      <td className="py-4 pl-2">
+                      <td className="py-4 pl-2 font-black text-xs text-blue-600">
+                        #{prod.order_id}
+                      </td>
+                      <td className="py-4 font-bold text-xs text-slate-600 truncate max-w-[150px]" title={prod.customer_name}>
+                        {prod.customer_name}
+                      </td>
+                      <td className="py-4">
                         <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 flex items-center justify-center shadow-sm">
                           {prod.image ? (
                             <img 
