@@ -7639,6 +7639,74 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     }
   });
 
+  async function performSystemBackup(mode: 'full' | 'incremental', userId: number | null): Promise<any> {
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+    const backupKey = `backup-${mode}-${stamp}`;
+    const backupRoot = path.join(process.cwd(), 'storage', 'backups');
+    const snapshotPath = path.join(backupRoot, backupKey, 'snapshot');
+    const archivePath = path.join(backupRoot, `${backupKey}.tar.gz`);
+    const dbPath = path.join(snapshotPath, 'database');
+    const filesPath = path.join(snapshotPath, 'files');
+    ensureDirSync(dbPath);
+    ensureDirSync(filesPath);
+
+    const allTables = await getAllTableNames();
+    const ignoredTables = new Set(['system_backups']);
+    for (const tableName of allTables) {
+      if (ignoredTables.has(tableName)) continue;
+      const rows = await dbAsync.all(`SELECT * FROM \`${tableName}\``) as any[];
+      safeJsonWrite(path.join(dbPath, `${tableName}.json`), rows);
+    }
+
+    const uploadsSource = path.join(process.cwd(), 'public', 'uploads');
+    const uploadsTarget = path.join(filesPath, 'public', 'uploads');
+    copyDirectoryRecursive(uploadsSource, uploadsTarget);
+
+    const rootUploadsSource = path.join(process.cwd(), 'uploads');
+    const rootUploadsTarget = path.join(filesPath, 'uploads');
+    copyDirectoryRecursive(rootUploadsSource, rootUploadsTarget);
+
+    const metadata = {
+      key: backupKey,
+      mode,
+      created_at: now.toISOString(),
+      table_count: allTables.filter((name) => !ignoredTables.has(name)).length,
+      includes: ['database', 'public/uploads', 'uploads'],
+      node_env: process.env.NODE_ENV || 'development',
+    };
+    safeJsonWrite(path.join(snapshotPath, 'metadata.json'), metadata);
+
+    buildBackupArchive(snapshotPath, archivePath);
+    const archiveStat = fs.statSync(archivePath);
+    const snapshotStat = fs.statSync(path.join(snapshotPath, 'metadata.json'));
+    const integrityOk = archiveStat.size > 0 && snapshotStat.size > 0 ? 1 : 0;
+
+    await dbAsync.run(
+      `INSERT INTO system_backups
+        (backup_key, mode, status, archive_path, snapshot_path, size_bytes, integrity_ok, notes, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      backupKey,
+      mode,
+      integrityOk ? 'completed' : 'warning',
+      archivePath,
+      snapshotPath,
+      Number(archiveStat.size || 0),
+      integrityOk,
+      integrityOk ? 'Backup concluido com sucesso.' : 'Backup finalizado com alerta de integridade.',
+      userId,
+    );
+
+    return {
+      success: true,
+      backup_key: backupKey,
+      mode,
+      archive_path: archivePath,
+      size_bytes: Number(archiveStat.size || 0),
+      integrity_ok: Boolean(integrityOk),
+    };
+  }
+
   app.get('/api/admin/backups', authenticate, isAdmin, async (req, res) => {
     try {
       const rows = await dbAsync.all(`
@@ -7657,72 +7725,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   app.post('/api/admin/backups/create', authenticate, isAdmin, async (req, res) => {
     try {
       const mode = String(req.body?.mode || 'full').toLowerCase() === 'incremental' ? 'incremental' : 'full';
-      const now = new Date();
-      const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-      const backupKey = `backup-${mode}-${stamp}`;
-      const backupRoot = path.join(process.cwd(), 'storage', 'backups');
-      const snapshotPath = path.join(backupRoot, backupKey, 'snapshot');
-      const archivePath = path.join(backupRoot, `${backupKey}.tar.gz`);
-      const dbPath = path.join(snapshotPath, 'database');
-      const filesPath = path.join(snapshotPath, 'files');
-      ensureDirSync(dbPath);
-      ensureDirSync(filesPath);
-
-      const allTables = await getAllTableNames();
-      const ignoredTables = new Set(['system_backups']);
-      for (const tableName of allTables) {
-        if (ignoredTables.has(tableName)) continue;
-        const rows = await dbAsync.all(`SELECT * FROM \`${tableName}\``) as any[];
-        safeJsonWrite(path.join(dbPath, `${tableName}.json`), rows);
-      }
-
-      const uploadsSource = path.join(process.cwd(), 'public', 'uploads');
-      const uploadsTarget = path.join(filesPath, 'public', 'uploads');
-      copyDirectoryRecursive(uploadsSource, uploadsTarget);
-
-      // Adicionado: Backup da pasta privada de uploads de matrizes/arquivos (/uploads) na raiz
-      const rootUploadsSource = path.join(process.cwd(), 'uploads');
-      const rootUploadsTarget = path.join(filesPath, 'uploads');
-      copyDirectoryRecursive(rootUploadsSource, rootUploadsTarget);
-
-      const metadata = {
-        key: backupKey,
-        mode,
-        created_at: now.toISOString(),
-        table_count: allTables.filter((name) => !ignoredTables.has(name)).length,
-        includes: ['database', 'public/uploads', 'uploads'],
-        node_env: process.env.NODE_ENV || 'development',
-      };
-      safeJsonWrite(path.join(snapshotPath, 'metadata.json'), metadata);
-
-      buildBackupArchive(snapshotPath, archivePath);
-      const archiveStat = fs.statSync(archivePath);
-      const snapshotStat = fs.statSync(path.join(snapshotPath, 'metadata.json'));
-      const integrityOk = archiveStat.size > 0 && snapshotStat.size > 0 ? 1 : 0;
-
-      await dbAsync.run(
-        `INSERT INTO system_backups
-          (backup_key, mode, status, archive_path, snapshot_path, size_bytes, integrity_ok, notes, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        backupKey,
-        mode,
-        integrityOk ? 'completed' : 'warning',
-        archivePath,
-        snapshotPath,
-        Number(archiveStat.size || 0),
-        integrityOk,
-        integrityOk ? 'Backup concluido com sucesso.' : 'Backup finalizado com alerta de integridade.',
-        Number((req as any)?.user?.id || 0) || null,
-      );
-
-      res.json({
-        success: true,
-        backup_key: backupKey,
-        mode,
-        archive_path: archivePath,
-        size_bytes: Number(archiveStat.size || 0),
-        integrity_ok: Boolean(integrityOk),
-      });
+      const userId = Number((req as any)?.user?.id || 0) || null;
+      const result = await performSystemBackup(mode, userId);
+      res.json(result);
     } catch (error: any) {
       console.error('Create backup error:', error);
       res.status(500).json({ error: error?.message || 'Erro ao criar backup.' });
@@ -10045,6 +10050,68 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       console.error('[Cron] Error checking pending PIX:', error);
     }
   }, 30 * 60 * 1000);
+
+  // Cron Job para Backup Automático (Roda a cada 15 minutos)
+  setInterval(async () => {
+    try {
+      const rows = await dbAsync.all('SELECT `key`, value FROM settings WHERE `key` IN ("backup_auto_enabled", "backup_auto_frequency", "backup_auto_hour", "backup_auto_mode", "backup_last_run")') as any[];
+      const config = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {} as any);
+      
+      const enabled = config.backup_auto_enabled === 'true';
+      if (!enabled) return;
+
+      const frequency = config.backup_auto_frequency || 'daily';
+      const targetHour = parseInt(config.backup_auto_hour || '3', 10);
+      const mode = (config.backup_auto_mode === 'incremental' ? 'incremental' : 'full') as 'full' | 'incremental';
+      const lastRunStr = config.backup_last_run;
+
+      const now = new Date();
+      const currentHour = now.getHours();
+
+      if (currentHour < targetHour) return;
+
+      let shouldRun = false;
+      const lastRun = lastRunStr ? new Date(lastRunStr) : null;
+
+      if (!lastRun) {
+        shouldRun = true;
+      } else {
+        const diffMs = now.getTime() - lastRun.getTime();
+        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+        if (frequency === 'daily') {
+          const lastRunDayStr = `${lastRun.getFullYear()}-${lastRun.getMonth()}-${lastRun.getDate()}`;
+          const currentDayStr = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+          if (lastRunDayStr !== currentDayStr) {
+            shouldRun = true;
+          }
+        } else if (frequency === 'weekly') {
+          if (diffDays >= 7) {
+            shouldRun = true;
+          }
+        } else if (frequency === 'monthly') {
+          if (diffDays >= 30) {
+            shouldRun = true;
+          }
+        }
+      }
+
+      if (shouldRun) {
+        console.log(`[Cron Backup] Iniciando backup automático agendado (${frequency}, modo: ${mode})...`);
+        const result = await performSystemBackup(mode, null);
+        
+        await dbAsync.run(
+          'INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?',
+          'backup_last_run',
+          now.toISOString(),
+          now.toISOString()
+        );
+        console.log(`[Cron Backup] Backup automático executado com sucesso: ${result.backup_key}`);
+      }
+    } catch (error) {
+      console.error('[Cron Backup] Erro no agendamento de backup:', error);
+    }
+  }, 15 * 60 * 1000);
 
   async function ensureEmailTemplatesUpdated() {
     try {

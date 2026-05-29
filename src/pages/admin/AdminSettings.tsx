@@ -211,6 +211,11 @@ export default function AdminSettings() {
     lgpd_policy_version_privacy: '1.0',
     lgpd_policy_version_terms: '1.0',
     lgpd_policy_version_cookies: '1.0',
+    backup_auto_enabled: 'false',
+    backup_auto_frequency: 'daily',
+    backup_auto_hour: '3',
+    backup_auto_mode: 'full',
+    backup_last_run: '',
   });
 
   useEffect(() => {
@@ -274,6 +279,11 @@ export default function AdminSettings() {
           paypal_brl_usd_rate: data.paypal_brl_usd_rate ?? prev.paypal_brl_usd_rate,
           paypal_brl_eur_rate: data.paypal_brl_eur_rate ?? prev.paypal_brl_eur_rate,
           paypal_webhook_id: data.paypal_webhook_id ?? prev.paypal_webhook_id,
+          backup_auto_enabled: data.backup_auto_enabled ?? prev.backup_auto_enabled,
+          backup_auto_frequency: data.backup_auto_frequency ?? prev.backup_auto_frequency,
+          backup_auto_hour: data.backup_auto_hour ?? prev.backup_auto_hour,
+          backup_auto_mode: data.backup_auto_mode ?? prev.backup_auto_mode,
+          backup_last_run: data.backup_last_run ?? prev.backup_last_run,
         }));
       }
     } catch (error) {
@@ -566,14 +576,14 @@ export default function AdminSettings() {
   };
 
   const restoreBackup = async (id: number) => {
-    if (!window.confirm('Confirma restaurar este backup? Esta opera??o substitui dados atuais do sistema.')) return;
+    if (!window.confirm('Confirma restaurar este backup? Esta operação substitui dados atuais do sistema.')) return;
     setBackupActionId(id);
     setMessage(null);
     try {
       const res = await fetch('/api/admin/backups/restore/' + id, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Erro ao restaurar backup');
-      setMessage({ type: 'success', text: 'Restaura??o conclu?da com sucesso.' });
+      setMessage({ type: 'success', text: 'Restauração concluída com sucesso.' });
       fetchBackups();
     } catch (error: any) {
       setMessage({ type: 'error', text: error?.message || 'Falha ao restaurar backup.' });
@@ -590,7 +600,7 @@ export default function AdminSettings() {
       const res = await fetch('/api/admin/backups/' + id, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Erro ao excluir backup');
-      setMessage({ type: 'success', text: 'Backup exclu?do com sucesso.' });
+      setMessage({ type: 'success', text: 'Backup excluído com sucesso.' });
       fetchBackups();
     } catch (error: any) {
       setMessage({ type: 'error', text: error?.message || 'Falha ao excluir backup.' });
@@ -2678,7 +2688,7 @@ export default function AdminSettings() {
                     </div>
 
                     <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-[11px] text-blue-800 font-semibold">
-                      O backup inclui snapshot de banco de dados e pasta <code>public/uploads</code>. Utilize restaura??o apenas em ambiente controlado.
+                      O backup inclui snapshot de banco de dados e pasta <code>public/uploads</code>. Utilize restauração apenas em ambiente controlado.
                     </div>
 
                     <div className="overflow-x-auto rounded-2xl border border-slate-200">
@@ -2690,7 +2700,7 @@ export default function AdminSettings() {
                             <th className="px-4 py-3 text-left">Modo</th>
                             <th className="px-4 py-3 text-left">Status</th>
                             <th className="px-4 py-3 text-left">Tamanho</th>
-                            <th className="px-4 py-3 text-right">A??es</th>
+                            <th className="px-4 py-3 text-right">Ações</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2721,6 +2731,78 @@ export default function AdminSettings() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+
+                  {/* Card: Agendamento de Backup Automático */}
+                  <div className="rounded-[2rem] border border-slate-200 p-6 md:p-8 space-y-6">
+                    <div>
+                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Agendamento de Backup</h3>
+                      <p className="text-[11px] text-slate-500 font-medium">Programe a frequência e horário das cópias de segurança automáticas do sistema.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Backup Automático</label>
+                        <select
+                          value={settings.backup_auto_enabled}
+                          onChange={e => setSettings({ ...settings, backup_auto_enabled: e.target.value })}
+                          className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                        >
+                          <option value="false">Desativado</option>
+                          <option value="true">Habilitado</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Frequência</label>
+                        <select
+                          value={settings.backup_auto_frequency}
+                          disabled={settings.backup_auto_enabled !== 'true'}
+                          onChange={e => setSettings({ ...settings, backup_auto_frequency: e.target.value })}
+                          className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-blue-500 text-xs font-bold disabled:opacity-50"
+                        >
+                          <option value="daily">Diário</option>
+                          <option value="weekly">Semanal (A cada 7 dias)</option>
+                          <option value="monthly">Mensal (A cada 30 dias)</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Horário Preferencial</label>
+                        <select
+                          value={settings.backup_auto_hour}
+                          disabled={settings.backup_auto_enabled !== 'true'}
+                          onChange={e => setSettings({ ...settings, backup_auto_hour: e.target.value })}
+                          className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-blue-500 text-xs font-bold disabled:opacity-50"
+                        >
+                          {Array.from({ length: 24 }).map((_, i) => (
+                            <option key={i} value={String(i)}>
+                              {String(i).padStart(2, '0')}:00h {i >= 1 && i <= 5 ? '(Recomendado)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Tipo de Backup</label>
+                        <select
+                          value={settings.backup_auto_mode}
+                          disabled={settings.backup_auto_enabled !== 'true'}
+                          onChange={e => setSettings({ ...settings, backup_auto_mode: e.target.value as 'full' | 'incremental' })}
+                          className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-blue-500 text-xs font-bold disabled:opacity-50"
+                        >
+                          <option value="full">Completo</option>
+                          <option value="incremental">Incremental</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {settings.backup_auto_enabled === 'true' && settings.backup_last_run && (
+                      <div className="text-[10px] text-slate-500 font-semibold bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100 flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                        Último backup automático executado em: <strong className="text-slate-800">{new Date(settings.backup_last_run).toLocaleString('pt-BR')}</strong>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
