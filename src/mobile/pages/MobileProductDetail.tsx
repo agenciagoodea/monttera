@@ -713,7 +713,7 @@ export default function MobileProductDetail() {
       )}
 
       {/* Barra de Compra Flutuante Fixa no Bottom (Mobile Sticky CTA) */}
-      <section className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-t border-slate-100/80 px-5 py-4 pb-5 flex items-center justify-between shadow-[0_-8px_30px_rgba(0,0,0,0.06)]">
+      <section className="fixed bottom-16 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-t border-slate-100/80 px-5 py-4 pb-5 flex items-center justify-between shadow-[0_-8px_30px_rgba(0,0,0,0.06)]">
         
         {/* Bloco de Preços */}
         <div className="flex flex-col min-w-0">

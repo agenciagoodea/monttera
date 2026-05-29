@@ -18,7 +18,7 @@ export default function MobileSearch() {
     { label: 'Fisioterapia', query: 'fisioterapia' },
     { label: 'Universidade', query: 'universidade' },
     { label: 'Carros', query: 'carros' },
-    { label: 'Desenhos', query: 'desenhos' },
+    { label: 'Desenhos', query: 'desenho' },
     { label: 'Militar', query: 'militar' }
   ];
 
