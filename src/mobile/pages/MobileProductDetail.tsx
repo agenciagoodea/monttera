@@ -405,10 +405,10 @@ export default function MobileProductDetail() {
             href={productionSheetHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl flex items-center justify-center gap-2 font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-red-500/10 active:scale-95 text-center"
+            className="w-full py-3.5 bg-white border border-red-500 hover:bg-red-50 text-red-500 rounded-2xl flex items-center justify-center gap-2 font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 text-center"
           >
-            <FileText className="w-4 h-4 fill-white/10" />
-            Visualizar Folha de Produção (PDF)
+            <FileText className="w-4 h-4 text-red-500" />
+            Folha de Produção
           </a>
         </section>
       )}
