@@ -48,6 +48,7 @@ const AdminReports = lazy(() => import('./pages/admin/AdminReports'));
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'));
 const AdminFiles = lazy(() => import('./pages/admin/AdminFiles'));
 const AdminReviews = lazy(() => import('./pages/admin/AdminReviews'));
+const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics'));
 
 import AdminLayout from './layouts/AdminLayout';
 import { AuthProvider } from './contexts/AuthContext';
@@ -138,6 +139,40 @@ function RouteSeoDefaults() {
       jsonLd: organizationSchema,
     });
   }, [location.pathname, location.search, settings]);
+
+  return null;
+}
+
+function AnalyticsTracker() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const path = location.pathname;
+    // Ignorar rotas do admin ou APIs
+    if (path.startsWith('/admin') || path.startsWith('/api')) {
+      return;
+    }
+
+    // Pequeno timeout para garantir que o título da página foi atualizado
+    const timer = setTimeout(() => {
+      fetch('/api/analytics/collect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          path,
+          full_url: window.location.href,
+          page_title: document.title || 'Digital Bordados',
+          referrer: document.referrer || '',
+        }),
+      }).catch((err) => {
+        console.warn('[Analytics] Falha ao registrar visita:', err);
+      });
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [location.pathname, location.search]);
 
   return null;
 }
@@ -267,6 +302,7 @@ export default function App() {
                     <Route path="/*" element={
                       <MobileLayout>
                         <RouteSeoDefaults />
+                        <AnalyticsTracker />
                         <Suspense fallback={<PageLoader />}>
                           <Routes>
                             <Route path="/" element={<MobileHome />} />
@@ -326,6 +362,7 @@ export default function App() {
                 <Route path="/pedidos" element={<AdminOrderList />} />
                 <Route path="/clientes" element={<AdminUserList />} />
                 <Route path="/avaliacoes" element={<AdminReviews />} />
+                <Route path="/estatisticas" element={<AdminAnalytics />} />
                 <Route path="/relatorios" element={<AdminReports />} />
                 <Route path="/arquivos" element={<AdminFiles />} />
                 <Route path="/configuracoes" element={<AdminSettings />} />
@@ -338,6 +375,7 @@ export default function App() {
           <Route path="/*" element={
             <div className="min-h-screen bg-white font-sans text-gray-900 scroll-smooth flex flex-col">
               <RouteSeoDefaults />
+              <AnalyticsTracker />
               <Header />
               <div className="flex-1">
                 <Suspense fallback={<PageLoader />}>

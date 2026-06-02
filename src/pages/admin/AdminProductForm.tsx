@@ -275,6 +275,9 @@ export default function AdminProductForm() {
     try {
       const data = new FormData();
       data.append('image', file);
+      if (formData.slug) {
+        data.append('slug', formData.slug);
+      }
 
       const res = await fetch(`/api/admin/products/${id}/main-image`, {
         method: 'POST',
@@ -352,7 +355,7 @@ export default function AdminProductForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ image_url: url })
+        body: JSON.stringify({ image_url: url, slug: formData.slug })
       });
 
       const payload = await res.json();
@@ -661,6 +664,12 @@ export default function AdminProductForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!previews.main) {
+      alert('A imagem principal do produto é obrigatória. Por favor, envie ou selecione uma imagem principal.');
+      return;
+    }
+
     setLoading(true);
 
     const normalizedCategoryIds = selectedCategoryIds

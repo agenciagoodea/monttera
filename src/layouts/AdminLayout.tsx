@@ -39,6 +39,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { icon: Users, label: 'Clientes', path: '/admin/clientes' },
     { icon: Star, label: 'Avaliações', path: '/admin/avaliacoes' },
     { icon: BarChart3, label: 'Relatórios', path: '/admin/relatorios' },
+    { icon: Activity, label: 'Estatísticas do Site', path: '/admin/estatisticas' },
     { icon: FolderOpen, label: 'Arquivos', path: '/admin/arquivos' },
     { icon: Settings, label: 'Configurações', path: '/admin/configuracoes' },
   ];

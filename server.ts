@@ -2469,6 +2469,131 @@ async function startServer() {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
+  // --- SISTEMA DE ESTATÍSTICAS E ANALYTICS (MELHORIA 1) ---
+
+  // Função auxiliar para anonimizar o IP com SHA-256
+  function getIpHash(ip: string): string {
+    const salt = 'db_analytics_salt_2026';
+    return crypto.createHmac('sha256', salt).update(ip).digest('hex');
+  }
+
+  // Parser leve de User-Agent
+  function parseUserAgent(uaString: string) {
+    const ua = uaString || '';
+    let browser = 'Outro';
+    let os = 'Outro';
+    let deviceType = 'desktop';
+
+    // Detecção de tipo de dispositivo
+    if (/mobi|android|iphone|ipad|ipod|windows phone/i.test(ua)) {
+      deviceType = 'mobile';
+    }
+
+    // Detecção de Sistema Operacional
+    if (/windows/i.test(ua)) {
+      os = 'Windows';
+    } else if (/iphone|ipad|ipod/i.test(ua)) {
+      os = 'iOS';
+    } else if (/macintosh|mac os x/i.test(ua)) {
+      os = 'macOS';
+    } else if (/android/i.test(ua)) {
+      os = 'Android';
+    } else if (/linux/i.test(ua)) {
+      os = 'Linux';
+    }
+
+    // Detecção de Navegador
+    if (/edg/i.test(ua)) {
+      browser = 'Edge';
+    } else if (/chrome|crios/i.test(ua) && !/opr|opios|edg/i.test(ua)) {
+      browser = 'Chrome';
+    } else if (/firefox|fxios/i.test(ua)) {
+      browser = 'Firefox';
+    } else if (/safari/i.test(ua) && !/chrome|crios|opr|opios|edg/i.test(ua)) {
+      browser = 'Safari';
+    } else if (/opr|opera/i.test(ua)) {
+      browser = 'Opera';
+    }
+
+    return { browser, os, deviceType };
+  }
+
+  // Rota pública de coleta de visitas
+  app.post('/api/analytics/collect', async (req, res) => {
+    try {
+      const { path: pagePath, full_url, page_title, referrer } = req.body || {};
+      const userAgent = req.headers['user-agent'] || '';
+
+      // 1. Ignorar se o path ou dados estiverem vazios
+      if (!pagePath || typeof pagePath !== 'string') {
+        return res.sendStatus(200);
+      }
+
+      // 2. Ignorar rotas administrativas ou rotas de API
+      const cleanPath = pagePath.trim().split('?')[0];
+      if (cleanPath.startsWith('/admin') || cleanPath.startsWith('/api')) {
+        return res.sendStatus(200);
+      }
+
+      // 3. Ignorar arquivos estáticos (imagens, css, js, zip, pdf, etc.)
+      if (/\.(png|jpe?g|gif|webp|svg|ico|css|js|map|json|zip|rar|pdf|7z|txt|xml)$/i.test(cleanPath)) {
+        return res.sendStatus(200);
+      }
+
+      // 4. Ignorar bots conhecidos
+      const botRegex = /bot|googlebot|crawler|spider|robot|crawling|google-coop|mediapartners-google|adsbot-google|yandexbot|mail\.ru|bingbot|baidu|duckduckbot|slurp|msnbot|teoma|screaming|semrush|ahrefs|rogerbot|exabot|ia_archiver|facebookexternalhit|twitterbot/i;
+      if (botRegex.test(userAgent)) {
+        return res.sendStatus(200);
+      }
+
+      // 5. Obter ou gerar o visitor_id por cookie
+      let visitorId = req.cookies.sb_visitor_id;
+      if (!visitorId) {
+        visitorId = crypto.randomUUID();
+        const secure = isProduction || req.secure || req.headers['x-forwarded-proto'] === 'https';
+        res.cookie('sb_visitor_id', visitorId, {
+          httpOnly: true,
+          secure,
+          sameSite: 'lax',
+          maxAge: 365 * 24 * 60 * 60 * 1000, // 1 ano
+          domain: isProduction ? '.digitalbordados.com.br' : undefined,
+        });
+      }
+
+      // 6. Anonimizar o IP
+      const clientIp = getClientIp(req);
+      const ipHash = getIpHash(clientIp);
+
+      // 7. Parsing básico de dispositivo/navegador/OS
+      const { browser, os, deviceType } = parseUserAgent(userAgent);
+
+      // 8. Salvar no banco em segundo plano
+      dbAsync.run(`
+        INSERT INTO site_visits (
+          path, full_url, page_title, referrer, device_type, browser, os, ip_hash, visitor_id, user_agent
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        cleanPath,
+        full_url || '',
+        page_title || null,
+        referrer || null,
+        deviceType,
+        browser,
+        os,
+        ipHash,
+        visitorId,
+        userAgent.substring(0, 1000)
+      ]).catch(err => {
+        console.error('[Analytics] Erro ao gravar visita no banco:', err);
+      });
+
+      return res.sendStatus(200);
+    } catch (error) {
+      console.error('[Analytics] Erro na rota de coleta:', error);
+      return res.sendStatus(200);
+    }
+  });
+
   // API Routes - AUTH
   // Busca inteligente de produtos (Posicionada no inÃƒÂ­cio para evitar conflitos)
   app.get('/api/products/search', async (req, res) => {
@@ -3121,6 +3246,313 @@ async function startServer() {
     }
   });
 
+  // --- SISTEMA DE ESTATÍSTICAS E ANALYTICS - ENDPOINTS DO ADMIN (MELHORIA 1) ---
+
+  // Função auxiliar para gerar filtro SQL de períodos
+  function getPeriodSqlFilter(period: string, startDate?: string, endDate?: string) {
+    let dateFilter = 'created_at >= CURDATE()'; // default: hoje
+    let params: any[] = [];
+
+    if (period === 'yesterday') {
+      dateFilter = 'created_at >= CURDATE() - INTERVAL 1 DAY AND created_at < CURDATE()';
+    } else if (period === 'week') {
+      dateFilter = 'created_at >= CURDATE() - INTERVAL 6 DAY';
+    } else if (period === 'month') {
+      dateFilter = 'created_at >= CURDATE() - INTERVAL 29 DAY';
+    } else if (period === 'year') {
+      dateFilter = 'created_at >= CURDATE() - INTERVAL 364 DAY';
+    } else if (period === 'custom' && startDate) {
+      if (endDate) {
+        dateFilter = 'created_at >= ? AND created_at <= ?';
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        params = [start, end];
+      } else {
+        dateFilter = 'created_at >= ?';
+        params = [new Date(startDate)];
+      }
+    } else if (period === 'specific' && startDate) {
+      dateFilter = 'DATE(created_at) = DATE(?)';
+      params = [startDate];
+    }
+
+    return { dateFilter, params };
+  }
+
+  // Resumo de estatísticas
+  app.get('/api/admin/analytics/summary', authenticate, isAdmin, async (req, res) => {
+    try {
+      const period = String(req.query.period || 'today');
+      const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+      const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+
+      const { dateFilter, params } = getPeriodSqlFilter(period, startDate, endDate);
+
+      // 1. Total de visitas no período
+      const totalQuery = dbAsync.get(`SELECT COUNT(*) as count FROM site_visits WHERE ${dateFilter}`, ...params);
+      
+      // 2. Visitantes únicos no período
+      const uniqueQuery = dbAsync.get(`SELECT COUNT(DISTINCT visitor_id) as count FROM site_visits WHERE ${dateFilter}`, ...params);
+      
+      // 3. Página mais visitada no período
+      const topPageQuery = dbAsync.get(`
+        SELECT path, page_title, COUNT(*) as count 
+        FROM site_visits 
+        WHERE ${dateFilter} 
+        GROUP BY path, page_title 
+        ORDER BY count DESC 
+        LIMIT 1
+      `, ...params);
+
+      // 4. Desktop vs Mobile no período
+      const deviceQuery = dbAsync.all(`
+        SELECT device_type, COUNT(*) as count 
+        FROM site_visits 
+        WHERE ${dateFilter} 
+        GROUP BY device_type
+      `, ...params);
+
+      // 5. Contadores fixos para os cards
+      const todayQuery = dbAsync.get("SELECT COUNT(*) as count FROM site_visits WHERE created_at >= CURDATE()");
+      const weekQuery = dbAsync.get("SELECT COUNT(*) as count FROM site_visits WHERE created_at >= CURDATE() - INTERVAL 6 DAY");
+      const monthQuery = dbAsync.get("SELECT COUNT(*) as count FROM site_visits WHERE created_at >= CURDATE() - INTERVAL 29 DAY");
+      const yearQuery = dbAsync.get("SELECT COUNT(*) as count FROM site_visits WHERE created_at >= CURDATE() - INTERVAL 364 DAY");
+
+      const [
+        totalRes, 
+        uniqueRes, 
+        topPageRes, 
+        deviceRes, 
+        todayRes, 
+        weekRes, 
+        monthRes, 
+        yearRes
+      ] = await Promise.all([
+        totalQuery, 
+        uniqueQuery, 
+        topPageQuery, 
+        deviceQuery, 
+        todayQuery, 
+        weekQuery, 
+        monthQuery, 
+        yearQuery
+      ]);
+
+      let desktopVisits = 0;
+      let mobileVisits = 0;
+      if (Array.isArray(deviceRes)) {
+        deviceRes.forEach((row: any) => {
+          if (row.device_type === 'desktop') desktopVisits = Number(row.count || 0);
+          if (row.device_type === 'mobile') mobileVisits = Number(row.count || 0);
+        });
+      }
+
+      res.json({
+        totalVisits: Number(totalRes?.count || 0),
+        uniqueVisitors: Number(uniqueRes?.count || 0),
+        mostVisitedPage: topPageRes ? {
+          path: topPageRes.path,
+          page_title: topPageRes.page_title,
+          visits: Number(topPageRes.count || 0)
+        } : null,
+        devices: {
+          desktop: desktopVisits,
+          mobile: mobileVisits
+        },
+        cards: {
+          today: Number(todayRes?.count || 0),
+          week: Number(weekRes?.count || 0),
+          month: Number(monthRes?.count || 0),
+          year: Number(yearRes?.count || 0)
+        }
+      });
+    } catch (error) {
+      console.error('[Analytics Summary] Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar resumo de estatísticas' });
+    }
+  });
+
+  // Lista das páginas mais acessadas
+  app.get('/api/admin/analytics/top-pages', authenticate, isAdmin, async (req, res) => {
+    try {
+      const period = String(req.query.period || 'today');
+      const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+      const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+      
+      const orderBy = req.query.orderBy === 'path' ? 'path' : 'visits';
+      const order = req.query.order === 'ASC' ? 'ASC' : 'DESC';
+
+      const { dateFilter, params } = getPeriodSqlFilter(period, startDate, endDate);
+
+      const topPages = await dbAsync.all(`
+        SELECT 
+          path, 
+          MAX(page_title) as page_title, 
+          COUNT(*) as visits, 
+          COUNT(DISTINCT visitor_id) as unique_visitors 
+        FROM site_visits 
+        WHERE ${dateFilter} 
+        GROUP BY path 
+        ORDER BY ${orderBy === 'path' ? 'path' : 'visits'} ${order}
+        LIMIT 100
+      `, ...params);
+
+      res.json(topPages);
+    } catch (error) {
+      console.error('[Analytics Top Pages] Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar páginas mais acessadas' });
+    }
+  });
+
+  // Dados do gráfico de acessos
+  app.get('/api/admin/analytics/visits-chart', authenticate, isAdmin, async (req, res) => {
+    try {
+      const period = String(req.query.period || 'today');
+      const startDate = req.query.startDate ? String(req.query.startDate) : undefined;
+      const endDate = req.query.endDate ? String(req.query.endDate) : undefined;
+
+      const { dateFilter, params } = getPeriodSqlFilter(period, startDate, endDate);
+
+      let groupSql = '';
+      let selectSql = '';
+      let formatType = 'day';
+
+      if (period === 'today' || period === 'yesterday' || (period === 'specific' && startDate)) {
+        selectSql = 'HOUR(created_at) as label_key';
+        groupSql = 'HOUR(created_at)';
+        formatType = 'hour';
+      } else if (period === 'year') {
+        selectSql = "DATE_FORMAT(created_at, '%Y-%m') as label_key";
+        groupSql = "DATE_FORMAT(created_at, '%Y-%m')";
+        formatType = 'month';
+      } else {
+        let isLongCustom = false;
+        if (period === 'custom' && startDate && endDate) {
+          const diffMs = new Date(endDate).getTime() - new Date(startDate).getTime();
+          const diffDays = diffMs / (1000 * 60 * 60 * 24);
+          if (diffDays > 60) {
+            isLongCustom = true;
+          }
+        }
+
+        if (isLongCustom) {
+          selectSql = "DATE_FORMAT(created_at, '%Y-%m') as label_key";
+          groupSql = "DATE_FORMAT(created_at, '%Y-%m')";
+          formatType = 'month';
+        } else {
+          selectSql = "DATE(created_at) as label_key";
+          groupSql = "DATE(created_at)";
+          formatType = 'day';
+        }
+      }
+
+      const rows = await dbAsync.all(`
+        SELECT 
+          ${selectSql}, 
+          COUNT(*) as visits, 
+          COUNT(DISTINCT visitor_id) as unique_visitors 
+        FROM site_visits 
+        WHERE ${dateFilter} 
+        GROUP BY ${groupSql} 
+        ORDER BY label_key ASC
+      `, ...params) as any[];
+
+      let chartData: any[] = [];
+
+      if (formatType === 'hour') {
+        const map = new Map(rows.map(r => [Number(r.label_key), r]));
+        for (let h = 0; h < 24; h++) {
+          const matched = map.get(h);
+          chartData.push({
+            name: `${String(h).padStart(2, '0')}:00`,
+            visits: matched ? Number(matched.visits || 0) : 0,
+            unique_visitors: matched ? Number(matched.unique_visitors || 0) : 0
+          });
+        }
+      } else if (formatType === 'day') {
+        let start = new Date();
+        let end = new Date();
+        
+        if (period === 'week') {
+          start.setDate(start.getDate() - 6);
+        } else if (period === 'month') {
+          start.setDate(start.getDate() - 29);
+        } else if (period === 'custom' && startDate) {
+          start = new Date(startDate);
+          if (endDate) end = new Date(endDate);
+        }
+
+        const map = new Map();
+        rows.forEach(r => {
+          let dateStr = '';
+          if (r.label_key instanceof Date) {
+            dateStr = r.label_key.toISOString().split('T')[0];
+          } else {
+            dateStr = String(r.label_key).split('T')[0];
+          }
+          map.set(dateStr, r);
+        });
+
+        const current = new Date(start);
+        while (current <= end) {
+          const dateStr = current.toISOString().split('T')[0];
+          const matched = map.get(dateStr);
+          
+          const day = String(current.getDate()).padStart(2, '0');
+          const month = String(current.getMonth() + 1).padStart(2, '0');
+          
+          chartData.push({
+            name: `${day}/${month}`,
+            dateFull: dateStr,
+            visits: matched ? Number(matched.visits || 0) : 0,
+            unique_visitors: matched ? Number(matched.unique_visitors || 0) : 0
+          });
+          
+          current.setDate(current.getDate() + 1);
+        }
+      } else {
+        const map = new Map(rows.map(r => [String(r.label_key), r]));
+        let start = new Date();
+        let end = new Date();
+
+        if (period === 'year') {
+          start.setDate(start.getDate() - 364);
+        } else if (period === 'custom' && startDate) {
+          start = new Date(startDate);
+          if (endDate) end = new Date(endDate);
+        }
+
+        const current = new Date(start);
+        current.setDate(1);
+        const endMonthKey = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}`;
+
+        while (true) {
+          const monthKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
+          const matched = map.get(monthKey);
+          
+          const monthName = current.toLocaleDateString('pt-BR', { month: 'short' });
+          const yearShort = String(current.getFullYear()).slice(-2);
+          
+          chartData.push({
+            name: `${monthName}/${yearShort}`,
+            visits: matched ? Number(matched.visits || 0) : 0,
+            unique_visitors: matched ? Number(matched.unique_visitors || 0) : 0
+          });
+
+          if (monthKey === endMonthKey) break;
+          current.setMonth(current.getMonth() + 1);
+          if (current.getFullYear() > end.getFullYear() + 2) break;
+        }
+      }
+
+      res.json(chartData);
+    } catch (error) {
+      console.error('[Analytics Chart] Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar dados do gráfico' });
+    }
+  });
+
   // API Routes - ADMIN PRODUCTS
   app.get('/api/admin/products', authenticate, isAdmin, async (req, res) => {
     try {
@@ -3545,6 +3977,7 @@ async function startServer() {
     const nextSlug = slug
       ? slugify(slug, { lower: true })
       : slugify(nextName, { lower: true });
+    const slugChanged = nextSlug && nextSlug !== existingProduct.slug;
     const nextDescription = description !== undefined
       ? (sanitizeRichHtml(description).trim() || null)
       : existingProduct.description;
@@ -3604,6 +4037,26 @@ async function startServer() {
         return res.status(500).json({ error: 'Erro de disco: A imagem principal editada não pôde ser gravada fisicamente no servidor.' });
       }
       nextImagePath = `/uploads/${finalName}`;
+    } else if (slugChanged && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.startsWith('/uploads/')) {
+      // Se o slug mudou e temos imagem principal existente, renomear o arquivo no disco
+      const oldImageName = existingProduct.image.split('/').pop();
+      if (oldImageName) {
+        const oldExt = path.extname(oldImageName).toLowerCase() || '.jpg';
+        const newImageName = buildProductMediaName(nextSlug, productId, oldExt);
+        if (oldImageName !== newImageName) {
+          const oldPhysicalPath = path.join(publicUploadsDir, oldImageName);
+          const newPhysicalPath = path.join(publicUploadsDir, newImageName);
+          if (fs.existsSync(oldPhysicalPath)) {
+            try {
+              fs.renameSync(oldPhysicalPath, newPhysicalPath);
+              nextImagePath = `/uploads/${newImageName}`;
+              console.log(`[Slug Change] Imagem principal física renomeada de ${oldImageName} para ${newImageName}`);
+            } catch (err) {
+              console.error('Erro ao renomear imagem física por mudança de slug:', err);
+            }
+          }
+        }
+      }
     }
 
     const productionSheetUpload = files['production_sheet']?.[0];
@@ -3625,6 +4078,26 @@ async function startServer() {
         return res.status(500).json({ error: 'Erro de disco: O arquivo PDF da Folha de Produção resultante possui tamanho igual a zero.' });
       }
       nextProductionSheet = `/uploads/${finalName}`;
+    } else if (slugChanged && existingProduct.production_sheet && typeof existingProduct.production_sheet === 'string' && existingProduct.production_sheet.startsWith('/uploads/')) {
+      // Se o slug mudou e temos folha de produção existente, renomear o arquivo no disco
+      const oldSheetName = existingProduct.production_sheet.split('/').pop();
+      if (oldSheetName) {
+        const oldExt = path.extname(oldSheetName).toLowerCase() || '.pdf';
+        const newSheetName = buildProductMediaName(nextSlug, productId, oldExt);
+        if (oldSheetName !== newSheetName) {
+          const oldPhysicalPath = path.join(publicUploadsDir, oldSheetName);
+          const newPhysicalPath = path.join(publicUploadsDir, newSheetName);
+          if (fs.existsSync(oldPhysicalPath)) {
+            try {
+              fs.renameSync(oldPhysicalPath, newPhysicalPath);
+              nextProductionSheet = `/uploads/${newSheetName}`;
+              console.log(`[Slug Change] PDF folha de produção renomeado de ${oldSheetName} para ${newSheetName}`);
+            } catch (err) {
+              console.error('Erro ao renomear PDF físico por mudança de slug:', err);
+            }
+          }
+        }
+      }
     } else if (production_sheet !== undefined) {
       nextProductionSheet = (typeof production_sheet === 'string' ? production_sheet.trim() : '') || null;
     }
@@ -4065,7 +4538,7 @@ async function startServer() {
   app.post('/api/admin/products/:id/main-image', authenticate, isAdmin, upload.single('image'), async (req, res) => {
     const productId = Number(req.params.id);
     const file = req.file;
-    const { image_url } = req.body || {};
+    const { image_url, slug: bodySlug } = req.body || {};
 
     try {
       if (image_url) {
@@ -4100,9 +4573,18 @@ async function startServer() {
         return res.status(404).json({ error: 'Produto não encontrado.' });
       }
 
+      // Se um novo slug foi passado no corpo da requisição, usar e atualizar no banco
+      let activeSlug = product.slug || 'produto';
+      if (bodySlug && typeof bodySlug === 'string' && bodySlug.trim() && bodySlug.trim() !== product.slug) {
+        const cleanSlug = bodySlug.trim();
+        const uniqueSlug = await createUniqueProductSlug(cleanSlug, productId);
+        await dbAsync.run('UPDATE products SET slug = ? WHERE id = ?', uniqueSlug, productId);
+        activeSlug = uniqueSlug;
+      }
+
       const publicUploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
       // A saída final sempre será .jpg (após watermark)
-      const finalName = buildProductMediaName(product.slug || 'produto', productId, '.jpg');
+      const finalName = buildProductMediaName(activeSlug, productId, '.jpg');
       const physicalPath = path.join(publicUploadsDir, finalName);
       // Caminho temporário da imagem recebida antes de aplicar watermark
       const tempPath = file.path;

@@ -34,5 +34,26 @@ export async function initDb() {
       UNIQUE KEY uniq_rate_limit (scope, rate_key, window_start)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  // Garante a existência da tabela site_visits para analytics
+  await dbAsync.query(`
+    CREATE TABLE IF NOT EXISTS site_visits (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      path VARCHAR(512) NOT NULL,
+      full_url TEXT NOT NULL,
+      page_title VARCHAR(255) NULL,
+      referrer VARCHAR(512) NULL,
+      device_type VARCHAR(50) NOT NULL,
+      browser VARCHAR(100) NULL,
+      os VARCHAR(100) NULL,
+      ip_hash VARCHAR(64) NOT NULL,
+      visitor_id VARCHAR(64) NOT NULL,
+      user_agent TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_visits_created_at (created_at),
+      INDEX idx_visits_visitor_id (visitor_id),
+      INDEX idx_visits_path (path(255))
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
 }
 
