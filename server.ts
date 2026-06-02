@@ -9178,7 +9178,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
       const body = products.map(p => {
-        const imgUrl = p.image.startsWith('http') ? p.image : `${appUrl}${p.image}`;
+        const imgUrl = p.image.startsWith('http') ? p.image : `${appUrl}${p.image.startsWith('/') ? '' : '/'}${p.image}`;
         return `
   <url>
     <loc>${appUrl}/produto/${xmlEscape(p.slug)}</loc>
