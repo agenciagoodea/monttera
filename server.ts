@@ -10764,6 +10764,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     app.use(
       express.static(distPath, {
         fallthrough: true,
+        index: false
       }),
     );
 
@@ -10809,6 +10810,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         let title = s.seo_meta_title || siteName;
         let description = s.seo_meta_description || s.site_description || 'Matrizes de Bordados Computadorizados';
         let canonicalUrl = `${appUrl}${req.path}`;
+        if (req.query.category) {
+          canonicalUrl += `?category=${encodeURIComponent(String(req.query.category))}`;
+        }
         let ogImage = s.seo_og_image || s.logo_url || '/logo.png';
         let absoluteOgImage = ogImage.startsWith('http') ? ogImage : `${appUrl}${ogImage.startsWith('/') ? '' : '/'}${ogImage}`;
         let ogType = 'website';
