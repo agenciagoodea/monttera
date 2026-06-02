@@ -49,6 +49,7 @@ const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'));
 const AdminFiles = lazy(() => import('./pages/admin/AdminFiles'));
 const AdminReviews = lazy(() => import('./pages/admin/AdminReviews'));
 const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics'));
+const AdminSeoDashboard = lazy(() => import('./pages/admin/AdminSeoDashboard'));
 
 import AdminLayout from './layouts/AdminLayout';
 import { AuthProvider } from './contexts/AuthContext';
@@ -363,6 +364,7 @@ export default function App() {
                 <Route path="/clientes" element={<AdminUserList />} />
                 <Route path="/avaliacoes" element={<AdminReviews />} />
                 <Route path="/estatisticas" element={<AdminAnalytics />} />
+                <Route path="/seo" element={<AdminSeoDashboard />} />
                 <Route path="/relatorios" element={<AdminReports />} />
                 <Route path="/arquivos" element={<AdminFiles />} />
                 <Route path="/configuracoes" element={<AdminSettings />} />

@@ -3280,6 +3280,108 @@ async function startServer() {
     return { dateFilter, params };
   }
 
+  // API de Métricas de SEO
+  app.get('/api/admin/seo/dashboard-metrics', authenticate, isAdmin, async (req, res) => {
+    try {
+      const totalProductsRes = await dbAsync.get('SELECT COUNT(*) as count FROM products WHERE status = "active"') as any;
+      const totalProducts = Number(totalProductsRes?.count || 0);
+
+      const withoutAltRes = await dbAsync.all('SELECT id, name FROM products WHERE status = "active" AND image IS NOT NULL AND image != "" AND (image_alt IS NULL OR TRIM(image_alt) = "")') as any[];
+      const withoutDescRes = await dbAsync.all('SELECT id, name, description FROM products WHERE status = "active" AND (description IS NULL OR TRIM(description) = "" OR LENGTH(TRIM(description)) < 30)') as any[];
+
+      const withoutCategoryRes = await dbAsync.all(`
+        SELECT id, name FROM products 
+        WHERE status = "active" 
+        AND (category_id IS NULL OR category_id = 0)
+        AND id NOT IN (SELECT DISTINCT product_id FROM product_category_relations)
+      `) as any[];
+
+      const duplicateTitlesRes = await dbAsync.all(`
+        SELECT name, COUNT(*) as count 
+        FROM products 
+        WHERE status = "active" 
+        GROUP BY name 
+        HAVING count > 1
+      `) as any[];
+      
+      const duplicateNames = duplicateTitlesRes.map(d => d.name);
+      const duplicateProducts = duplicateNames.length > 0 
+        ? await dbAsync.all(`SELECT id, name FROM products WHERE status = "active" AND name IN (${duplicateNames.map(() => '?').join(',')})`, ...duplicateNames) as any[]
+        : [];
+
+      const shoppingEligibleRes = await dbAsync.get(`
+        SELECT COUNT(*) as count 
+        FROM products 
+        WHERE status = "active" 
+        AND price > 0 
+        AND image IS NOT NULL AND image != "" 
+        AND description IS NOT NULL AND LENGTH(description) >= 10
+      `) as any;
+      const shoppingEligible = Number(shoppingEligibleRes?.count || 0);
+
+      const alerts: any[] = [];
+      
+      withoutAltRes.forEach(p => {
+        alerts.push({
+          type: 'alt_missing',
+          severity: 'warning',
+          message: `O produto "${p.name}" está sem texto descritivo ALT na imagem principal.`,
+          productId: p.id,
+          productName: p.name
+        });
+      });
+
+      withoutDescRes.forEach(p => {
+        const isShort = p.description && p.description.trim().length > 0;
+        alerts.push({
+          type: isShort ? 'description_short' : 'description_short',
+          severity: 'warning',
+          message: isShort 
+            ? `O produto "${p.name}" tem uma descrição curta (${p.description.trim().length} carac.). SEO fraco.`
+            : `O produto "${p.name}" está sem nenhuma descrição cadastrada.`,
+          productId: p.id,
+          productName: p.name
+        });
+      });
+
+      withoutCategoryRes.forEach(p => {
+        alerts.push({
+          type: 'category_missing',
+          severity: 'warning',
+          message: `O produto "${p.name}" não está associado a nenhuma categoria.`,
+          productId: p.id,
+          productName: p.name
+        });
+      });
+
+      duplicateProducts.forEach(p => {
+        alerts.push({
+          type: 'duplicate_title',
+          severity: 'danger',
+          message: `O título "${p.name}" está duplicado com outro produto ativo.`,
+          productId: p.id,
+          productName: p.name
+        });
+      });
+
+      const sitemapsCount = 4; // Static, Products, Categories, Images
+      
+      return res.json({
+        totalProducts,
+        shoppingEligible,
+        productsWithoutAlt: withoutAltRes.length,
+        productsWithoutDescription: withoutDescRes.length,
+        productsWithoutCategory: withoutCategoryRes.length,
+        productsWithDuplicateTitles: duplicateProducts.length,
+        sitemapsCount,
+        alerts
+      });
+    } catch (error) {
+      console.error('SEO Dashboard metrics error:', error);
+      return res.status(500).json({ error: 'Erro ao buscar métricas de SEO' });
+    }
+  });
+
   // Resumo de estatísticas
   app.get('/api/admin/analytics/summary', authenticate, isAdmin, async (req, res) => {
     try {
@@ -8933,56 +9035,236 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       }
 
       const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
-      const staticPaths = ['/', '/loja', '/contato', '/orcamento', '/login', '/cadastro'];
-      const productSlugs = await dbAsync.all(`SELECT slug, updated_at, created_at FROM products WHERE status = 'active'`) as any[];
-      const categorySlugs = await dbAsync.all(`SELECT slug, created_at FROM product_categories WHERE status = 'active'`) as any[];
-
-      const xmlEscape = (v: string) =>
-        String(v || '')
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&apos;');
-
-      const formatLastMod = (dateVal: any): string | undefined => {
-        if (!dateVal) return undefined;
-        try {
-          const d = new Date(dateVal);
-          if (isNaN(d.getTime())) return undefined;
-          return d.toISOString().slice(0, 10);
-        } catch {
-          return undefined;
-        }
-      };
-
-      const urls: Array<{ loc: string; lastmod?: string; priority?: string }> = [];
-      staticPaths.forEach((path) => urls.push({ loc: `${appUrl}${path}`, priority: path === '/' ? '1.0' : '0.8' }));
-      productSlugs.forEach((row) => urls.push({ loc: `${appUrl}/produto/${row.slug}`, lastmod: formatLastMod(row.updated_at || row.created_at), priority: '0.7' }));
-      categorySlugs.forEach((row) => urls.push({ loc: `${appUrl}/?category=${row.slug}`, lastmod: formatLastMod(row.created_at), priority: '0.6' }));
-
-      const body = urls
-        .map((u) => {
-          const lines = [
-            '<url>',
-            `<loc>${xmlEscape(u.loc)}</loc>`,
-            ...(u.lastmod ? [`<lastmod>${xmlEscape(u.lastmod)}</lastmod>`] : []),
-            ...(u.priority ? [`<priority>${xmlEscape(u.priority)}</priority>`] : []),
-            '</url>',
-          ];
-          return lines.join('');
-        })
-        .join('');
-
-      const xml = `<?xml version="1.0" encoding="UTF-8"?>` +
-        `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}</urlset>`;
+      
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>${appUrl}/sitemap-static.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>${appUrl}/sitemap-products.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>${appUrl}/sitemap-categories.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>${appUrl}/sitemap-images.xml</loc>
+  </sitemap>
+</sitemapindex>`;
       res.type('application/xml; charset=utf-8');
       return res.send(xml);
     } catch (error) {
-      console.error('sitemap.xml error:', error);
-      return res.status(500).type('text/plain').send('Erro ao gerar sitemap');
+      console.error('sitemap.xml index error:', error);
+      return res.status(500).type('text/plain').send('Erro ao gerar sitemap index');
     }
   });
+
+  app.get('/sitemap-static.xml', async (req, res) => {
+    try {
+      const s = await loadSettingsMapAsync(['seo_sitemap_enabled', 'app_url']);
+      const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
+      if (!sitemapEnabled) return res.status(404).type('text/plain').send('Sitemap desabilitado');
+
+      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const staticPaths = ['/', '/loja', '/contato', '/orcamento', '/login', '/cadastro'];
+
+      const body = staticPaths.map(p => `
+  <url>
+    <loc>${appUrl}${p}</loc>
+    <priority>${p === '/' ? '1.0' : '0.8'}</priority>
+    <changefreq>daily</changefreq>
+  </url>`).join('');
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}
+</urlset>`;
+      res.type('application/xml; charset=utf-8');
+      return res.send(xml);
+    } catch (error) {
+      console.error('sitemap-static.xml error:', error);
+      return res.status(500).type('text/plain').send('Erro');
+    }
+  });
+
+  app.get('/sitemap-products.xml', async (req, res) => {
+    try {
+      const s = await loadSettingsMapAsync(['seo_sitemap_enabled', 'app_url']);
+      const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
+      if (!sitemapEnabled) return res.status(404).type('text/plain').send('Sitemap desabilitado');
+
+      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const products = await dbAsync.all(`SELECT slug, updated_at, created_at FROM products WHERE status = 'active'`) as any[];
+
+      const formatLastMod = (dateVal: any): string => {
+        if (!dateVal) return new Date().toISOString().slice(0, 10);
+        try {
+          const d = new Date(dateVal);
+          return isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
+        } catch {
+          return new Date().toISOString().slice(0, 10);
+        }
+      };
+
+      const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+
+      const body = products.map(p => `
+  <url>
+    <loc>${appUrl}/produto/${xmlEscape(p.slug)}</loc>
+    <lastmod>${formatLastMod(p.updated_at || p.created_at)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>`).join('');
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}
+</urlset>`;
+      res.type('application/xml; charset=utf-8');
+      return res.send(xml);
+    } catch (error) {
+      console.error('sitemap-products.xml error:', error);
+      return res.status(500).type('text/plain').send('Erro');
+    }
+  });
+
+  app.get('/sitemap-categories.xml', async (req, res) => {
+    try {
+      const s = await loadSettingsMapAsync(['seo_sitemap_enabled', 'app_url']);
+      const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
+      if (!sitemapEnabled) return res.status(404).type('text/plain').send('Sitemap desabilitado');
+
+      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const categories = await dbAsync.all(`SELECT slug, created_at FROM product_categories WHERE status = 'active'`) as any[];
+
+      const formatLastMod = (dateVal: any): string => {
+        if (!dateVal) return new Date().toISOString().slice(0, 10);
+        try {
+          const d = new Date(dateVal);
+          return isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
+        } catch {
+          return new Date().toISOString().slice(0, 10);
+        }
+      };
+
+      const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+
+      const body = categories.map(c => `
+  <url>
+    <loc>${appUrl}/?category=${xmlEscape(c.slug)}</loc>
+    <lastmod>${formatLastMod(c.created_at)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>`).join('');
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}
+</urlset>`;
+      res.type('application/xml; charset=utf-8');
+      return res.send(xml);
+    } catch (error) {
+      console.error('sitemap-categories.xml error:', error);
+      return res.status(500).type('text/plain').send('Erro');
+    }
+  });
+
+  app.get('/sitemap-images.xml', async (req, res) => {
+    try {
+      const s = await loadSettingsMapAsync(['seo_sitemap_enabled', 'app_url']);
+      const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
+      if (!sitemapEnabled) return res.status(404).type('text/plain').send('Sitemap desabilitado');
+
+      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const products = await dbAsync.all(`SELECT name, slug, image, image_alt FROM products WHERE status = 'active' AND image IS NOT NULL AND image != ''`) as any[];
+
+      const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+
+      const body = products.map(p => {
+        const imgUrl = p.image.startsWith('http') ? p.image : `${appUrl}${p.image}`;
+        return `
+  <url>
+    <loc>${appUrl}/produto/${xmlEscape(p.slug)}</loc>
+    <image:image>
+      <image:loc>${xmlEscape(imgUrl)}</image:loc>
+      <image:title>${xmlEscape(p.name)}</image:title>
+      <image:caption>${xmlEscape(p.image_alt || p.name)}</image:caption>
+    </image:image>
+  </url>`;
+      }).join('');
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">${body}
+</urlset>`;
+      res.type('application/xml; charset=utf-8');
+      return res.send(xml);
+    } catch (error) {
+      console.error('sitemap-images.xml error:', error);
+      return res.status(500).type('text/plain').send('Erro');
+    }
+  });
+
+  const handleGoogleMerchant = async (req: express.Request, res: express.Response) => {
+    try {
+      const s = await loadSettingsMapAsync(['site_name', 'site_description', 'app_url', 'seo_organization_name']);
+      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const siteName = s.site_name || 'Digital Bordados';
+      const siteDescription = s.site_description || 'Matrizes de Bordados Computadorizados de Alta Qualidade';
+      const brandName = s.seo_organization_name || siteName;
+
+      const products = await dbAsync.all(`
+        SELECT p.*, c.name as category_name 
+        FROM products p
+        LEFT JOIN product_categories c ON p.category_id = c.id
+        WHERE p.status = 'active' AND p.price > 0 AND p.image IS NOT NULL AND p.image != ''
+      `) as any[];
+
+      const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+      const stripHtml = (html: string) => String(html || '').replace(/<[^>]*>/g, '').trim();
+
+      const items = products.map(p => {
+        const prodUrl = `${appUrl}/produto/${p.slug}`;
+        const imgUrl = p.image.startsWith('http') ? p.image : `${appUrl}${p.image}`;
+        
+        let desc = stripHtml(p.description || '');
+        if (desc.length < 10) {
+          desc = `Matriz de bordado profissional computadorizada: ${p.name}. Produto digital disponível para download imediato em diversas extensões (PES, JEF, DST, XXX, EXP).`;
+        }
+        
+        return `
+    <item>
+      <g:id>${p.id}</g:id>
+      <title>${xmlEscape(p.name)}</title>
+      <description>${xmlEscape(desc)}</description>
+      <link>${xmlEscape(prodUrl)}</link>
+      <g:image_link>${xmlEscape(imgUrl)}</g:image_link>
+      <g:condition>new</g:condition>
+      <g:availability>in stock</g:availability>
+      <g:price>${Number(p.price).toFixed(2)} BRL</g:price>
+      <g:brand>${xmlEscape(brandName)}</g:brand>
+      <g:mpn>${xmlEscape(`${p.slug}-${p.id}`)}</g:mpn>
+      <g:google_product_category>Arts &amp; Entertainment &gt; Hobbies &amp; Creative Arts &gt; Crafts &amp; Hobbies &gt; Needlecraft &amp; Sewing</g:google_product_category>
+    </item>`;
+      }).join('');
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">
+  <channel>
+    <title>${xmlEscape(siteName)}</title>
+    <link>${xmlEscape(appUrl)}</link>
+    <description>${xmlEscape(siteDescription)}</description>
+    <language>pt-BR</language>${items}
+  </channel>
+</rss>`;
+
+      res.type('application/xml; charset=utf-8');
+      return res.send(xml);
+    } catch (error) {
+      console.error('google-merchant.xml error:', error);
+      return res.status(500).type('text/plain').send('Erro ao gerar feed do Google Merchant');
+    }
+  };
+
+  app.get('/google-merchant.xml', handleGoogleMerchant);
+  app.get('/api/seo/google-merchant.xml', handleGoogleMerchant);
 
   app.get('/api/settings', async (req, res) => {
     try {
@@ -10485,7 +10767,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       }),
     );
 
-    app.get('*', (req, res, next) => {
+    app.get('*', async (req, res, next) => {
       if (req.method !== 'GET') return next();
       if (req.path.startsWith('/api/')) return next();
       if (req.path.startsWith('/assets/')) return next();
@@ -10493,11 +10775,252 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const accept = String(req.headers.accept || '');
       if (!accept.includes('text/html')) return next();
 
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.sendFile(indexFilePath, (error) => {
-        if (!error) return;
-        next(error);
-      });
+      try {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        
+        let html = '';
+        try {
+          html = await fs.promises.readFile(indexFilePath, 'utf-8');
+        } catch (err) {
+          return next(err);
+        }
+
+        const s = await loadSettingsMapAsync([
+          'site_name',
+          'site_description',
+          'logo_url',
+          'facebook_url',
+          'instagram_url',
+          'youtube_url',
+          'app_url',
+          'seo_meta_title',
+          'seo_meta_description',
+          'seo_og_image',
+          'seo_organization_name',
+          'seo_organization_logo'
+        ]);
+
+        const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+        const siteName = s.site_name || 'Digital Bordados';
+        const orgName = s.seo_organization_name || siteName;
+        const orgLogo = s.seo_organization_logo || s.logo_url || '/logo.png';
+        const absoluteOrgLogo = orgLogo.startsWith('http') ? orgLogo : `${appUrl}${orgLogo.startsWith('/') ? '' : '/'}${orgLogo}`;
+
+        let title = s.seo_meta_title || siteName;
+        let description = s.seo_meta_description || s.site_description || 'Matrizes de Bordados Computadorizados';
+        let canonicalUrl = `${appUrl}${req.path}`;
+        let ogImage = s.seo_og_image || s.logo_url || '/logo.png';
+        let absoluteOgImage = ogImage.startsWith('http') ? ogImage : `${appUrl}${ogImage.startsWith('/') ? '' : '/'}${ogImage}`;
+        let ogType = 'website';
+        
+        const jsonLdGraph: any[] = [];
+
+        // Adicionar Website no grafo
+        jsonLdGraph.push({
+          "@type": "WebSite",
+          "@id": `${appUrl}/#website`,
+          "url": `${appUrl}/`,
+          "name": siteName,
+          "description": description,
+          "publisher": { "@id": `${appUrl}/#organization` },
+          "potentialAction": [{
+            "@type": "SearchAction",
+            "target": {
+              "@type": "EntryPoint",
+              "urlTemplate": `${appUrl}/loja?search={search_term_string}`
+            },
+            "query-input": "required name=search_term_string"
+          }]
+        });
+
+        // Adicionar Organization no grafo
+        const sameAsLinks = [s.facebook_url, s.instagram_url, s.youtube_url].filter(Boolean) as string[];
+        jsonLdGraph.push({
+          "@type": "Organization",
+          "@id": `${appUrl}/#organization`,
+          "name": orgName,
+          "url": `${appUrl}/`,
+          "logo": {
+            "@type": "ImageObject",
+            "@id": `${appUrl}/#logo`,
+            "url": absoluteOrgLogo,
+            "caption": orgName
+          },
+          "sameAs": sameAsLinks
+        });
+
+        // Detecção de Rota de Produto
+        const productMatch = req.path.match(/^\/produto\/([^/]+)$/);
+        
+        if (productMatch) {
+          const productSlug = productMatch[1];
+          const product = await dbAsync.get(`
+            SELECT p.*, c.name as category_name 
+            FROM products p
+            LEFT JOIN product_categories c ON p.category_id = c.id
+            WHERE p.slug = ? AND p.status = 'active'
+          `, productSlug) as any;
+
+          if (product) {
+            title = `${product.name} | ${siteName}`;
+            
+            // Gerar descrição dinamicamente se estiver muito curta ou vazia
+            let rawDesc = product.description ? String(product.description).replace(/<[^>]*>/g, '').trim() : '';
+            if (rawDesc.length < 10) {
+              description = `Compre a matriz de bordado ${product.name} na Digital Bordados. Arquivo digital de alta qualidade pronto para download imediato em PES, JEF, DST, XXX, EXP.`;
+            } else {
+              description = rawDesc.slice(0, 160);
+            }
+
+            canonicalUrl = `${appUrl}/produto/${product.slug}`;
+            if (product.image) {
+              absoluteOgImage = product.image.startsWith('http') ? product.image : `${appUrl}${product.image.startsWith('/') ? '' : '/'}${product.image}`;
+            }
+            ogType = 'product';
+
+            // Adicionar Breadcrumb do Produto
+            jsonLdGraph.push({
+              "@type": "BreadcrumbList",
+              "@id": `${canonicalUrl}/#breadcrumb`,
+              "itemListElement": [
+                {
+                  "@type": "ListItem",
+                  "position": 1,
+                  "name": "Início",
+                  "item": `${appUrl}/`
+                },
+                {
+                  "@type": "ListItem",
+                  "position": 2,
+                  "name": "Loja",
+                  "item": `${appUrl}/loja`
+                },
+                {
+                  "@type": "ListItem",
+                  "position": 3,
+                  "name": product.category_name || "Matrizes",
+                  "item": product.category_name ? `${appUrl}/?category=${encodeURIComponent(product.category_name.toLowerCase())}` : `${appUrl}/loja`
+                },
+                {
+                  "@type": "ListItem",
+                  "position": 4,
+                  "name": product.name,
+                  "item": canonicalUrl
+                }
+              ]
+            });
+
+            // Adicionar Product no grafo
+            const offers: any = {
+              "@type": "Offer",
+              "url": canonicalUrl,
+              "priceCurrency": "BRL",
+              "price": Number(product.price || 0).toFixed(2),
+              "priceValidUntil": "2029-12-31",
+              "availability": "https://schema.org/InStock",
+              "itemCondition": "https://schema.org/NewCondition"
+            };
+
+            const images = [absoluteOgImage];
+            
+            // Adicionar galeria se houver (opcional)
+            const galleryImages = await dbAsync.all('SELECT url FROM product_images WHERE product_id = ?', product.id) as any[];
+            galleryImages.forEach(g => {
+              if (g.url) {
+                images.push(g.url.startsWith('http') ? g.url : `${appUrl}${g.url.startsWith('/') ? '' : '/'}${g.url}`);
+              }
+            });
+
+            jsonLdGraph.push({
+              "@type": "Product",
+              "@id": `${canonicalUrl}/#product`,
+              "name": product.name,
+              "image": images,
+              "description": description,
+              "sku": `${product.slug}-${product.id}`,
+              "mpn": `${product.slug}-${product.id}`,
+              "brand": {
+                "@type": "Brand",
+                "name": orgName
+              },
+              "offers": offers
+            });
+
+            // Adicionar ImageObject no grafo para o Google Imagens
+            jsonLdGraph.push({
+              "@type": "ImageObject",
+              "@id": `${canonicalUrl}/#primaryimage`,
+              "url": absoluteOgImage,
+              "contentUrl": absoluteOgImage,
+              "caption": product.image_alt || product.name
+            });
+          }
+        } else {
+          // Adicionar Breadcrumb genérico para outras páginas
+          let breadcrumbName = 'Página';
+          if (req.path === '/loja') breadcrumbName = 'Loja';
+          else if (req.path === '/contato') breadcrumbName = 'Contato';
+          else if (req.path === '/orcamento') breadcrumbName = 'Solicitar Orçamento';
+          else if (req.path === '/login') breadcrumbName = 'Entrar';
+          else if (req.path === '/cadastro') breadcrumbName = 'Cadastrar';
+
+          jsonLdGraph.push({
+            "@type": "BreadcrumbList",
+            "@id": `${canonicalUrl}/#breadcrumb`,
+            "itemListElement": [
+              {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Início",
+                "item": `${appUrl}/`
+              },
+              {
+                "@type": "ListItem",
+                "position": 2,
+                "name": breadcrumbName,
+                "item": canonicalUrl
+              }
+            ]
+          });
+        }
+
+        const xmlEscape = (v: string) =>
+          String(v || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+
+        const seoTags = `
+  <title>${xmlEscape(title)}</title>
+  <meta name="description" content="${xmlEscape(description)}" />
+  <link rel="canonical" href="${xmlEscape(canonicalUrl)}" />
+  <meta property="og:title" content="${xmlEscape(title)}" />
+  <meta property="og:description" content="${xmlEscape(description)}" />
+  <meta property="og:url" content="${xmlEscape(canonicalUrl)}" />
+  <meta property="og:image" content="${xmlEscape(absoluteOgImage)}" />
+  <meta property="og:type" content="${xmlEscape(ogType)}" />
+  <meta property="og:site_name" content="${xmlEscape(siteName)}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${xmlEscape(title)}" />
+  <meta name="twitter:description" content="${xmlEscape(description)}" />
+  <meta name="twitter:image" content="${xmlEscape(absoluteOgImage)}" />
+  <script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@graph": jsonLdGraph
+  })}</script>
+`;
+
+        // Substitui a tag title original e insere as tags SEO + JSON-LD no head
+        html = html.replace(/<title>.*?<\/title>/i, '');
+        html = html.replace('</head>', `${seoTags}\n</head>`);
+
+        return res.type('text/html').send(html);
+      } catch (err) {
+        console.error('Prerender error:', err);
+        return res.sendFile(indexFilePath);
+      }
     });
   }
 

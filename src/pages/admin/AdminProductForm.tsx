@@ -989,6 +989,11 @@ export default function AdminProductForm() {
                   rows={12}
                   placeholder="Instruções e detalhes do bordado..."
                 />
+                {(!formData.description || formData.description.replace(/<[^>]*>/g, '').trim().length < 30) && (
+                  <p className="text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1.5 rounded-lg flex items-center gap-1 mt-1 border border-amber-100">
+                    ⚠️ Sem descrição otimizada: Uma descrição completa e rica em detalhes é obrigatória para o Google Shopping e melhora o ranqueamento.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1484,6 +1489,11 @@ export default function AdminProductForm() {
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
                   placeholder="ALT da imagem principal (ex: Brasão Medicina FIMCA)"
                 />
+                {!mainImageAlt.trim() && (
+                  <p className="text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1.5 rounded-lg flex items-center gap-1 mt-1 border border-amber-100">
+                    ⚠️ Sem ALT text: O Google usará o nome do produto como fallback no SEO, mas um ALT detalhado melhora a relevância no Google Imagens.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-4">
