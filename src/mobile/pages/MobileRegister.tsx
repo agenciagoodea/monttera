@@ -3,6 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { User, Mail, Lock, AlertCircle, ArrowRight, ShieldCheck, Phone, CreditCard } from 'lucide-react';
 import { useAppData } from '../../contexts/AppDataContext';
+import SocialLoginButtons from '../../components/SocialLoginButtons';
 
 export default function MobileRegister() {
   const [firstName, setFirstName] = useState('');
@@ -21,6 +22,12 @@ export default function MobileRegister() {
   const { settings } = useAppData();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+
+  const isMobile = window.location.search.includes('mobile=true');
+  const rawRedirect = searchParams.get('redirect') || '/minha-conta';
+  const redirectTo = isMobile && !rawRedirect.includes('mobile=true')
+    ? `${rawRedirect}${rawRedirect.includes('?') ? '&' : '?'}mobile=true`
+    : rawRedirect;
 
   const requireConsent = String(settings.lgpd_enabled || 'true') === 'true' && String(settings.lgpd_require_consent_register || 'true') === 'true';
   const requireTerms = requireConsent && String(settings.lgpd_require_terms_acceptance || 'true') === 'true';
@@ -93,6 +100,9 @@ export default function MobileRegister() {
           <span>{error}</span>
         </div>
       )}
+
+      {/* Login social — opção rápida */}
+      <SocialLoginButtons redirectTo={redirectTo} dividerText="ou preencha o formulário" />
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {/* Name Fields */}

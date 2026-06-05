@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { useAppData } from '../contexts/AppDataContext';
+import SocialLoginButtons from '../components/SocialLoginButtons';
 
 type CheckoutMethod = 'pix' | 'credit_card' | 'debit_card' | 'paypal';
 
@@ -583,6 +584,29 @@ export default function CartPage() {
         </div>
 
         <div className="space-y-6">
+          {/* Banner de login para usuários não autenticados */}
+          {!user && (
+            <div className="bg-blue-50 border border-blue-100 rounded-[2rem] p-6 shadow-sm">
+              <p className="text-sm font-black text-slate-800 mb-1">Faça login para agilizar seu checkout</p>
+              <p className="text-xs font-medium text-slate-500 mb-5">Seus dados serão preenchidos automaticamente.</p>
+              <SocialLoginButtons redirectTo="/carrinho" dividerText="ou entre com e-mail" />
+              <div className="flex gap-3 mt-1">
+                <Link
+                  to="/login?redirect=/carrinho"
+                  className="flex-1 text-center py-2.5 rounded-xl bg-blue-600 text-white text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-colors"
+                >
+                  Login
+                </Link>
+                <Link
+                  to="/cadastro?redirect=/carrinho"
+                  className="flex-1 text-center py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-black uppercase tracking-widest hover:bg-slate-50 transition-colors"
+                >
+                  Criar Conta
+                </Link>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 p-6 md:p-8 space-y-6">
             <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">Seus Dados</h2>
 

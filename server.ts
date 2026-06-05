@@ -2852,6 +2852,21 @@ async function startServer() {
       }
 
       if (!user.password || typeof user.password !== 'string') {
+        // Verificar se é usuário social
+        try {
+          const socialAccount = await dbAsync.get(
+            'SELECT provider FROM user_social_accounts WHERE user_id = ? LIMIT 1',
+            Number(user.id)
+          ) as any;
+          if (socialAccount?.provider) {
+            const providerName = socialAccount.provider === 'google' ? 'Google' : 'Facebook';
+            await recordLoginAttempt(normalizedEmail, ip, false);
+            return res.status(401).json({
+              error: `Este e-mail foi cadastrado via ${providerName}. Use o botão "Continuar com ${providerName}" para entrar.`,
+              social_provider: socialAccount.provider,
+            });
+          }
+        } catch { /* ignora erros de consulta social, cai no erro genérico */ }
         console.error('Falha no login: usuario sem hash de senha valido', { userId: user.id, email: normalizedEmail });
         await recordLoginAttempt(normalizedEmail, ip, false);
         return res.status(500).json({ error: 'Conta sem senha valida. Redefina a senha do usuario.' });
@@ -3004,6 +3019,462 @@ async function startServer() {
     } catch {
       // fallback: retorna o token decodificado
       return res.json({ user: decoded });
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────────
+  // SOCIAL LOGIN — Google & Facebook (OAuth 2.0 puro, sem bibliotecas externas)
+  // ──────────────────────────────────────────────────────────────────────────────
+
+  const SOCIAL_STATE_COOKIE = 'oauth_state';
+  const SOCIAL_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+
+  function getSocialStateCookieOptions(req: express.Request): express.CookieOptions {
+    const secure = isProduction || req.secure || req.headers['x-forwarded-proto'] === 'https';
+    const options: express.CookieOptions = {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure,
+      maxAge: SOCIAL_STATE_TTL_MS,
+    };
+    if (isProduction) {
+      options.domain = '.digitalbordados.com.br';
+    }
+    return options;
+  }
+
+  function buildFrontendUrl(urlPath: string) {
+    const base = (process.env.FRONTEND_URL || process.env.APP_URL || 'https://digitalbordados.com.br').replace(/\/$/, '');
+    return `${base}${urlPath}`;
+  }
+
+  async function findOrCreateSocialUser(params: {
+    provider: string;
+    providerId: string;
+    email: string | null;
+    name: string;
+    avatar: string | null;
+  }) {
+    const { provider, providerId, email, name, avatar } = params;
+    const normalizedEmail = email ? email.trim().toLowerCase() : null;
+
+    // 1. Verificar se já existe conta social com este providerId
+    const existingSocial = await dbAsync.get(
+      'SELECT usa.*, u.id as linked_user_id FROM user_social_accounts usa JOIN users u ON u.id = usa.user_id WHERE usa.provider = ? AND usa.provider_user_id = ? LIMIT 1',
+      provider, providerId
+    ) as any;
+
+    if (existingSocial) {
+      if (avatar && avatar !== existingSocial.provider_avatar) {
+        await dbAsync.run('UPDATE user_social_accounts SET provider_avatar = ?, updated_at = NOW() WHERE id = ?', avatar, existingSocial.id);
+        await dbAsync.run('UPDATE users SET avatar_url = ? WHERE id = ? AND avatar_url IS NULL', avatar, existingSocial.linked_user_id);
+      }
+      await dbAsync.run('UPDATE users SET last_login_at = NOW() WHERE id = ?', existingSocial.linked_user_id);
+      return { userId: Number(existingSocial.linked_user_id), isNew: false };
+    }
+
+    // 2. Verificar se existe usuário com o mesmo e-mail
+    if (normalizedEmail) {
+      const existingUser = await dbAsync.get('SELECT id FROM users WHERE email = ? LIMIT 1', normalizedEmail) as any;
+      if (existingUser) {
+        await dbAsync.run(
+          'INSERT INTO user_social_accounts (user_id, provider, provider_user_id, provider_email, provider_avatar) VALUES (?, ?, ?, ?, ?)',
+          existingUser.id, provider, providerId, normalizedEmail, avatar || null
+        );
+        if (avatar) {
+          await dbAsync.run('UPDATE users SET avatar_url = ?, last_login_at = NOW() WHERE id = ? AND avatar_url IS NULL', avatar, existingUser.id);
+        } else {
+          await dbAsync.run('UPDATE users SET last_login_at = NOW() WHERE id = ?', existingUser.id);
+        }
+        return { userId: Number(existingUser.id), isNew: false };
+      }
+    }
+
+    // 3. Criar novo usuário
+    if (!normalizedEmail) {
+      return null; // Sem e-mail, não podemos criar
+    }
+
+    const insertResult = await dbAsync.run(
+      `INSERT INTO users (name, email, password, role, status, avatar_url, auth_provider, email_verified_at, last_login_at, created_at)
+       VALUES (?, ?, NULL, 'customer', 'ativo', ?, ?, NOW(), NOW(), NOW())`,
+      (name || 'Usuário').trim(), normalizedEmail, avatar || null, provider
+    );
+    const newUserId = Number(insertResult.lastInsertRowid);
+
+    await dbAsync.run(
+      'INSERT INTO user_social_accounts (user_id, provider, provider_user_id, provider_email, provider_avatar) VALUES (?, ?, ?, ?, ?)',
+      newUserId, provider, providerId, normalizedEmail, avatar || null
+    );
+
+    return { userId: newUserId, isNew: true };
+  }
+
+  async function issueSocialAuthToken(userId: number, req: express.Request, res: express.Response) {
+    const user = await dbAsync.get('SELECT id, name, email, role, avatar_url FROM users WHERE id = ? LIMIT 1', userId) as any;
+    if (!user) throw new Error('Usuário não encontrado');
+    const type = user.role === 'admin' ? 'user' : 'customer';
+    const tokenPayload = {
+      id: user.id,
+      email: user.email,
+      type,
+      name: user.name,
+      role: user.role,
+      email_verified: true,
+    };
+    const token = generateToken(tokenPayload);
+    res.cookie('auth_token', token, getAuthCookieOptions(req));
+    return tokenPayload;
+  }
+
+  // ── Google/Facebook Dinâmicos (settings) ──────────────────────────────────────
+
+  async function getSettingValue(key: string): Promise<string | null> {
+    try {
+      const row = await dbAsync.get('SELECT value FROM settings WHERE `key` = ? LIMIT 1', key) as { value: string } | undefined;
+      return row ? row.value : null;
+    } catch (error) {
+      console.error(`Error fetching setting ${key}:`, error);
+      return null;
+    }
+  }
+
+  async function getGoogleCredentials() {
+    const enabledSetting = await getSettingValue('google_enabled');
+    const enabled = enabledSetting ? (enabledSetting === 'true') : Boolean(process.env.GOOGLE_CLIENT_ID);
+    const clientId = (await getSettingValue('google_client_id')) || process.env.GOOGLE_CLIENT_ID || null;
+    const clientSecret = (await getSettingValue('google_client_secret')) || process.env.GOOGLE_CLIENT_SECRET || null;
+    return { enabled, clientId, clientSecret };
+  }
+
+  async function getFacebookCredentials() {
+    const enabledSetting = await getSettingValue('facebook_enabled');
+    const enabled = enabledSetting ? (enabledSetting === 'true') : Boolean(process.env.FACEBOOK_APP_ID);
+    const appId = (await getSettingValue('facebook_app_id')) || process.env.FACEBOOK_APP_ID || null;
+    const appSecret = (await getSettingValue('facebook_app_secret')) || process.env.FACEBOOK_APP_SECRET || null;
+    return { enabled, appId, appSecret };
+  }
+
+  app.get('/api/auth/social/config', async (req, res) => {
+    try {
+      const google = await getGoogleCredentials();
+      const facebook = await getFacebookCredentials();
+      return res.json({
+        google_enabled: google.enabled && Boolean(google.clientId),
+        facebook_enabled: facebook.enabled && Boolean(facebook.appId)
+      });
+    } catch (error) {
+      console.error('Social config fetch error:', error);
+      return res.status(500).json({ error: 'Erro ao buscar configuração social' });
+    }
+  });
+
+  // ── Google OAuth ──────────────────────────────────────────────────────────────
+
+  app.get('/api/auth/google', async (req, res) => {
+    try {
+      const { enabled, clientId } = await getGoogleCredentials();
+      if (!enabled || !clientId) {
+        return res.status(503).json({ error: 'Login com Google não está ativo ou configurado.' });
+      }
+      const state = crypto.randomBytes(32).toString('hex');
+      const redirectAfter = String(req.query.redirect || '');
+      const statePayload = JSON.stringify({ state, redirect: redirectAfter.startsWith('/') ? redirectAfter : '/minha-conta' });
+      const stateEncoded = Buffer.from(statePayload).toString('base64url');
+
+      res.cookie(SOCIAL_STATE_COOKIE, stateEncoded, getSocialStateCookieOptions(req));
+
+      const callbackUrl = process.env.GOOGLE_CALLBACK_URL || buildFrontendUrl('/api/auth/google/callback');
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: callbackUrl,
+        response_type: 'code',
+        scope: 'openid email profile',
+        state: stateEncoded,
+        access_type: 'online',
+        prompt: 'select_account',
+      });
+      return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+    } catch (error) {
+      console.error('Google OAuth init error:', error);
+      return res.status(500).json({ error: 'Erro interno ao iniciar login com Google.' });
+    }
+  });
+
+  app.get('/api/auth/google/callback', async (req, res) => {
+    try {
+      const { enabled, clientId, clientSecret } = await getGoogleCredentials();
+      if (!enabled || !clientId || !clientSecret) {
+        return res.redirect(buildFrontendUrl('/login?social_error=not_configured'));
+      }
+
+      const code = String(req.query.code || '');
+      const state = String(req.query.state || '');
+      const oauthError = String(req.query.error || '');
+
+      if (oauthError) {
+        return res.redirect(buildFrontendUrl(`/login?social_error=${encodeURIComponent(oauthError)}`));
+      }
+
+      const cookieState = req.cookies[SOCIAL_STATE_COOKIE];
+      res.clearCookie(SOCIAL_STATE_COOKIE);
+      if (!cookieState || cookieState !== state) {
+        return res.redirect(buildFrontendUrl('/login?social_error=csrf_invalid'));
+      }
+
+      let stateData: { redirect: string } = { redirect: '/minha-conta' };
+      try {
+        stateData = JSON.parse(Buffer.from(String(cookieState), 'base64url').toString('utf8'));
+      } catch { /* mantém default */ }
+
+      if (!code) {
+        return res.redirect(buildFrontendUrl('/login?social_error=no_code'));
+      }
+
+      const callbackUrl = process.env.GOOGLE_CALLBACK_URL || buildFrontendUrl('/api/auth/google/callback');
+      const tokenRes = await axios.post('https://oauth2.googleapis.com/token', new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: callbackUrl,
+        grant_type: 'authorization_code',
+      }).toString(), {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 10000,
+      });
+
+      const idToken = tokenRes.data?.id_token;
+      if (!idToken) {
+        return res.redirect(buildFrontendUrl('/login?social_error=no_token'));
+      }
+
+      // Decodificar id_token e validar claims básicos
+      const [, payloadB64] = String(idToken).split('.');
+      let googlePayload: any = {};
+      try {
+        googlePayload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+      } catch {
+        return res.redirect(buildFrontendUrl('/login?social_error=token_invalid'));
+      }
+
+      const validIss = ['https://accounts.google.com', 'accounts.google.com'].includes(String(googlePayload.iss || ''));
+      const validAud = googlePayload.aud === clientId;
+      const notExpired = Number(googlePayload.exp || 0) > Math.floor(Date.now() / 1000);
+      if (!validIss || !validAud || !notExpired) {
+        return res.redirect(buildFrontendUrl('/login?social_error=token_invalid'));
+      }
+
+      const providerId = String(googlePayload.sub || '');
+      const email = String(googlePayload.email || '');
+      const name = String(googlePayload.name || email.split('@')[0] || 'Usuário Google');
+      const avatar = String(googlePayload.picture || '');
+
+      const result = await findOrCreateSocialUser({
+        provider: 'google',
+        providerId,
+        email: email || null,
+        name,
+        avatar: avatar || null,
+      });
+
+      if (!result) {
+        return res.redirect(buildFrontendUrl('/login?social_error=no_email&provider=google'));
+      }
+
+      await issueSocialAuthToken(result.userId, req, res);
+      const redirectTo = stateData.redirect || '/minha-conta';
+      return res.redirect(buildFrontendUrl(`${redirectTo}${redirectTo.includes('?') ? '&' : '?'}social_login=success`));
+    } catch (error: any) {
+      console.error('Google OAuth callback error:', error?.message || error);
+      return res.redirect(buildFrontendUrl('/login?social_error=server_error'));
+    }
+  });
+
+  // ── Facebook OAuth ────────────────────────────────────────────────────────────
+
+  app.get('/api/auth/facebook', async (req, res) => {
+    try {
+      const { enabled, appId } = await getFacebookCredentials();
+      if (!enabled || !appId) {
+        return res.status(503).json({ error: 'Login com Facebook não está ativo ou configurado.' });
+      }
+      const state = crypto.randomBytes(32).toString('hex');
+      const redirectAfter = String(req.query.redirect || '');
+      const statePayload = JSON.stringify({ state, redirect: redirectAfter.startsWith('/') ? redirectAfter : '/minha-conta' });
+      const stateEncoded = Buffer.from(statePayload).toString('base64url');
+
+      res.cookie(SOCIAL_STATE_COOKIE, stateEncoded, getSocialStateCookieOptions(req));
+
+      const callbackUrl = process.env.FACEBOOK_CALLBACK_URL || buildFrontendUrl('/api/auth/facebook/callback');
+      const params = new URLSearchParams({
+        client_id: appId,
+        redirect_uri: callbackUrl,
+        response_type: 'code',
+        scope: 'email,public_profile',
+        state: stateEncoded,
+      });
+      return res.redirect(`https://www.facebook.com/v18.0/dialog/oauth?${params.toString()}`);
+    } catch (error) {
+      console.error('Facebook OAuth init error:', error);
+      return res.status(500).json({ error: 'Erro interno ao iniciar login com Facebook.' });
+    }
+  });
+
+  app.get('/api/auth/facebook/callback', async (req, res) => {
+    try {
+      const { enabled, appId, appSecret } = await getFacebookCredentials();
+      if (!enabled || !appId || !appSecret) {
+        return res.redirect(buildFrontendUrl('/login?social_error=not_configured'));
+      }
+
+      const code = String(req.query.code || '');
+      const state = String(req.query.state || '');
+      const oauthError = String(req.query.error || '');
+
+      if (oauthError) {
+        return res.redirect(buildFrontendUrl(`/login?social_error=${encodeURIComponent(oauthError)}`));
+      }
+
+      const cookieState = req.cookies[SOCIAL_STATE_COOKIE];
+      res.clearCookie(SOCIAL_STATE_COOKIE);
+      if (!cookieState || cookieState !== state) {
+        return res.redirect(buildFrontendUrl('/login?social_error=csrf_invalid'));
+      }
+
+      let stateData: { redirect: string } = { redirect: '/minha-conta' };
+      try {
+        stateData = JSON.parse(Buffer.from(String(cookieState), 'base64url').toString('utf8'));
+      } catch { /* mantém default */ }
+
+      if (!code) {
+        return res.redirect(buildFrontendUrl('/login?social_error=no_code'));
+      }
+
+      const callbackUrl = process.env.FACEBOOK_CALLBACK_URL || buildFrontendUrl('/api/auth/facebook/callback');
+      const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+        params: {
+          client_id: appId,
+          client_secret: appSecret,
+          redirect_uri: callbackUrl,
+          code,
+        },
+        timeout: 10000,
+      });
+
+      const accessToken = tokenRes.data?.access_token;
+      if (!accessToken) {
+        return res.redirect(buildFrontendUrl('/login?social_error=no_token'));
+      }
+
+      const profileRes = await axios.get('https://graph.facebook.com/me', {
+        params: {
+          access_token: accessToken,
+          fields: 'id,name,email,picture.type(large)',
+        },
+        timeout: 10000,
+      });
+
+      const profile = profileRes.data;
+      const providerId = String(profile.id || '');
+      const email = profile.email ? String(profile.email).trim().toLowerCase() : null;
+      const name = String(profile.name || 'Usuário Facebook');
+      const avatar: string | null = profile.picture?.data?.url || null;
+
+      if (!email) {
+        // Facebook não retornou e-mail — redirecionar para tela de coleta
+        const tempState = crypto.randomBytes(16).toString('hex');
+        return res.redirect(buildFrontendUrl(
+          `/login?social_email_required=facebook&fb_name=${encodeURIComponent(name)}&fb_id=${providerId}&fb_avatar=${encodeURIComponent(avatar || '')}&fb_state=${tempState}`
+        ));
+      }
+
+      const result = await findOrCreateSocialUser({
+        provider: 'facebook',
+        providerId,
+        email,
+        name,
+        avatar,
+      });
+
+      if (!result) {
+        return res.redirect(buildFrontendUrl('/login?social_error=no_email&provider=facebook'));
+      }
+
+      await issueSocialAuthToken(result.userId, req, res);
+      const redirectTo = stateData.redirect || '/minha-conta';
+      return res.redirect(buildFrontendUrl(`${redirectTo}${redirectTo.includes('?') ? '&' : '?'}social_login=success`));
+    } catch (error: any) {
+      console.error('Facebook OAuth callback error:', error?.message || error);
+      return res.redirect(buildFrontendUrl('/login?social_error=server_error'));
+    }
+  });
+
+  // ── Contas Sociais — Listar / Vincular / Desvincular ─────────────────────────
+
+  app.get('/api/auth/social/accounts', authenticate, async (req, res) => {
+    try {
+      const userId = Number((req as any).user?.id);
+      const accounts = await dbAsync.all(
+        'SELECT provider, provider_email, provider_avatar, created_at FROM user_social_accounts WHERE user_id = ?',
+        userId
+      ) as any[];
+      const user = await dbAsync.get('SELECT password FROM users WHERE id = ? LIMIT 1', userId) as any;
+      return res.json({
+        accounts,
+        has_password: Boolean(user?.password),
+      });
+    } catch (error) {
+      console.error('Social accounts list error:', error);
+      return res.status(500).json({ error: 'Erro ao listar contas sociais' });
+    }
+  });
+
+  app.post('/api/auth/social/link', authenticate, async (req, res) => {
+    try {
+      const { provider } = req.body || {};
+      if (!provider || !['google', 'facebook'].includes(String(provider))) {
+        return res.status(400).json({ error: 'Provedor inválido' });
+      }
+      const redirectUrl = `/api/auth/${provider}?redirect=${encodeURIComponent('/minha-conta')}`;
+      return res.json({ redirect: redirectUrl });
+    } catch (error) {
+      console.error('Social link error:', error);
+      return res.status(500).json({ error: 'Erro ao vincular conta social' });
+    }
+  });
+
+  app.post('/api/auth/social/unlink', authenticate, async (req, res) => {
+    try {
+      const userId = Number((req as any).user?.id);
+      const { provider } = req.body || {};
+      if (!provider || !['google', 'facebook'].includes(String(provider))) {
+        return res.status(400).json({ error: 'Provedor inválido' });
+      }
+
+      const user = await dbAsync.get('SELECT password FROM users WHERE id = ? LIMIT 1', userId) as any;
+      const allSocials = await dbAsync.all('SELECT provider FROM user_social_accounts WHERE user_id = ?', userId) as any[];
+      const hasPassword = Boolean(user?.password);
+      const otherSocials = allSocials.filter((a: any) => a.provider !== provider);
+
+      if (!hasPassword && otherSocials.length === 0) {
+        return res.status(400).json({
+          error: 'Não é possível desvincular: esta é a única forma de acesso à sua conta. Defina uma senha primeiro.',
+        });
+      }
+
+      const unlinkResult = await dbAsync.run(
+        'DELETE FROM user_social_accounts WHERE user_id = ? AND provider = ?',
+        userId, String(provider)
+      );
+
+      if (unlinkResult.changes === 0) {
+        return res.status(404).json({ error: 'Conta social não vinculada' });
+      }
+
+      return res.json({ success: true, message: `Conta ${provider} desvinculada com sucesso.` });
+    } catch (error) {
+      console.error('Social unlink error:', error);
+      return res.status(500).json({ error: 'Erro ao desvincular conta social' });
     }
   });
 
@@ -5057,7 +5528,52 @@ async function startServer() {
         return res.status(400).json({ error: 'E-mail do pagador ÃƒÂ© obrigatÃƒÂ³rio' });
       }
       if (!payerCpf) {
-        return res.status(400).json({ error: 'CPF do pagador ÃƒÂ© obrigatÃƒÂ³rio' });
+        return res.status(400).json({ error: 'CPF do pagador é obrigatório' });
+      }
+
+      // Salvar CPF, telefone e nome no cadastro do usuário se estiverem vazios (ex: login social)
+      const userUpdates: string[] = [];
+      const userUpdateParams: any[] = [];
+      if (!freshUser.cpf && payerCpf) {
+        userUpdates.push('cpf = ?');
+        userUpdateParams.push(payerCpf);
+      }
+      if (!freshUser.phone && payerPhone) {
+        userUpdates.push('phone = ?');
+        userUpdateParams.push(payerPhone);
+      }
+      if (!freshUser.first_name && payerFirstName) {
+        userUpdates.push('first_name = ?');
+        userUpdateParams.push(payerFirstName);
+      }
+      if (!freshUser.last_name && payerLastName) {
+        userUpdates.push('last_name = ?');
+        userUpdateParams.push(payerLastName);
+      }
+      if (userUpdates.length > 0) {
+        userUpdateParams.push(freshUser.id);
+        await dbAsync.run(`UPDATE users SET ${userUpdates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, ...userUpdateParams);
+        
+        // Também atualizar na tabela customers se existir
+        const customer = await dbAsync.get('SELECT id FROM customers WHERE user_id = ? LIMIT 1', freshUser.id) as any;
+        if (customer?.id) {
+          const custUpdates: string[] = [];
+          const custUpdateParams: any[] = [];
+          if (payerPhone) {
+            custUpdates.push('phone = ?');
+            custUpdateParams.push(payerPhone);
+          }
+          if (payerCpf) {
+            custUpdates.push('cpf = ?');
+            custUpdateParams.push(payerCpf);
+          }
+          if (custUpdates.length > 0) {
+            custUpdateParams.push(freshUser.id);
+            await dbAsync.run(`UPDATE customers SET ${custUpdates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`, ...custUpdateParams);
+          }
+        } else {
+          await dbAsync.run('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', [freshUser.id, payerPhone || null, payerCpf || null]);
+        }
       }
 
       const orderId = await dbAsync.transaction(async (conn) => {

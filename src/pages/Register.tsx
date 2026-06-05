@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { User, Mail, Lock, AlertCircle, ArrowRight, Phone, CreditCard } from 'lucide-react';
 import { useAppData } from '../contexts/AppDataContext';
+import SocialLoginButtons from '../components/SocialLoginButtons';
 
 export default function Register() {
   const [firstName, setFirstName] = useState('');
@@ -72,14 +73,19 @@ export default function Register() {
     }
   };
 
+  const redirectTo = searchParams.get('redirect') || '/minha-conta';
+
   return (
     <div className="min-h-[90vh] flex items-center justify-center px-4 py-12 text-slate-800">
       <div className="max-w-xl w-full bg-white rounded-[2.5rem] border border-blue-50 shadow-2xl overflow-hidden">
         <div className="p-8 md:p-12">
-          <div className="text-center mb-10">
+          <div className="text-center mb-8">
             <h2 className="text-4xl font-black text-slate-800 uppercase tracking-tight mb-3">Criar Conta</h2>
             <p className="text-slate-500 font-medium">Junte-se à maior comunidade de bordadeiras do Brasil.</p>
           </div>
+
+          {/* Login social — opção rápida */}
+          <SocialLoginButtons redirectTo={redirectTo} dividerText="ou preencha o formulário" />
 
           {error && (
             <div className="mb-8 p-4 bg-red-50 border border-red-100 text-red-600 rounded-3xl flex items-center gap-3 text-sm font-bold animate-shake">

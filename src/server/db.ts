@@ -970,6 +970,33 @@ export function initDb() {
       CONSTRAINT fk_admin_mfa_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+
+  // ── Social Login ─────────────────────────────────────────────────────────────
+  query(`
+    CREATE TABLE IF NOT EXISTS user_social_accounts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      provider VARCHAR(50) NOT NULL,
+      provider_user_id VARCHAR(255) NOT NULL,
+      provider_email VARCHAR(255) NULL,
+      provider_avatar TEXT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_social_provider_user (provider, provider_user_id),
+      CONSTRAINT fk_social_accounts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  createIndexIfNotExists('user_social_accounts', 'idx_social_accounts_user', 'CREATE INDEX idx_social_accounts_user ON user_social_accounts(user_id)');
+
+  // Tornar password nullable (users sociais não têm senha)
+  try {
+    query(`ALTER TABLE users MODIFY COLUMN password VARCHAR(255) NULL`);
+  } catch (_) { /* já está nullable ou outro erro irrecuperável */ }
+
+  // Campos adicionais para social login
+  query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(50) NULL DEFAULT 'local'`);
+  query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME NULL`);
 }
 
 export default {

@@ -49,6 +49,10 @@ export default function AdminSettings() {
   const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [showAccessToken, setShowAccessToken] = useState(false);
   const [showWebhookSecret, setShowWebhookSecret] = useState(false);
+  const [showGoogleSecret, setShowGoogleSecret] = useState(false);
+  const [showFacebookSecret, setShowFacebookSecret] = useState(false);
+  const [copiedGoogleCallback, setCopiedGoogleCallback] = useState(false);
+  const [copiedFacebookCallback, setCopiedFacebookCallback] = useState(false);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionInfo, setConnectionInfo] = useState<MpConnectionInfo | null>(null);
@@ -216,6 +220,12 @@ export default function AdminSettings() {
     backup_auto_hour: '3',
     backup_auto_mode: 'full',
     backup_last_run: '',
+    google_enabled: 'false',
+    google_client_id: '',
+    google_client_secret: '',
+    facebook_enabled: 'false',
+    facebook_app_id: '',
+    facebook_app_secret: '',
   });
 
   useEffect(() => {
@@ -284,6 +294,12 @@ export default function AdminSettings() {
           backup_auto_hour: data.backup_auto_hour ?? prev.backup_auto_hour,
           backup_auto_mode: data.backup_auto_mode ?? prev.backup_auto_mode,
           backup_last_run: data.backup_last_run ?? prev.backup_last_run,
+          google_enabled: data.google_enabled ?? prev.google_enabled,
+          google_client_id: data.google_client_id ?? prev.google_client_id,
+          google_client_secret: data.google_client_secret ?? prev.google_client_secret,
+          facebook_enabled: data.facebook_enabled ?? prev.facebook_enabled,
+          facebook_app_id: data.facebook_app_id ?? prev.facebook_app_id,
+          facebook_app_secret: data.facebook_app_secret ?? prev.facebook_app_secret,
         }));
       }
     } catch (error) {
@@ -614,6 +630,7 @@ export default function AdminSettings() {
     { id: 'email', label: 'Configuração de E-mail', icon: Mail },
     { id: 'seo', label: 'SEO', icon: Globe2 },
     { id: 'payment', label: 'Meios de Pagamento', icon: CreditCard },
+    { id: 'social', label: 'Login Social', icon: Users },
     { id: 'backup', label: 'Backup', icon: Database },
     { id: 'lgpd', label: 'LGPD', icon: ShieldCheck },
   ];
@@ -770,6 +787,22 @@ export default function AdminSettings() {
       await navigator.clipboard.writeText(window.location.origin + '/api/webhooks/paypal');
       setCopiedPaypalWebhook(true);
       setTimeout(() => setCopiedPaypalWebhook(false), 1500);
+    } catch { /* noop */ }
+  };
+
+  const copyGoogleCallbackUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/api/auth/google/callback`);
+      setCopiedGoogleCallback(true);
+      setTimeout(() => setCopiedGoogleCallback(false), 1500);
+    } catch { /* noop */ }
+  };
+
+  const copyFacebookCallbackUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/api/auth/facebook/callback`);
+      setCopiedFacebookCallback(true);
+      setTimeout(() => setCopiedFacebookCallback(false), 1500);
     } catch { /* noop */ }
   };
 
@@ -3160,6 +3193,195 @@ export default function AdminSettings() {
                       </div>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* Tab: Social Login */}
+              {activeTab === 'social' && (
+                <div className="space-y-8">
+                  
+                  {/* Google OAuth Config Card */}
+                  <div className="rounded-[2rem] border border-slate-200 p-6 md:p-8 space-y-6">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                      <div>
+                        <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                          </svg>
+                          Autenticação com Google
+                        </h3>
+                        <p className="text-xs text-slate-500 font-medium mt-1">Permita que os usuários se cadastrem e entrem com suas contas Google.</p>
+                      </div>
+                      
+                      {/* Enable Switch */}
+                      <button
+                        type="button"
+                        onClick={() => setSettings({ ...settings, google_enabled: settings.google_enabled === 'true' ? 'false' : 'true' })}
+                        className={`px-5 py-2.5 rounded-2xl border flex items-center gap-3 transition-all ${
+                          settings.google_enabled === 'true' 
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold text-xs' 
+                            : 'bg-slate-50 border-slate-200 text-slate-500 font-bold text-xs'
+                        }`}
+                      >
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                          settings.google_enabled === 'true' ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300'
+                        }`}>
+                          {settings.google_enabled === 'true' && <Check className="w-2.5 h-2.5" />}
+                        </span>
+                        Google {settings.google_enabled === 'true' ? 'Ativado' : 'Desativado'}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Client ID Google</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: 123456789-xxxxxxxxxxxxxx.apps.googleusercontent.com"
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                          value={settings.google_client_id}
+                          onChange={e => setSettings({ ...settings, google_client_id: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Client Secret Google</label>
+                        <div className="relative">
+                          <input
+                            type={showGoogleSecret ? 'text' : 'password'}
+                            placeholder="GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx"
+                            className="w-full px-5 py-3.5 pr-12 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                            value={settings.google_client_secret}
+                            onChange={e => setSettings({ ...settings, google_client_secret: e.target.value })}
+                          />
+                          <button type="button" onClick={() => setShowGoogleSecret(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                            {showGoogleSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Callback URL */}
+                      <div className="md:col-span-2 space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">URI de redirecionamento autorizada</label>
+                        <div className="flex items-center gap-2 rounded-2xl bg-slate-900 text-emerald-400 px-4 py-3.5">
+                          <LinkIcon className="w-4 h-4 shrink-0" />
+                          <span className="text-xs font-bold flex-1 break-all">{`${window.location.origin}/api/auth/google/callback`}</span>
+                          <button type="button" onClick={copyGoogleCallbackUrl} className="px-3 py-1.5 rounded-xl bg-white/10 text-white text-[10px] font-black uppercase tracking-widest shrink-0 hover:bg-white/20">
+                            {copiedGoogleCallback ? 'Copiado!' : 'Copiar'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Google Instructions Box */}
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-5 space-y-3">
+                      <p className="text-[11px] font-black text-amber-700 uppercase tracking-widest">Instruções para obter as credenciais do Google</p>
+                      <ol className="text-xs text-slate-600 font-semibold space-y-2 list-decimal pl-5">
+                        <li>Acesse o <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google Cloud Console</a>.</li>
+                        <li>Crie um projeto ou selecione um existente.</li>
+                        <li>No menu, vá em <strong>APIs e Serviços &gt; Tela de consentimento OAuth</strong>. Configure-a como <strong>Externo</strong> e defina as permissões básicas (<code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">email</code>, <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">profile</code>, <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">openid</code>).</li>
+                        <li>Vá para a guia <strong>Credenciais</strong>, clique em <strong>Criar Credenciais</strong> e escolha <strong>ID do cliente OAuth</strong>.</li>
+                        <li>Selecione o Tipo de aplicativo como <strong>Aplicativo da Web</strong>.</li>
+                        <li>Em <strong>Origens JavaScript autorizadas</strong>, adicione a URL base do site: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{window.location.origin}</code></li>
+                        <li>Em <strong>URIs de redirecionamento autorizados</strong>, adicione o endereço copiado acima: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{`${window.location.origin}/api/auth/google/callback`}</code></li>
+                        <li>Clique em <strong>Criar</strong> e copie o <strong>Client ID</strong> e o <strong>Client Secret</strong> nos campos acima.</li>
+                      </ol>
+                    </div>
+                  </div>
+
+                  {/* Facebook OAuth Config Card */}
+                  <div className="rounded-[2rem] border border-slate-200 p-6 md:p-8 space-y-6">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                      <div>
+                        <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="#1877F2" aria-hidden="true" className="shrink-0">
+                            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                          </svg>
+                          Autenticação com Facebook
+                        </h3>
+                        <p className="text-xs text-slate-500 font-medium mt-1">Permita que os usuários se cadastrem e entrem com suas contas do Facebook.</p>
+                      </div>
+                      
+                      {/* Enable Switch */}
+                      <button
+                        type="button"
+                        onClick={() => setSettings({ ...settings, facebook_enabled: settings.facebook_enabled === 'true' ? 'false' : 'true' })}
+                        className={`px-5 py-2.5 rounded-2xl border flex items-center gap-3 transition-all ${
+                          settings.facebook_enabled === 'true' 
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold text-xs' 
+                            : 'bg-slate-50 border-slate-200 text-slate-500 font-bold text-xs'
+                        }`}
+                      >
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                          settings.facebook_enabled === 'true' ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300'
+                        }`}>
+                          {settings.facebook_enabled === 'true' && <Check className="w-2.5 h-2.5" />}
+                        </span>
+                        Facebook {settings.facebook_enabled === 'true' ? 'Ativado' : 'Desativado'}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">App ID Facebook</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: 123456789012345"
+                          className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                          value={settings.facebook_app_id}
+                          onChange={e => setSettings({ ...settings, facebook_app_id: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">App Secret Facebook</label>
+                        <div className="relative">
+                          <input
+                            type={showFacebookSecret ? 'text' : 'password'}
+                            placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                            className="w-full px-5 py-3.5 pr-12 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
+                            value={settings.facebook_app_secret}
+                            onChange={e => setSettings({ ...settings, facebook_app_secret: e.target.value })}
+                          />
+                          <button type="button" onClick={() => setShowFacebookSecret(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                            {showFacebookSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Callback URL */}
+                      <div className="md:col-span-2 space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">URI de redirecionamento OAuth válida</label>
+                        <div className="flex items-center gap-2 rounded-2xl bg-slate-900 text-emerald-400 px-4 py-3.5">
+                          <LinkIcon className="w-4 h-4 shrink-0" />
+                          <span className="text-xs font-bold flex-1 break-all">{`${window.location.origin}/api/auth/facebook/callback`}</span>
+                          <button type="button" onClick={copyFacebookCallbackUrl} className="px-3 py-1.5 rounded-xl bg-white/10 text-white text-[10px] font-black uppercase tracking-widest shrink-0 hover:bg-white/20">
+                            {copiedFacebookCallback ? 'Copiado!' : 'Copiar'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Facebook Instructions Box */}
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-5 space-y-3">
+                      <p className="text-[11px] font-black text-amber-700 uppercase tracking-widest">Instruções para obter as credenciais do Facebook</p>
+                      <ol className="text-xs text-slate-600 font-semibold space-y-2 list-decimal pl-5">
+                        <li>Acesse o <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Meta for Developers</a>.</li>
+                        <li>Crie uma conta de desenvolvedor, clique em <strong>Meus Aplicativos</strong> e depois em <strong>Criar aplicativo</strong>.</li>
+                        <li>Selecione o tipo de aplicativo <strong>Consumidor</strong> ou <strong>Empresa</strong> e finalize a criação.</li>
+                        <li>No painel do aplicativo, vá em <strong>Configurações &gt; Básico</strong> e adicione o <strong>Domínio do aplicativo</strong> (ex: <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px]">digitalbordados.com.br</code>) e a <strong>URL da Política de Privacidade</strong>.</li>
+                        <li>No menu lateral, clique no botão <strong>Adicionar Produto</strong> (ou procure por produtos) e adicione o produto <strong>Login do Facebook</strong>.</li>
+                        <li>Acesse <strong>Login do Facebook &gt; Configurações</strong>.</li>
+                        <li>No campo <strong>URIs de redirecionamento OAuth válidos</strong>, cole a URL copiada acima: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{`${window.location.origin}/api/auth/facebook/callback`}</code></li>
+                        <li>Clique em <strong>Salvar alterações</strong> no rodapé.</li>
+                        <li>Volte para <strong>Configurações &gt; Básico</strong> para copiar o <strong>ID do aplicativo</strong> e a <strong>Chave secreta do aplicativo</strong> nos campos acima.</li>
+                      </ol>
+                    </div>
+                  </div>
+
                 </div>
               )}
 
