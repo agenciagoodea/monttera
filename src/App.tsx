@@ -33,6 +33,7 @@ const PayPalSuccess = lazy(() => import('./pages/PayPalSuccess'));
 const PayPalCancel = lazy(() => import('./pages/PayPalCancel'));
 const ThankYouPage = lazy(() => import('./pages/ThankYouPage'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const DataDeletion = lazy(() => import('./pages/DataDeletion'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
 const CompanyPage = lazy(() => import('./pages/CompanyPage'));
 
@@ -318,6 +319,7 @@ export default function App() {
                             <Route path="/minha-conta/*" element={<RequireRegisteredUser><MobileMyAccount /></RequireRegisteredUser>} />
                             <Route path="/produto/:slug" element={<MobileProductDetail />} />
                             <Route path="/politica" element={<Suspense fallback={<PageLoader />}><PrivacyPolicy /></Suspense>} />
+                            <Route path="/exclusao-dados" element={<Suspense fallback={<PageLoader />}><DataDeletion /></Suspense>} />
                             <Route path="/ajuda" element={<Suspense fallback={<PageLoader />}><HelpPage /></Suspense>} />
                             <Route path="/nossa-empresa" element={<Suspense fallback={<PageLoader />}><CompanyPage /></Suspense>} />
                             <Route path="/orcamento" element={<Suspense fallback={<PageLoader />}><BudgetPage /></Suspense>} />
@@ -412,6 +414,7 @@ export default function App() {
                   <Route path="/checkout/paypal/cancel" element={<PayPalCancel />} />
                   <Route path="/obrigado-compra" element={<ThankYouPage />} />
                   <Route path="/politica" element={<PrivacyPolicy />} />
+                  <Route path="/exclusao-dados" element={<DataDeletion />} />
                   <Route path="/ajuda" element={<HelpPage />} />
                 </Routes>
             </Suspense>

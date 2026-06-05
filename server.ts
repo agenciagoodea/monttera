@@ -6959,6 +6959,80 @@ async function startServer() {
     }
   });
 
+  app.post('/api/public/privacy/delete-request', async (req, res) => {
+    try {
+      const { name, email, details = '' } = req.body || {};
+      const normalizedName = String(name || '').trim();
+      const normalizedEmail = String(email || '').trim().toLowerCase();
+
+      if (!normalizedName || !normalizedEmail) {
+        return res.status(400).json({ error: 'Nome e e-mail são obrigatórios.' });
+      }
+
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+        return res.status(400).json({ error: 'E-mail inválido.' });
+      }
+
+      // Buscar se o usuário existe pelo e-mail
+      const user = await dbAsync.get('SELECT id FROM users WHERE email = ? LIMIT 1', normalizedEmail) as any;
+
+      let requestId = null;
+      if (user?.id) {
+        // Se o usuário existir, cria o LGPD request no banco associado a ele
+        const result = await dbAsync.run(
+          `INSERT INTO lgpd_requests (user_id, request_type, status, payload)
+           VALUES (?, 'delete', 'pending', ?)`,
+          Number(user.id),
+          JSON.stringify({
+            name: normalizedName,
+            email: normalizedEmail,
+            details: String(details || 'Solicitação de exclusão de dados (Facebook/Pública)').slice(0, 4000)
+          }),
+        );
+        requestId = Number(result.lastInsertRowid);
+
+        await logLgpdEvent({
+          req,
+          userId: Number(user.id),
+          actorUserId: Number(user.id),
+          eventType: 'request',
+          action: 'request_created',
+          details: { request_id: requestId, request_type: 'delete', public: true },
+        });
+      }
+
+      // Envia notificação por e-mail para a equipe de suporte
+      const settings = await loadSettingsMapAsync(['email_contact', 'email_requests']);
+      const supportEmail = String(settings.email_requests || settings.email_contact || 'contato@digitalbordados.com.br').trim().toLowerCase();
+
+      await sendEmail({
+        to: supportEmail,
+        templateKey: 'lgpd_request_received',
+        variables: {
+          name: 'Suporte',
+          request_type: 'Exclusão de Dados (Meta/Facebook)',
+          request_id: requestId ? String(requestId) : 'N/A (Usuário não cadastrado)',
+        },
+      }).catch((err) => console.error('Error sending support deletion request email:', err));
+
+      // Envia confirmação para o e-mail do solicitante
+      await sendEmail({
+        to: normalizedEmail,
+        templateKey: 'lgpd_request_received',
+        variables: {
+          name: normalizedName,
+          request_type: 'exclusão de dados',
+          request_id: requestId ? String(requestId) : 'Pendente',
+        },
+      }).catch((err) => console.error('Error sending customer deletion confirmation email:', err));
+
+      return res.status(201).json({ success: true });
+    } catch (error) {
+      console.error('Create public deletion request error:', error);
+      return res.status(500).json({ error: 'Erro ao processar solicitação de exclusão de dados.' });
+    }
+  });
+
   app.get('/api/customer/privacy/export', authenticate, async (req, res) => {
     try {
       const user = (req as any).user;
