@@ -70,11 +70,6 @@ export default function ProductCard({ product }: ProductCardProps) {
           loading="lazy"
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
         />
-        {discount > 0 && (
-          <div className="absolute bottom-3 right-3 bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded-lg shadow-lg">
-            {discount}% OFF
-          </div>
-        )}
       </Link>
 
       {/* Content */}
