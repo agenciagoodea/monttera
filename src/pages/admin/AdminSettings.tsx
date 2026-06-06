@@ -30,6 +30,8 @@ import {
   FileCheck2,
   Globe2,
   Shield,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import AdminEmailTemplates from './AdminEmailTemplates';
 import AdminEmailLogs from './AdminEmailLogs';
@@ -198,6 +200,7 @@ export default function AdminSettings() {
     matrix_request_team_email: '',
     email_requests: '',
     brand_logos: '[]',
+    home_sliders: '[]',
     lgpd_enabled: 'true',
     lgpd_require_consent_register: 'true',
     lgpd_require_checkout_consent: 'true',
@@ -300,6 +303,7 @@ export default function AdminSettings() {
           facebook_enabled: data.facebook_enabled ?? prev.facebook_enabled,
           facebook_app_id: data.facebook_app_id ?? prev.facebook_app_id,
           facebook_app_secret: data.facebook_app_secret ?? prev.facebook_app_secret,
+          home_sliders: data.home_sliders || prev.home_sliders || '[]',
         }));
       }
     } catch (error) {
@@ -1270,6 +1274,165 @@ export default function AdminSettings() {
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
                           Quando ativado, o cliente será enviado direto para o checkout ao clicar em comprar.
                         </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Slideshow da Home (1080x500) */}
+                  <div>
+                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Slideshow da Home (1080x500)</h3>
+                    <div className="rounded-[2rem] border border-slate-100 bg-slate-50 p-6 space-y-6">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Gerencie os banners exibidos no topo da página inicial do site. Formato ideal: 1080x500 pixels.
+                      </p>
+
+                      <div className="space-y-4">
+                        {(() => {
+                          let slidersList: any[] = [];
+                          try {
+                            slidersList = JSON.parse(settings.home_sliders || '[]');
+                          } catch (e) {
+                            slidersList = [];
+                          }
+                          if (!Array.isArray(slidersList)) slidersList = [];
+
+                          return (
+                            <>
+                              {slidersList.map((slider, idx) => (
+                                <div key={slider.id || idx} className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
+                                  <div className="w-32 h-16 bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex items-center justify-center shrink-0">
+                                    {slider.image_url ? (
+                                      <img src={slider.image_url} alt="Slide Preview" className="w-full h-full object-cover" />
+                                    ) : (
+                                      <ImageIcon className="w-6 h-6 text-slate-300" />
+                                    )}
+                                  </div>
+                                  
+                                  <div className="flex-1 w-full space-y-2">
+                                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Link do Banner (Opcional)</label>
+                                    <input 
+                                      type="text" 
+                                      className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold"
+                                      placeholder="Ex: /categoria/animais ou https://link.com"
+                                      value={slider.link || ''}
+                                      onChange={(e) => {
+                                        const updated = [...slidersList];
+                                        updated[idx] = { ...updated[idx], link: e.target.value };
+                                        setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                      }}
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => {
+                                        if (idx === 0) return;
+                                        const updated = [...slidersList];
+                                        const temp = updated[idx];
+                                        updated[idx] = updated[idx - 1];
+                                        updated[idx - 1] = temp;
+                                        setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                      }}
+                                      className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                                      title="Mover para Cima"
+                                    >
+                                      <ArrowUp className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === slidersList.length - 1}
+                                      onClick={() => {
+                                        if (idx === slidersList.length - 1) return;
+                                        const updated = [...slidersList];
+                                        const temp = updated[idx];
+                                        updated[idx] = updated[idx + 1];
+                                        updated[idx + 1] = temp;
+                                        setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                      }}
+                                      className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                                      title="Mover para Baixo"
+                                    >
+                                      <ArrowDown className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = slidersList.filter((_, i) => i !== idx);
+                                        setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                        setMessage({ text: 'Slide removido. Lembre-se de salvar as alterações.', type: 'success' });
+                                      }}
+                                      className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
+                                      title="Remover Slide"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+
+                              {slidersList.length === 0 && (
+                                <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-white">
+                                  <ImageIcon className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nenhum slide configurado</p>
+                                  <p className="text-[9px] font-semibold text-slate-400 mt-1">O banner azul original será exibido como fallback na Home.</p>
+                                </div>
+                              )}
+
+                              {slidersList.length < 6 ? (
+                                <label className="flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 hover:border-blue-300 text-blue-600 rounded-2xl cursor-pointer transition-all active:scale-[0.99]">
+                                  <Plus className="w-4 h-4" />
+                                  <span className="text-[10px] font-black uppercase tracking-widest">Adicionar Novo Slide</span>
+                                  <input 
+                                    type="file" 
+                                    className="hidden" 
+                                    accept="image/*"
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (!file) return;
+
+                                      try {
+                                        const formData = new FormData();
+                                        formData.append('logo', file);
+
+                                        const res = await fetch('/api/admin/upload-logo', {
+                                          method: 'POST',
+                                          body: formData,
+                                        });
+
+                                        const data = await res.json().catch(() => ({}));
+                                        if (!res.ok) {
+                                          setMessage({ text: data?.error || 'Erro ao subir imagem do slide.', type: 'error' });
+                                          return;
+                                        }
+
+                                        if (data.url) {
+                                          const newSlide = {
+                                            id: Date.now().toString(),
+                                            image_url: data.url,
+                                            link: ''
+                                          };
+                                          const updated = [...slidersList, newSlide];
+                                          setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                          setMessage({ text: 'Slide adicionado com sucesso! Salve para aplicar.', type: 'success' });
+                                        }
+                                      } catch (err) {
+                                        setMessage({ text: 'Erro ao subir imagem do slide.', type: 'error' });
+                                      } finally {
+                                        e.currentTarget.value = '';
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              ) : (
+                                <p className="text-[9px] font-bold text-amber-500 uppercase tracking-wider text-center">
+                                  Limite máximo de 6 slides atingido para preservar o desempenho da página.
+                                </p>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>

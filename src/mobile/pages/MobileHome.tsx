@@ -7,6 +7,8 @@ import { Search, ChevronLeft, ChevronRight, Sparkles, Filter, AlertCircle, Plus,
 import { formatCurrency } from '../../lib/utils';
 import { motion } from 'motion/react';
 
+import Banner from '../../components/Banner';
+
 export default function MobileHome() {
   const [searchParams, setSearchParams] = useSearchParams();
   const searchQuery = searchParams.get('q') || '';
@@ -110,24 +112,8 @@ export default function MobileHome() {
   return (
     <div className="flex flex-col gap-6">
       
-      {/* Banner Principal Leve e Premium */}
-      <section className="relative w-full rounded-[2.5rem] overflow-hidden bg-gradient-to-br from-blue-700 via-blue-600 to-indigo-700 text-white p-6 shadow-xl shadow-blue-500/10">
-        {/* Elemento de brilho decorativo de fundo */}
-        <div className="absolute -top-12 -right-12 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
-        <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-indigo-500/30 rounded-full blur-3xl pointer-events-none"></div>
-
-        <div className="relative z-10 flex flex-col gap-2">
-          <div className="flex items-center gap-1.5 bg-white/15 border border-white/15 px-3 py-1 rounded-full w-max text-[8px] font-black uppercase tracking-widest">
-            <Sparkles className="w-3 h-3 text-amber-300 fill-amber-300" /> Matrizes Digitais
-          </div>
-          <h2 className="text-xl font-black leading-tight uppercase tracking-tight mt-1">
-            Variadas Matrizes <br/>para sua máquina de bordar
-          </h2>
-          <p className="text-[10px] text-blue-100 font-bold max-w-[80%] leading-relaxed">
-            Muitas opções para você escolher e baixar. Download imediato após a compra.
-          </p>
-        </div>
-      </section>
+      {/* Banner Principal Unificado e Dinâmico */}
+      <Banner />
 
       {/* Carrossel Horizontal de Categorias (Scroll de Toque) */}
       <section className="flex flex-col gap-3">

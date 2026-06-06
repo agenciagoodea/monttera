@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ArrowLeft, ArrowRight, CheckCircle2, ShoppingCart, Sparkles, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import MatrixRequestForm from './MatrixRequestForm';
+import { useAppData } from '../contexts/AppDataContext';
 
 const steps = [
   {
@@ -40,30 +41,130 @@ function SlideIndicator({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className={`h-2.5 rounded-full transition-all duration-300 ${
-        active ? 'w-8 bg-white' : 'w-2.5 bg-white/45 hover:bg-white/70'
+      className={`h-2 rounded-full transition-all duration-300 ${
+        active ? 'w-6 bg-white' : 'w-2 bg-white/45 hover:bg-white/70'
       }`}
     />
   );
 }
 
 export default function Banner() {
+  const { settings } = useAppData();
+
+  const sliders = (() => {
+    try {
+      if (settings?.home_sliders) {
+        const parsed = JSON.parse(settings.home_sliders);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error('Erro ao parsear home_sliders:', e);
+    }
+    return [];
+  })();
+
   const [activeSlide, setActiveSlide] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const totalSlides = sliders.length > 0 ? sliders.length : 2;
 
   useEffect(() => {
     if (isPaused) return;
 
     const timer = window.setInterval(() => {
-      setActiveSlide((current) => (current + 1) % 2);
+      setActiveSlide((current) => (current + 1) % totalSlides);
     }, SLIDE_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
-  }, [isPaused]);
+  }, [isPaused, totalSlides]);
+
+  useEffect(() => {
+    setActiveSlide(0);
+  }, [sliders.length]);
 
   const goToSlide = (index: number) => setActiveSlide(index);
-  const nextSlide = () => setActiveSlide((current) => (current + 1) % 2);
-  const prevSlide = () => setActiveSlide((current) => (current === 0 ? 1 : 0));
+  const nextSlide = () => setActiveSlide((current) => (current + 1) % totalSlides);
+  const prevSlide = () => setActiveSlide((current) => (current === 0 ? totalSlides - 1 : current - 1));
+
+  if (sliders.length > 0) {
+    return (
+      <section
+        onMouseEnter={() => setIsPaused(true)}
+        onMouseLeave={() => setIsPaused(false)}
+        className="relative w-full aspect-[1080/500] overflow-hidden rounded-[2.35rem] border border-slate-200 bg-slate-100 shadow-[0_16px_40px_-16px_rgba(0,0,0,0.1)] group/banner"
+      >
+        <AnimatePresence mode="wait">
+          {sliders.map((slide, index) => {
+            if (index !== activeSlide) return null;
+
+            const slideContent = (
+              <motion.img
+                key={slide.id || index}
+                src={slide.image_url}
+                alt={`Slide promocional ${index + 1}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.5 }}
+                className="w-full h-full object-cover rounded-[2.35rem]"
+              />
+            );
+
+            return slide.link ? (
+              <a
+                href={slide.link}
+                key={slide.id || index}
+                className="block w-full h-full cursor-pointer"
+                target={slide.link.startsWith('http') ? '_blank' : '_self'}
+                rel="noopener noreferrer"
+              >
+                {slideContent}
+              </a>
+            ) : (
+              <div key={slide.id || index} className="w-full h-full">
+                {slideContent}
+              </div>
+            );
+          })}
+        </AnimatePresence>
+
+        {totalSlides > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={prevSlide}
+              aria-label="Slide anterior"
+              className="absolute left-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition opacity-0 group-hover/banner:opacity-100 hover:bg-black/55 shadow-lg active:scale-95"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={nextSlide}
+              aria-label="Próximo slide"
+              className="absolute right-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition opacity-0 group-hover/banner:opacity-100 hover:bg-black/55 shadow-lg active:scale-95"
+            >
+              <ArrowRight className="h-5 w-5" />
+            </button>
+          </>
+        )}
+
+        {totalSlides > 1 && (
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-black/15 backdrop-blur-md px-3.5 py-2 rounded-full border border-white/10">
+            {sliders.map((_, index) => (
+              <SlideIndicator
+                key={index}
+                active={activeSlide === index}
+                onClick={() => goToSlide(index)}
+                label={`Abrir slide ${index + 1}`}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    );
+  }
 
   return (
     <section
