@@ -602,7 +602,7 @@ export default function MobileCart() {
         <picture className="w-full h-auto block">
           <source srcSet="/uploads/banner_checkout.webp" type="image/webp" />
           <img
-            src="/uploads/banner_checkout.png"
+            src="/uploads/banner_checkout.jpg"
             alt="Banner Checkout"
             loading="lazy"
             width={1080}
