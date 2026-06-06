@@ -598,19 +598,17 @@ export default function MobileCart() {
       </div>
 
       {/* Banner Checkout Promocional (Mobile) */}
-      <div className="w-full rounded-2xl overflow-hidden bg-white border border-slate-100 flex items-center justify-center shadow-sm">
+      <div className="w-full rounded-2xl overflow-hidden bg-white border border-slate-100 shadow-sm">
         <img
           src="/uploads/banner_checkout.jpg"
           alt="Banner Checkout"
           loading="lazy"
-          width={1080}
-          height={500}
-          className="w-full h-auto aspect-[1080/500] object-contain rounded-2xl"
+          className="w-full h-auto block rounded-2xl"
         />
       </div>
 
       {/* Selo de Segurança do Pagamento (Mobile) */}
-      <div className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 flex items-center justify-center shadow-sm">
+      <div className="w-full rounded-2xl border border-slate-100 bg-white p-4 flex items-center justify-center shadow-sm">
         <img
           src={securityImageSrc}
           alt="Ambiente Seguro de Pagamento"
@@ -618,7 +616,7 @@ export default function MobileCart() {
           onError={() => {
             if (securityImageSrc.endsWith('/seguranca')) setSecurityImageSrc('/uploads/seguranca.jpeg');
           }}
-          className="w-full h-auto object-contain rounded-2xl"
+          className="w-full h-auto block rounded-xl"
         />
       </div>
 

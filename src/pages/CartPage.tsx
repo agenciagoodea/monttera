@@ -520,21 +520,19 @@ export default function CartPage() {
         <h1 className="text-3xl font-black text-slate-800 uppercase tracking-tight">Meu Carrinho</h1>
       </div>
 
-      <div className="mb-8 grid grid-cols-1 md:grid-cols-10 gap-4 items-stretch">
+      <div className="mb-8 grid grid-cols-1 md:grid-cols-10 gap-4 items-start">
         {/* Banner Checkout (70%) */}
-        <div className="md:col-span-7 rounded-2xl overflow-hidden bg-white border border-slate-100 flex items-center justify-center shadow-sm">
+        <div className="md:col-span-7 rounded-2xl overflow-hidden bg-white border border-slate-100 shadow-sm">
           <img
             src="/uploads/banner_checkout.jpg"
             alt="Banner Checkout"
             loading="lazy"
-            width={1080}
-            height={500}
-            className="w-full h-auto aspect-[1080/500] object-contain rounded-2xl"
+            className="w-full h-auto block rounded-2xl"
           />
         </div>
 
         {/* Ambiente Seguro (30%) */}
-        <div className="md:col-span-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 flex items-center justify-center shadow-sm">
+        <div className="md:col-span-3 rounded-2xl border border-slate-100 bg-white p-4 flex items-center justify-center shadow-sm">
           <img
             src={securityImageSrc}
             alt="Ambiente Seguro de Pagamento"
@@ -542,7 +540,7 @@ export default function CartPage() {
             onError={() => {
               if (securityImageSrc.endsWith('/seguranca')) setSecurityImageSrc('/uploads/seguranca.jpeg');
             }}
-            className="w-full h-auto object-contain rounded-2xl"
+            className="w-full h-auto block rounded-xl"
           />
         </div>
       </div>
