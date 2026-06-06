@@ -599,17 +599,14 @@ export default function MobileCart() {
 
       {/* Banner Checkout Promocional (Mobile) */}
       <div className="w-full rounded-2xl overflow-hidden bg-white border border-slate-100 flex items-center justify-center shadow-sm">
-        <picture className="w-full h-auto block">
-          <source srcSet="/uploads/banner_checkout.webp" type="image/webp" />
-          <img
-            src="/uploads/banner_checkout.jpg"
-            alt="Banner Checkout"
-            loading="lazy"
-            width={1080}
-            height={500}
-            className="w-full h-auto aspect-[1080/500] object-contain rounded-2xl"
-          />
-        </picture>
+        <img
+          src="/uploads/banner_checkout.jpg"
+          alt="Banner Checkout"
+          loading="lazy"
+          width={1080}
+          height={500}
+          className="w-full h-auto aspect-[1080/500] object-contain rounded-2xl"
+        />
       </div>
 
       {/* Selo de Segurança do Pagamento (Mobile) */}
