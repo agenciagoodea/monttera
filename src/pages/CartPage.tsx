@@ -513,30 +513,40 @@ export default function CartPage() {
 
   return (
     <div className="max-w-[1440px] mx-auto px-6 md:px-10 py-10 w-full">
-      <div className="mb-10 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex items-center gap-4">
-          <Link to="/" className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-blue-600 transition-colors">
-            <ChevronLeft className="w-5 h-5" />
-          </Link>
-          <h1 className="text-3xl font-black text-slate-800 uppercase tracking-tight">Meu Carrinho</h1>
-        </div>
-        <div className="w-full xl:w-auto xl:max-w-[960px] flex flex-col md:flex-row md:items-center gap-3">
-          <div className="bg-[#eaf4fc] border border-blue-100 rounded-2xl p-4 text-[12px] text-blue-900 leading-relaxed shadow-sm flex-1">
-            <p className="font-bold mb-1 text-blue-950">Neste pacote contém arquivos: PES - JEF - DST - EXP - XXX</p>
-            <p>
-              Após a finalização da sua compra, caso você não seja redirecionado automaticamente para download, acesse o Painel do Cliente no menu superior do site clicando na opção <strong>"Matrizes Compradas"</strong> para visualizar e baixar seus arquivos.
-            </p>
-          </div>
-          <div className="w-full xl:w-[390px] rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="mb-6 flex items-center gap-4">
+        <Link to="/" className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-blue-600 transition-colors">
+          <ChevronLeft className="w-5 h-5" />
+        </Link>
+        <h1 className="text-3xl font-black text-slate-800 uppercase tracking-tight">Meu Carrinho</h1>
+      </div>
+
+      <div className="mb-8 grid grid-cols-1 md:grid-cols-10 gap-4 items-stretch">
+        {/* Banner Checkout (70%) */}
+        <div className="md:col-span-7 rounded-2xl overflow-hidden bg-white border border-slate-100 flex items-center justify-center shadow-sm">
+          <picture className="w-full h-auto block">
+            <source srcSet="/uploads/banner_checkout.webp" type="image/webp" />
             <img
-              src={securityImageSrc}
-              alt="Selo de segurança da compra"
-              onError={() => {
-                if (securityImageSrc.endsWith('/seguranca')) setSecurityImageSrc('/uploads/seguranca.jpeg');
-              }}
-              className="w-full h-auto object-contain"
+              src="/uploads/banner_checkout.png"
+              alt="Banner Checkout"
+              loading="lazy"
+              width={1080}
+              height={500}
+              className="w-full h-auto aspect-[1080/500] object-contain rounded-2xl"
             />
-          </div>
+          </picture>
+        </div>
+
+        {/* Ambiente Seguro (30%) */}
+        <div className="md:col-span-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 flex items-center justify-center shadow-sm">
+          <img
+            src={securityImageSrc}
+            alt="Ambiente Seguro de Pagamento"
+            loading="lazy"
+            onError={() => {
+              if (securityImageSrc.endsWith('/seguranca')) setSecurityImageSrc('/uploads/seguranca.jpeg');
+            }}
+            className="w-full h-auto object-contain rounded-2xl"
+          />
         </div>
       </div>
 

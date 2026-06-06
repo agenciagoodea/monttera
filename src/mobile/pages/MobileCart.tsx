@@ -134,6 +134,7 @@ export default function MobileCart() {
   const [secondsLeft, setSecondsLeft] = useState(30 * 60);
   const [statusMessage, setStatusMessage] = useState('');
   const [checkoutConsent, setCheckoutConsent] = useState(false);
+  const [securityImageSrc, setSecurityImageSrc] = useState('/uploads/seguranca');
   const [payerErrors, setPayerErrors] = useState<string[]>([]);
   const [payerTouched, setPayerTouched] = useState<Record<string, boolean>>({
     first_name: false,
@@ -596,6 +597,34 @@ export default function MobileCart() {
         </span>
       </div>
 
+      {/* Banner Checkout Promocional (Mobile) */}
+      <div className="w-full rounded-2xl overflow-hidden bg-white border border-slate-100 flex items-center justify-center shadow-sm">
+        <picture className="w-full h-auto block">
+          <source srcSet="/uploads/banner_checkout.webp" type="image/webp" />
+          <img
+            src="/uploads/banner_checkout.png"
+            alt="Banner Checkout"
+            loading="lazy"
+            width={1080}
+            height={500}
+            className="w-full h-auto aspect-[1080/500] object-contain rounded-2xl"
+          />
+        </picture>
+      </div>
+
+      {/* Selo de Segurança do Pagamento (Mobile) */}
+      <div className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 flex items-center justify-center shadow-sm">
+        <img
+          src={securityImageSrc}
+          alt="Ambiente Seguro de Pagamento"
+          loading="lazy"
+          onError={() => {
+            if (securityImageSrc.endsWith('/seguranca')) setSecurityImageSrc('/uploads/seguranca.jpeg');
+          }}
+          className="w-full h-auto object-contain rounded-2xl"
+        />
+      </div>
+
       {statusMessage && (
         <div className="p-4 bg-rose-50 border border-rose-100 text-rose-600 rounded-2xl text-xs font-bold flex items-center gap-2.5 animate-shake">
           <AlertCircle className="w-4.5 h-4.5 flex-shrink-0" />
@@ -630,16 +659,6 @@ export default function MobileCart() {
         </div>
       </div>
 
-      {/* Informativo LGPD/LGPD do Pacote */}
-      <div className="bg-blue-50 border border-blue-100 rounded-3xl p-4 text-[10px] text-blue-900 leading-relaxed shadow-sm">
-        <p className="font-black mb-1 text-blue-950 flex items-center gap-1.5">
-          <Info className="w-4 h-4 text-blue-600 flex-shrink-0" />
-          Formatos do Pacote: PES - JEF - DST - EXP - XXX
-        </p>
-        <p className="font-medium text-blue-800">
-          O download é liberado de forma imediata na sua conta após a confirmação do pagamento.
-        </p>
-      </div>
 
       {/* Formulário Completo de Dados do Comprador e Endereço */}
       <div className="bg-white rounded-[2.5rem] border border-slate-100 p-5 shadow-sm flex flex-col gap-4">
