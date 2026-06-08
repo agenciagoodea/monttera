@@ -32,6 +32,8 @@ import {
   Shield,
   ArrowUp,
   ArrowDown,
+  Smartphone,
+  Monitor,
 } from 'lucide-react';
 import AdminEmailTemplates from './AdminEmailTemplates';
 import AdminEmailLogs from './AdminEmailLogs';
@@ -1341,21 +1343,63 @@ export default function AdminSettings() {
                                         </span>
                                       </div>
                                       
-                                      <div className="flex-1 w-full flex items-center gap-2">
-                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Exibir em:</label>
-                                        <select
-                                          className="flex-1 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold"
-                                          value={slider.visibility || 'all'}
-                                          onChange={(e) => {
-                                            const updated = [...slidersList];
-                                            updated[idx] = { ...updated[idx], visibility: e.target.value };
-                                            setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
-                                          }}
-                                        >
-                                          <option value="all">Celular e Desktop</option>
-                                          <option value="mobile">Somente Celular</option>
-                                          <option value="desktop">Somente Desktop</option>
-                                        </select>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Exibir em:</span>
+                                        <div className="flex gap-2">
+                                          {/* Botão Celular */}
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updated = [...slidersList];
+                                              const currentShowMobile = updated[idx].show_mobile ?? (updated[idx].visibility === 'all' || updated[idx].visibility === 'mobile' || !updated[idx].visibility);
+                                              const currentShowDesktop = updated[idx].show_desktop ?? (updated[idx].visibility === 'all' || updated[idx].visibility === 'desktop' || !updated[idx].visibility);
+                                              
+                                              updated[idx] = {
+                                                ...updated[idx],
+                                                visibility: undefined,
+                                                show_mobile: !currentShowMobile,
+                                                show_desktop: currentShowDesktop
+                                              };
+                                              setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                            }}
+                                            className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 active:scale-95 ${
+                                              (slider.show_mobile ?? (slider.visibility === 'all' || slider.visibility === 'mobile' || !slider.visibility))
+                                                ? 'bg-blue-50 border-blue-600 text-blue-600 font-bold'
+                                                : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-slate-300'
+                                            }`}
+                                            title="Celular"
+                                          >
+                                            <Smartphone className="w-4 h-4" />
+                                            <span className="text-[9px] font-black uppercase tracking-wider">Celular</span>
+                                          </button>
+                                          
+                                          {/* Botão Desktop */}
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updated = [...slidersList];
+                                              const currentShowMobile = updated[idx].show_mobile ?? (updated[idx].visibility === 'all' || updated[idx].visibility === 'mobile' || !updated[idx].visibility);
+                                              const currentShowDesktop = updated[idx].show_desktop ?? (updated[idx].visibility === 'all' || updated[idx].visibility === 'desktop' || !updated[idx].visibility);
+                                              
+                                              updated[idx] = {
+                                                ...updated[idx],
+                                                visibility: undefined,
+                                                show_mobile: currentShowMobile,
+                                                show_desktop: !currentShowDesktop
+                                              };
+                                              setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                            }}
+                                            className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 active:scale-95 ${
+                                              (slider.show_desktop ?? (slider.visibility === 'all' || slider.visibility === 'desktop' || !slider.visibility))
+                                                ? 'bg-blue-50 border-blue-600 text-blue-600 font-bold'
+                                                : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-slate-300'
+                                            }`}
+                                            title="Desktop"
+                                          >
+                                            <Monitor className="w-4 h-4" />
+                                            <span className="text-[9px] font-black uppercase tracking-wider">Desktop</span>
+                                          </button>
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
@@ -1450,7 +1494,8 @@ export default function AdminSettings() {
                                             image_url: data.url,
                                             link: '',
                                             active: true,
-                                            visibility: 'all'
+                                            show_mobile: true,
+                                            show_desktop: true
                                           };
                                           const updated = [...slidersList, newSlide];
                                           setSettings({ ...settings, home_sliders: JSON.stringify(updated) });

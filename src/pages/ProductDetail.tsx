@@ -44,6 +44,15 @@ export default function ProductDetail() {
   const [newRating, setNewRating] = useState(5);
   const [newComment, setNewComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [activeReviewIndex, setActiveReviewIndex] = useState(0);
+
+  useEffect(() => {
+    if (reviews.length <= 1) return;
+    const interval = window.setInterval(() => {
+      setActiveReviewIndex((prev) => (prev + 1) % reviews.length);
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [reviews]);
   const redirectToCheckout = String(settings.redirect_to_checkout_after_add_to_cart || 'false') === 'true';
 
   useEffect(() => {
@@ -582,6 +591,71 @@ export default function ProductDetail() {
                 </button>
               ))}
             </motion.div>
+          )}
+
+          {/* Carrossel de Últimos Comentários */}
+          {reviews.length > 0 && (
+            <div className="bg-slate-50 border border-slate-100 rounded-[30px] p-6 mt-8 relative overflow-hidden shadow-sm">
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-1.5 select-none">
+                <Star className="w-3.5 h-3.5 text-amber-500 fill-current" />
+                O que dizem nossos clientes
+              </h3>
+              <div className="min-h-[80px] flex flex-col justify-between">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={activeReviewIndex}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex text-amber-400">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star
+                            key={i}
+                            className={`w-3.5 h-3.5 ${
+                              i < reviews[activeReviewIndex].rating ? 'fill-current' : 'text-slate-200'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <span className="text-[9px] font-bold text-slate-400">
+                        {new Date(reviews[activeReviewIndex].created_at).toLocaleDateString('pt-BR')}
+                      </span>
+                    </div>
+                    <p className="text-slate-600 text-xs font-semibold italic leading-relaxed">
+                      "{reviews[activeReviewIndex].comment}"
+                    </p>
+                    <p className="text-slate-800 text-[10px] font-black uppercase tracking-wider">
+                      - {reviews[activeReviewIndex].user_name}
+                    </p>
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+              
+              {reviews.length > 1 && (
+                <div className="flex justify-end gap-1.5 mt-3 border-t border-slate-200/40 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setActiveReviewIndex((prev) => (prev === 0 ? reviews.length - 1 : prev - 1))}
+                    className="p-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-500 transition-colors border border-slate-200/60 active:scale-95 shadow-sm"
+                    aria-label="Avaliação anterior"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveReviewIndex((prev) => (prev + 1) % reviews.length)}
+                    className="p-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-500 transition-colors border border-slate-200/60 active:scale-95 shadow-sm"
+                    aria-label="Próxima avaliação"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
 

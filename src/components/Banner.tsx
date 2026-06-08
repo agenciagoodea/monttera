@@ -70,8 +70,12 @@ export default function Banner() {
         if (Array.isArray(parsed)) {
           return parsed.filter((slide: any) => {
             if (slide.active === false) return false;
-            if (slide.visibility === 'mobile' && !isMobile) return false;
-            if (slide.visibility === 'desktop' && isMobile) return false;
+            
+            const showMobile = slide.show_mobile ?? (slide.visibility === 'all' || slide.visibility === 'mobile' || !slide.visibility);
+            const showDesktop = slide.show_desktop ?? (slide.visibility === 'all' || slide.visibility === 'desktop' || !slide.visibility);
+            
+            if (isMobile && !showMobile) return false;
+            if (!isMobile && !showDesktop) return false;
             return true;
           });
         }
