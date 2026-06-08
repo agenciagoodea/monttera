@@ -51,12 +51,29 @@ function SlideIndicator({
 export default function Banner() {
   const { settings } = useAppData();
 
+  const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowWidth(window.innerWidth);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isMobile = windowWidth < 768;
+
   const sliders = (() => {
     try {
       if (settings?.home_sliders) {
         const parsed = JSON.parse(settings.home_sliders);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          return parsed.filter((slide: any) => {
+            if (slide.active === false) return false;
+            if (slide.visibility === 'mobile' && !isMobile) return false;
+            if (slide.visibility === 'desktop' && isMobile) return false;
+            return true;
+          });
         }
       }
     } catch (e) {
@@ -135,7 +152,7 @@ export default function Banner() {
               type="button"
               onClick={prevSlide}
               aria-label="Slide anterior"
-              className="absolute left-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition opacity-0 group-hover/banner:opacity-100 hover:bg-black/55 shadow-lg active:scale-95"
+              className="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition hover:bg-black/55 shadow-lg active:scale-95"
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
@@ -143,24 +160,11 @@ export default function Banner() {
               type="button"
               onClick={nextSlide}
               aria-label="Próximo slide"
-              className="absolute right-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition opacity-0 group-hover/banner:opacity-100 hover:bg-black/55 shadow-lg active:scale-95"
+              className="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition hover:bg-black/55 shadow-lg active:scale-95"
             >
               <ArrowRight className="h-5 w-5" />
             </button>
           </>
-        )}
-
-        {totalSlides > 1 && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-black/15 backdrop-blur-md px-3.5 py-2 rounded-full border border-white/10">
-            {sliders.map((_, index) => (
-              <SlideIndicator
-                key={index}
-                active={activeSlide === index}
-                onClick={() => goToSlide(index)}
-                label={`Abrir slide ${index + 1}`}
-              />
-            ))}
-          </div>
         )}
       </section>
     );
@@ -263,10 +267,7 @@ export default function Banner() {
         )}
       </AnimatePresence>
 
-      <div className="relative z-10 mt-6 flex items-center justify-center gap-2">
-        <SlideIndicator active={activeSlide === 0} onClick={() => goToSlide(0)} label="Abrir slide de compra" />
-        <SlideIndicator active={activeSlide === 1} onClick={() => goToSlide(1)} label="Abrir slide de solicitação" />
-      </div>
+
     </section>
   );
 }

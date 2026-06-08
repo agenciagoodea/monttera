@@ -1308,19 +1308,56 @@ export default function AdminSettings() {
                                     )}
                                   </div>
                                   
-                                  <div className="flex-1 w-full space-y-2">
-                                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Link do Banner (Opcional)</label>
-                                    <input 
-                                      type="text" 
-                                      className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold"
-                                      placeholder="Ex: /categoria/animais ou https://link.com"
-                                      value={slider.link || ''}
-                                      onChange={(e) => {
-                                        const updated = [...slidersList];
-                                        updated[idx] = { ...updated[idx], link: e.target.value };
-                                        setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
-                                      }}
-                                    />
+                                  <div className="flex-1 w-full space-y-3">
+                                    <div>
+                                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Link do Banner (Opcional)</label>
+                                      <input 
+                                        type="text" 
+                                        className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold"
+                                        placeholder="Ex: /categoria/animais ou https://link.com"
+                                        value={slider.link || ''}
+                                        onChange={(e) => {
+                                          const updated = [...slidersList];
+                                          updated[idx] = { ...updated[idx], link: e.target.value };
+                                          setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updated = [...slidersList];
+                                            updated[idx] = { ...updated[idx], active: updated[idx].active === false ? true : false };
+                                            setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                          }}
+                                          className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ${slider.active !== false ? 'bg-blue-600' : 'bg-slate-300'}`}
+                                        >
+                                          <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-all ${slider.active !== false ? 'left-6' : 'left-0.5'}`} />
+                                        </button>
+                                        <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">
+                                          {slider.active !== false ? 'Ativado' : 'Desativado'}
+                                        </span>
+                                      </div>
+                                      
+                                      <div className="flex-1 w-full flex items-center gap-2">
+                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Exibir em:</label>
+                                        <select
+                                          className="flex-1 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold"
+                                          value={slider.visibility || 'all'}
+                                          onChange={(e) => {
+                                            const updated = [...slidersList];
+                                            updated[idx] = { ...updated[idx], visibility: e.target.value };
+                                            setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                          }}
+                                        >
+                                          <option value="all">Celular e Desktop</option>
+                                          <option value="mobile">Somente Celular</option>
+                                          <option value="desktop">Somente Desktop</option>
+                                        </select>
+                                      </div>
+                                    </div>
                                   </div>
 
                                   <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
@@ -1411,7 +1448,9 @@ export default function AdminSettings() {
                                           const newSlide = {
                                             id: Date.now().toString(),
                                             image_url: data.url,
-                                            link: ''
+                                            link: '',
+                                            active: true,
+                                            visibility: 'all'
                                           };
                                           const updated = [...slidersList, newSlide];
                                           setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
