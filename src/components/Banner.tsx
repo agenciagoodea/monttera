@@ -156,7 +156,7 @@ export default function Banner() {
               type="button"
               onClick={prevSlide}
               aria-label="Slide anterior"
-              className="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition hover:bg-black/55 shadow-lg active:scale-95"
+              className="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition opacity-100 md:opacity-0 md:group-hover/banner:opacity-100 hover:bg-black/55 shadow-lg active:scale-95"
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
@@ -164,7 +164,7 @@ export default function Banner() {
               type="button"
               onClick={nextSlide}
               aria-label="Próximo slide"
-              className="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition hover:bg-black/55 shadow-lg active:scale-95"
+              className="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 z-20 inline-flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/30 backdrop-blur-md text-white border border-white/20 transition opacity-100 md:opacity-0 md:group-hover/banner:opacity-100 hover:bg-black/55 shadow-lg active:scale-95"
             >
               <ArrowRight className="h-5 w-5" />
             </button>
