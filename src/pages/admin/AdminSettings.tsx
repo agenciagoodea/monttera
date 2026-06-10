@@ -1281,26 +1281,43 @@ export default function AdminSettings() {
                   </div>
 
                   {/* Slideshow da Home (1080x500) */}
-                  <div>
-                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Slideshow da Home (1080x500)</h3>
-                    <div className="rounded-[2rem] border border-slate-100 bg-slate-50 p-6 space-y-6">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Gerencie os banners exibidos no topo da página inicial do site. Formato ideal: 1080x500 pixels.
-                      </p>
+                  {(() => {
+                    let slidersList: any[] = [];
+                    try {
+                      slidersList = JSON.parse(settings.home_sliders || '[]');
+                    } catch (e) {
+                      slidersList = [];
+                    }
+                    if (!Array.isArray(slidersList)) slidersList = [];
 
-                      <div className="space-y-4">
-                        {(() => {
-                          let slidersList: any[] = [];
-                          try {
-                            slidersList = JSON.parse(settings.home_sliders || '[]');
-                          } catch (e) {
-                            slidersList = [];
-                          }
-                          if (!Array.isArray(slidersList)) slidersList = [];
+                    const getSlideVisibility = (slide: any) => {
+                      const show_mobile = slide.show_mobile ?? (slide.visibility === 'all' || slide.visibility === 'mobile' || !slide.visibility);
+                      const show_desktop = slide.show_desktop ?? (slide.visibility === 'all' || slide.visibility === 'desktop' || !slide.visibility);
+                      return { show_mobile, show_desktop };
+                    };
 
-                          return (
-                            <>
-                              {slidersList.map((slider, idx) => (
+                    const activeDesktopCount = slidersList.filter(s => s.active !== false && getSlideVisibility(s).show_desktop).length;
+                    const activeMobileCount = slidersList.filter(s => s.active !== false && getSlideVisibility(s).show_mobile).length;
+
+                    return (
+                      <div>
+                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Slideshow da Home (1080x500)</h3>
+                        <div className="rounded-[2rem] border border-slate-100 bg-slate-50 p-6 space-y-6">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              Gerencie os banners exibidos no topo da página inicial do site. Formato ideal: 1080x500 pixels.
+                            </p>
+                            <div className="flex gap-3 text-[9px] font-black uppercase tracking-wider text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shrink-0">
+                              <span>Desktop: <span className={activeDesktopCount >= 6 ? 'text-amber-500 font-black' : 'text-blue-600 font-black'}>{activeDesktopCount}/6</span></span>
+                              <span className="text-slate-300">|</span>
+                              <span>Celular: <span className={activeMobileCount >= 6 ? 'text-amber-500 font-black' : 'text-blue-600 font-black'}>{activeMobileCount}/6</span></span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            {slidersList.map((slider, idx) => {
+                              const { show_desktop, show_mobile } = getSlideVisibility(slider);
+                              return (
                                 <div key={slider.id || idx} className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
                                   <div className="w-32 h-16 bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex items-center justify-center shrink-0">
                                     {slider.image_url ? (
@@ -1331,6 +1348,17 @@ export default function AdminSettings() {
                                           type="button"
                                           onClick={() => {
                                             const updated = [...slidersList];
+                                            const isActivating = updated[idx].active === false;
+                                            if (isActivating) {
+                                              if (show_desktop && activeDesktopCount >= 6) {
+                                                setMessage({ text: 'Não é possível ativar este slide. O limite de 6 slides ativos para Desktop foi atingido.', type: 'error' });
+                                                return;
+                                              }
+                                              if (show_mobile && activeMobileCount >= 6) {
+                                                setMessage({ text: 'Não é possível ativar este slide. O limite de 6 slides ativos para Celular foi atingido.', type: 'error' });
+                                                return;
+                                              }
+                                            }
                                             updated[idx] = { ...updated[idx], active: updated[idx].active === false ? true : false };
                                             setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
                                           }}
@@ -1351,19 +1379,24 @@ export default function AdminSettings() {
                                             type="button"
                                             onClick={() => {
                                               const updated = [...slidersList];
-                                              const currentShowMobile = updated[idx].show_mobile ?? (updated[idx].visibility === 'all' || updated[idx].visibility === 'mobile' || !updated[idx].visibility);
-                                              const currentShowDesktop = updated[idx].show_desktop ?? (updated[idx].visibility === 'all' || updated[idx].visibility === 'desktop' || !updated[idx].visibility);
-                                              
+                                              const isActivatingMobile = !show_mobile;
+                                              const isSlideActive = updated[idx].active !== false;
+
+                                              if (isSlideActive && isActivatingMobile && activeMobileCount >= 6) {
+                                                setMessage({ text: 'Não é possível exibir no Celular. O limite de 6 slides ativos para Celular foi atingido.', type: 'error' });
+                                                return;
+                                              }
+
                                               updated[idx] = {
                                                 ...updated[idx],
                                                 visibility: undefined,
-                                                show_mobile: !currentShowMobile,
-                                                show_desktop: currentShowDesktop
+                                                show_mobile: !show_mobile,
+                                                show_desktop: show_desktop
                                               };
                                               setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
                                             }}
                                             className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 active:scale-95 ${
-                                              (slider.show_mobile ?? (slider.visibility === 'all' || slider.visibility === 'mobile' || !slider.visibility))
+                                              show_mobile
                                                 ? 'bg-blue-50 border-blue-600 text-blue-600 font-bold'
                                                 : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-slate-300'
                                             }`}
@@ -1378,19 +1411,24 @@ export default function AdminSettings() {
                                             type="button"
                                             onClick={() => {
                                               const updated = [...slidersList];
-                                              const currentShowMobile = updated[idx].show_mobile ?? (updated[idx].visibility === 'all' || updated[idx].visibility === 'mobile' || !updated[idx].visibility);
-                                              const currentShowDesktop = updated[idx].show_desktop ?? (updated[idx].visibility === 'all' || updated[idx].visibility === 'desktop' || !updated[idx].visibility);
-                                              
+                                              const isActivatingDesktop = !show_desktop;
+                                              const isSlideActive = updated[idx].active !== false;
+
+                                              if (isSlideActive && isActivatingDesktop && activeDesktopCount >= 6) {
+                                                setMessage({ text: 'Não é possível exibir no Desktop. O limite de 6 slides ativos para Desktop foi atingido.', type: 'error' });
+                                                return;
+                                              }
+
                                               updated[idx] = {
                                                 ...updated[idx],
                                                 visibility: undefined,
-                                                show_mobile: currentShowMobile,
-                                                show_desktop: !currentShowDesktop
+                                                show_mobile: show_mobile,
+                                                show_desktop: !show_desktop
                                               };
                                               setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
                                             }}
                                             className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 active:scale-95 ${
-                                              (slider.show_desktop ?? (slider.visibility === 'all' || slider.visibility === 'desktop' || !slider.visibility))
+                                              show_desktop
                                                 ? 'bg-blue-50 border-blue-600 text-blue-600 font-bold'
                                                 : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-slate-300'
                                             }`}
@@ -1451,75 +1489,93 @@ export default function AdminSettings() {
                                     </button>
                                   </div>
                                 </div>
-                              ))}
+                              );
+                            })}
 
-                              {slidersList.length === 0 && (
-                                <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-white">
-                                  <ImageIcon className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nenhum slide configurado</p>
-                                  <p className="text-[9px] font-semibold text-slate-400 mt-1">O banner azul original será exibido como fallback na Home.</p>
-                                </div>
-                              )}
+                            {slidersList.length === 0 && (
+                              <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-white">
+                                <ImageIcon className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nenhum slide configurado</p>
+                                <p className="text-[9px] font-semibold text-slate-400 mt-1">O banner azul original será exibido como fallback na Home.</p>
+                              </div>
+                            )}
 
-                              {slidersList.length < 6 ? (
-                                <label className="flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 hover:border-blue-300 text-blue-600 rounded-2xl cursor-pointer transition-all active:scale-[0.99]">
-                                  <Plus className="w-4 h-4" />
-                                  <span className="text-[10px] font-black uppercase tracking-widest">Adicionar Novo Slide</span>
-                                  <input 
-                                    type="file" 
-                                    className="hidden" 
-                                    accept="image/*"
-                                    onChange={async (e) => {
-                                      const file = e.target.files?.[0];
-                                      if (!file) return;
+                            {activeDesktopCount < 6 || activeMobileCount < 6 ? (
+                              <label className="flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 hover:border-blue-300 text-blue-600 rounded-2xl cursor-pointer transition-all active:scale-[0.99]">
+                                <Plus className="w-4 h-4" />
+                                <span className="text-[10px] font-black uppercase tracking-widest">Adicionar Novo Slide</span>
+                                <input 
+                                  type="file" 
+                                  className="hidden" 
+                                  accept="image/*"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
 
-                                      try {
-                                        const formData = new FormData();
-                                        formData.append('logo', file);
+                                    try {
+                                      const formData = new FormData();
+                                      formData.append('logo', file);
 
-                                        const res = await fetch('/api/admin/upload-logo', {
-                                          method: 'POST',
-                                          body: formData,
-                                        });
+                                      const res = await fetch('/api/admin/upload-logo', {
+                                        method: 'POST',
+                                        body: formData,
+                                      });
 
-                                        const data = await res.json().catch(() => ({}));
-                                        if (!res.ok) {
-                                          setMessage({ text: data?.error || 'Erro ao subir imagem do slide.', type: 'error' });
-                                          return;
-                                        }
+                                      const data = await res.json().catch(() => ({}));
+                                      if (!res.ok) {
+                                        setMessage({ text: data?.error || 'Erro ao subir imagem do slide.', type: 'error' });
+                                        return;
+                                      }
 
-                                        if (data.url) {
-                                          const newSlide = {
-                                            id: Date.now().toString(),
-                                            image_url: data.url,
-                                            link: '',
-                                            active: true,
-                                            show_mobile: true,
-                                            show_desktop: true
-                                          };
-                                          const updated = [...slidersList, newSlide];
-                                          setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                      if (data.url) {
+                                        const wantDesktop = activeDesktopCount < 6;
+                                        const wantMobile = activeMobileCount < 6;
+                                        const newSlide = {
+                                          id: Date.now().toString(),
+                                          image_url: data.url,
+                                          link: '',
+                                          active: wantDesktop || wantMobile,
+                                          show_mobile: wantMobile,
+                                          show_desktop: wantDesktop
+                                        };
+                                        const updated = [...slidersList, newSlide];
+                                        setSettings({ ...settings, home_sliders: JSON.stringify(updated) });
+                                        
+                                        if (!wantDesktop) {
+                                          setMessage({ text: 'Slide adicionado para Celular. O limite de Desktop foi atingido.', type: 'success' });
+                                        } else if (!wantMobile) {
+                                          setMessage({ text: 'Slide adicionado para Desktop. O limite de Celular foi atingido.', type: 'success' });
+                                        } else {
                                           setMessage({ text: 'Slide adicionado com sucesso! Salve para aplicar.', type: 'success' });
                                         }
-                                      } catch (err) {
-                                        setMessage({ text: 'Erro ao subir imagem do slide.', type: 'error' });
-                                      } finally {
-                                        e.currentTarget.value = '';
                                       }
-                                    }}
-                                  />
-                                </label>
-                              ) : (
-                                <p className="text-[9px] font-bold text-amber-500 uppercase tracking-wider text-center">
-                                  Limite máximo de 6 slides atingido para preservar o desempenho da página.
+                                    } catch (err) {
+                                      setMessage({ text: 'Erro ao subir imagem do slide.', type: 'error' });
+                                    } finally {
+                                      e.currentTarget.value = '';
+                                    }
+                                  }}
+                                />
+                              </label>
+                            ) : null}
+
+                            <div className="space-y-1 text-center">
+                              {activeDesktopCount >= 6 && (
+                                <p className="text-[9px] font-bold text-amber-500 uppercase tracking-wider">
+                                  Limite máximo de 6 slides ativos atingido para Desktop.
                                 </p>
                               )}
-                            </>
-                          );
-                        })()}
+                              {activeMobileCount >= 6 && (
+                                <p className="text-[9px] font-bold text-amber-500 uppercase tracking-wider">
+                                  Limite máximo de 6 slides ativos atingido para Celular.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
 
                   <div>
                     <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Seção Nossa Empresa</h3>
