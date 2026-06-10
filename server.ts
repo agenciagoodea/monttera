@@ -1839,6 +1839,15 @@ async function ensureUserLgpdCompliance(userId: number) {
     return { ok: true };
   }
 
+  // Se o usuario possui login social (Google ou Facebook), ignora o consentimento obrigatorio para nao travar a compra/downloads
+  const isSocialUser = await dbAsync.get(
+    'SELECT id FROM user_social_accounts WHERE user_id = ? LIMIT 1',
+    userId
+  );
+  if (isSocialUser) {
+    return { ok: true };
+  }
+
   const userRow = await dbAsync.get(
     'SELECT id, privacy_reaccept_required FROM users WHERE id = ? LIMIT 1',
     userId,
@@ -3001,7 +3010,7 @@ async function startServer() {
 
     // Consulta o DB para retornar dados atualizados (incluindo avatar_url)
     try {
-      const fresh = await dbAsync.get('SELECT id, name, email, role, avatar_url, email_verified_at, privacy_reaccept_required FROM users WHERE id = ?', Number(decoded.id)) as any;
+      const fresh = await dbAsync.get('SELECT id, name, email, role, avatar_url, email_verified_at, privacy_reaccept_required, auth_provider FROM users WHERE id = ?', Number(decoded.id)) as any;
       if (!fresh) return res.json({ user: null });
       const type = fresh.role === 'admin' ? 'user' : 'customer';
       return res.json({
@@ -5446,6 +5455,35 @@ async function startServer() {
 
     const lgpd = await resolveLgpdSettings();
     if (lgpd.enabled) {
+      if (parseBooleanSetting(checkout_data_processing_accepted, false)) {
+        const requiredVersions = await resolveRequiredPolicyVersions(lgpd);
+        if (lgpd.requireTermsAcceptance) {
+          await recordPolicyAcceptance({
+            userId: Number(freshUser.id),
+            policyType: 'terms',
+            policyVersion: requiredVersions.terms,
+            req,
+            source: 'checkout_auto',
+          });
+        }
+        if (lgpd.requireCookieConsent) {
+          await recordPolicyAcceptance({
+            userId: Number(freshUser.id),
+            policyType: 'cookies',
+            policyVersion: requiredVersions.cookies,
+            req,
+            source: 'checkout_auto',
+          });
+        }
+        await recordPolicyAcceptance({
+          userId: Number(freshUser.id),
+          policyType: 'privacy',
+          policyVersion: requiredVersions.privacy,
+          req,
+          source: 'checkout_auto',
+        });
+      }
+
       const compliance = await ensureUserLgpdCompliance(Number(freshUser.id));
       if (!compliance.ok) {
         return res.status(403).json({
@@ -5531,49 +5569,106 @@ async function startServer() {
         return res.status(400).json({ error: 'CPF do pagador é obrigatório' });
       }
 
-      // Salvar CPF, telefone e nome no cadastro do usuário se estiverem vazios (ex: login social)
-      const userUpdates: string[] = [];
-      const userUpdateParams: any[] = [];
-      if (!freshUser.cpf && payerCpf) {
-        userUpdates.push('cpf = ?');
-        userUpdateParams.push(payerCpf);
-      }
-      if (!freshUser.phone && payerPhone) {
-        userUpdates.push('phone = ?');
-        userUpdateParams.push(payerPhone);
-      }
-      if (!freshUser.first_name && payerFirstName) {
-        userUpdates.push('first_name = ?');
-        userUpdateParams.push(payerFirstName);
-      }
-      if (!freshUser.last_name && payerLastName) {
-        userUpdates.push('last_name = ?');
-        userUpdateParams.push(payerLastName);
-      }
-      if (userUpdates.length > 0) {
-        userUpdateParams.push(freshUser.id);
-        await dbAsync.run(`UPDATE users SET ${userUpdates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, ...userUpdateParams);
-        
-        // Também atualizar na tabela customers se existir
-        const customer = await dbAsync.get('SELECT id FROM customers WHERE user_id = ? LIMIT 1', freshUser.id) as any;
-        if (customer?.id) {
-          const custUpdates: string[] = [];
-          const custUpdateParams: any[] = [];
-          if (payerPhone) {
-            custUpdates.push('phone = ?');
-            custUpdateParams.push(payerPhone);
-          }
-          if (payerCpf) {
-            custUpdates.push('cpf = ?');
-            custUpdateParams.push(payerCpf);
-          }
-          if (custUpdates.length > 0) {
-            custUpdateParams.push(freshUser.id);
-            await dbAsync.run(`UPDATE customers SET ${custUpdates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`, ...custUpdateParams);
-          }
-        } else {
-          await dbAsync.run('INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)', [freshUser.id, payerPhone || null, payerCpf || null]);
-        }
+      // Salvar CPF, telefone, nome e endereco completos no cadastro do usuario
+      await dbAsync.run(`
+        UPDATE users
+        SET
+          first_name = ?,
+          last_name = ?,
+          phone = ?,
+          cpf = ?,
+          name = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [
+        payerFirstName || null,
+        payerLastName || null,
+        payerPhone || null,
+        payerCpf || null,
+        `${payerFirstName} ${payerLastName}`.trim() || null,
+        freshUser.id
+      ]);
+
+      const composedAddress = payerAddress ? `${payerAddress}${payerNumber ? `, ${payerNumber}` : ''}${payerComplement ? ` - ${payerComplement}` : ''}` : null;
+      const customer = await dbAsync.get('SELECT id FROM customers WHERE user_id = ? LIMIT 1', freshUser.id) as any;
+      if (customer?.id) {
+        await dbAsync.run(`
+          UPDATE customers
+          SET
+            phone = ?,
+            cpf = ?,
+            billing_address = ?,
+            billing_city = ?,
+            billing_neighborhood = ?,
+            billing_state = ?,
+            billing_zip = ?,
+            billing_country = ?,
+            shipping_address = ?,
+            shipping_city = ?,
+            shipping_neighborhood = ?,
+            shipping_state = ?,
+            shipping_zip = ?,
+            shipping_country = ?,
+            address = ?,
+            city = ?,
+            state = ?,
+            zip = ?,
+            country = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = ?
+        `, [
+          payerPhone || null,
+          payerCpf || null,
+          composedAddress,
+          payerCity || null,
+          payerNeighborhood || null,
+          payerState || null,
+          payerPostalCode || null,
+          'Brasil',
+          composedAddress,
+          payerCity || null,
+          payerNeighborhood || null,
+          payerState || null,
+          payerPostalCode || null,
+          'Brasil',
+          composedAddress,
+          payerCity || null,
+          payerState || null,
+          payerPostalCode || null,
+          'Brasil',
+          freshUser.id
+        ]);
+      } else {
+        await dbAsync.run(`
+          INSERT INTO customers (
+            user_id, phone, cpf,
+            billing_address, billing_city, billing_neighborhood, billing_state, billing_zip, billing_country,
+            shipping_address, shipping_city, shipping_neighborhood, shipping_state, shipping_zip, shipping_country,
+            address, city, state, zip, country
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          freshUser.id,
+          payerPhone || null,
+          payerCpf || null,
+          composedAddress,
+          payerCity || null,
+          payerNeighborhood || null,
+          payerState || null,
+          payerPostalCode || null,
+          'Brasil',
+          composedAddress,
+          payerCity || null,
+          payerNeighborhood || null,
+          payerState || null,
+          payerPostalCode || null,
+          'Brasil',
+          composedAddress,
+          payerCity || null,
+          payerState || null,
+          payerPostalCode || null,
+          'Brasil'
+        ]);
       }
 
       const orderId = await dbAsync.transaction(async (conn) => {
@@ -5924,6 +6019,7 @@ async function startServer() {
           u.last_name,
           u.email_verified_at,
           u.privacy_reaccept_required,
+          u.auth_provider,
           c.phone,
           c.cpf,
           u.avatar_url,
@@ -10541,7 +10637,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     return Math.round((totalBrl / usdRate) * 100) / 100;
   }
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ PayPal Endpoints Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬ PayPal Endpoints Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬
 
   // POST /api/paypal/create-order
   app.post('/api/paypal/create-order', authenticate, async (req, res) => {

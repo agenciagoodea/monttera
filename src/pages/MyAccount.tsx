@@ -153,6 +153,7 @@ export default function MyAccount() {
   const location = useLocation();
 
   const [activeTab, setActiveTab] = useState<AccountTab>('dashboard');
+  const [reloadTrigger, setReloadTrigger] = useState(0);
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
@@ -490,7 +491,7 @@ export default function MyAccount() {
     return () => {
       mounted = false;
     };
-  }, [authLoading, user, navigate]);
+  }, [authLoading, user, navigate, reloadTrigger]);
 
   const displayName = useMemo(() => {
     if (accountUser?.name) return accountUser.name;
@@ -935,6 +936,7 @@ export default function MyAccount() {
       }
       setPrivacyMessage('Políticas aceitas com sucesso.');
       setAccountMessage('');
+      setReloadTrigger(prev => prev + 1);
       await reloadPrivacyData();
     } catch {
       setPrivacyMessage('Erro ao registrar os aceites de política.');
@@ -1081,10 +1083,10 @@ export default function MyAccount() {
                 <span>{accountMessage}</span>
                 <button
                   type="button"
-                  onClick={() => handleMenuClick('privacy')}
+                  onClick={acceptRequiredPolicies}
                   className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-3 py-2 text-[11px] font-black uppercase tracking-wider text-white"
                 >
-                  Revisar privacidade
+                  Aceitar Políticas de Uso
                 </button>
               </div>
             </div>
@@ -1431,7 +1433,7 @@ export default function MyAccount() {
                   disabled={privacyLoading}
                   className="px-4 py-2 rounded-lg bg-blue-600 text-white text-[11px] font-black uppercase tracking-wider disabled:opacity-60"
                 >
-                  Aceitar políticas obrigatórias
+                  Aceitar Políticas de Uso
                 </button>
                 <button
                   type="button"

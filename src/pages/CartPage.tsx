@@ -27,6 +27,21 @@ function maskCPF(value: string) {
   return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
 }
 
+function maskCEP(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}-${digits.slice(5)}`;
+}
+
+function maskPhone(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 11);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
@@ -77,6 +92,7 @@ export default function CartPage() {
     first_name: '',
     last_name: '',
     cpf: '',
+    phone: '',
     zip_code: '',
     street: '',
     number: '',
@@ -95,6 +111,7 @@ export default function CartPage() {
     last_name: false,
     email: false,
     cpf: false,
+    phone: false,
     zip_code: false,
     street: false,
     number: false,
@@ -121,7 +138,8 @@ export default function CartPage() {
 
   const requireCheckoutConsent =
     String(settings.lgpd_enabled || 'true') === 'true' &&
-    String(settings.lgpd_require_checkout_consent || 'true') === 'true';
+    String(settings.lgpd_require_checkout_consent || 'true') === 'true' &&
+    !user?.auth_provider;
 
   useEffect(() => {
     const errors: string[] = [];
@@ -129,6 +147,7 @@ export default function CartPage() {
     if (payer.last_name.trim().length < 2) errors.push('Sobrenome inválido');
     if (!isValidEmail(payer.email)) errors.push('E-mail inválido');
     if (!isValidCPF(payer.cpf)) errors.push('CPF inválido');
+    if (payer.phone.replace(/\D/g, '').length < 10) errors.push('Telefone inválido');
     setPayerErrors(errors);
   }, [payer]);
 
@@ -137,6 +156,7 @@ export default function CartPage() {
     last_name: payer.last_name.trim().length < 2 ? 'Sobrenome inválido' : '',
     email: !isValidEmail(payer.email) ? 'E-mail inválido' : '',
     cpf: !isValidCPF(payer.cpf) ? 'CPF inválido' : '',
+    phone: payer.phone.replace(/\D/g, '').length < 10 ? 'Telefone inválido' : '',
   };
 
   // Atualiza refs sincronamente a cada render (não causa re-render)
@@ -200,6 +220,7 @@ export default function CartPage() {
               first_name: String(profile.first_name || firstName || prev.first_name),
               last_name: String(profile.last_name || rest.join(' ') || prev.last_name),
               cpf: String(profile.cpf || prev.cpf),
+              phone: String(profile.phone || prev.phone),
               zip_code: String(profile.billing_zip || profile.zip || prev.zip_code),
               street: parsed.address || prev.street,
               number: parsed.number || prev.number,
@@ -333,6 +354,14 @@ export default function CartPage() {
                     first_name: firstName || currentPayer.first_name,
                     last_name: lastName || currentPayer.last_name,
                     cpf: cardPayerCpf,
+                    phone: currentPayer.phone,
+                    city: currentPayer.city,
+                    state: currentPayer.state,
+                    postal_code: currentPayer.zip_code,
+                    address: currentPayer.street,
+                    number: currentPayer.number,
+                    neighborhood: currentPayer.neighborhood,
+                    complement: currentPayer.complement,
                   },
                   card_token: cardData?.token,
                   installments: currentMethod === 'debit_card' ? 1 : Number(cardData?.installments || 1),
@@ -660,6 +689,17 @@ export default function CartPage() {
                   className={`${inputClassName('cpf')} w-full`}
                 />
               </div>
+              <div className="space-y-1 col-span-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Telefone / WhatsApp</label>
+                <input
+                  type="text"
+                  placeholder="(00) 00000-0000"
+                  value={payer.phone}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, phone: maskPhone(e.target.value) }))}
+                  onBlur={() => setPayerTouched((prev) => ({ ...prev, phone: true }))}
+                  className={`${inputClassName('phone')} w-full`}
+                />
+              </div>
             </div>
 
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight pt-4 border-t border-slate-50">Endereço de Faturamento</h3>
@@ -671,7 +711,7 @@ export default function CartPage() {
                   type="text"
                   placeholder="00000-000"
                   value={payer.zip_code}
-                  onChange={(e) => setPayer((prev) => ({ ...prev, zip_code: maskCPF(e.target.value.replace(/\D/g, '').slice(0, 8).replace(/^(\d{5})(\d)/, '$1-$2')) }))}
+                  onChange={(e) => setPayer((prev) => ({ ...prev, zip_code: maskCEP(e.target.value) }))}
                   onBlur={handleCepBlur}
                   className={`${inputClassName('zip_code')} w-full`}
                 />
