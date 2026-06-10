@@ -5580,7 +5580,7 @@ async function startServer() {
           name = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `, [
+      `, ...[
         payerFirstName || null,
         payerLastName || null,
         payerPhone || null,
@@ -5616,7 +5616,7 @@ async function startServer() {
             country = ?,
             updated_at = CURRENT_TIMESTAMP
           WHERE user_id = ?
-        `, [
+        `, ...[
           payerPhone || null,
           payerCpf || null,
           composedAddress,
@@ -5647,7 +5647,7 @@ async function startServer() {
             address, city, state, zip, country
           )
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
+        `, ...[
           freshUser.id,
           payerPhone || null,
           payerCpf || null,
