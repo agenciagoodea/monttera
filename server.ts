@@ -5646,7 +5646,7 @@ async function startServer() {
             shipping_address, shipping_city, shipping_neighborhood, shipping_state, shipping_zip, shipping_country,
             address, city, state, zip, country
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, ...[
           freshUser.id,
           payerPhone || null,
