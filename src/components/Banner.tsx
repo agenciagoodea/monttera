@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowLeft, ArrowRight, CheckCircle2, ShoppingCart, Sparkles, UserPlus } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import MatrixRequestForm from './MatrixRequestForm';
 import { useAppData } from '../contexts/AppDataContext';
 
@@ -88,6 +88,32 @@ export default function Banner() {
 
   const [activeSlide, setActiveSlide] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const [touchEnd, setTouchEnd] = useState<number | null>(null);
+
+  const minSwipeDistance = 50;
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+    if (isLeftSwipe) {
+      nextSlide();
+    } else if (isRightSwipe) {
+      prevSlide();
+    }
+  };
+
   const totalSlides = sliders.length > 0 ? sliders.length : 2;
 
   useEffect(() => {
@@ -113,6 +139,9 @@ export default function Banner() {
       <section
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
         className="relative w-full aspect-[1080/500] overflow-hidden rounded-[2.35rem] border border-slate-200 bg-slate-100 shadow-[0_16px_40px_-16px_rgba(0,0,0,0.1)] group/banner"
       >
         <AnimatePresence mode="wait">
@@ -150,7 +179,7 @@ export default function Banner() {
           })}
         </AnimatePresence>
 
-        {totalSlides > 1 && (
+        {totalSlides > 1 && !isMobile && (
           <>
             <button
               type="button"
@@ -178,6 +207,9 @@ export default function Banner() {
     <section
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
       className="relative w-full overflow-hidden rounded-[2.35rem] border border-white/20 bg-gradient-to-br from-[#1e58dc] via-[#2868ec] to-[#08aeea] p-6 md:p-10 shadow-[0_32px_80px_-32px_rgba(8,85,220,0.75)]"
     >
       <div className="pointer-events-none absolute -left-20 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
@@ -189,24 +221,26 @@ export default function Banner() {
           {activeSlide === 0 ? 'Guia rápido' : 'Solicitação personalizada'}
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={prevSlide}
-            aria-label="Slide anterior"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={nextSlide}
-            aria-label="Próximo slide"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
-          >
-            <ArrowRight className="h-4 w-4" />
-          </button>
-        </div>
+        {!isMobile && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={prevSlide}
+              aria-label="Slide anterior"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={nextSlide}
+              aria-label="Próximo slide"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/25 bg-white/10 text-white transition hover:bg-white/20"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       <AnimatePresence mode="wait">
