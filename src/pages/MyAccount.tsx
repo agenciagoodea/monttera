@@ -1575,80 +1575,7 @@ export default function MyAccount() {
               )}
             </div>
           )}
-        </section>
-      </section>
 
-      {/* Modal de Crop/Zoom da Foto */}
-      {showCropModal && selectedImage && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-300">
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-black text-slate-900">Ajustar Foto de Perfil</h3>
-              <button onClick={() => setShowCropModal(false)} className="text-slate-400 hover:text-slate-600">
-                <LogOut className="w-5 h-5 rotate-180" />
-              </button>
-            </div>
-            
-            <div className="p-6 space-y-6">
-              {/* Área de visualização */}
-              <div 
-                className="relative aspect-square w-full bg-slate-100 rounded-2xl overflow-hidden cursor-move touch-none"
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-              >
-                <div 
-                  className="absolute inset-0 flex items-center justify-center transition-transform duration-75"
-                  style={{
-                    transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
-                  }}
-                >
-                  <img src={selectedImage} alt="Preview" className="max-w-none w-full h-auto" draggable={false} />
-                </div>
-                {/* Overlay de Círculo Guia */}
-                <div className="absolute inset-0 border-[40px] border-black/40 pointer-events-none">
-                   <div className="w-full h-full border-2 border-white/50 rounded-full shadow-[0_0_0_9999px_rgba(0,0,0,0.2)]"></div>
-                </div>
-              </div>
-
-              {/* Slider de Zoom */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-400">
-                  <span>Zoom</span>
-                  <span>{Math.round(zoom * 100)}%</span>
-                </div>
-                <input 
-                  type="range" 
-                  min="0.5" 
-                  max="3" 
-                  step="0.1" 
-                  value={zoom} 
-                  onChange={(e) => setZoom(parseFloat(e.target.value))}
-                  className="w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer accent-blue-600"
-                />
-              </div>
-
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setShowCropModal(false)}
-                  className="flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  onClick={confirmAvatarUpload}
-                  disabled={uploadingAvatar}
-                  className="flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  {uploadingAvatar ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  Salvar Foto
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
           {/* ── ABA: CONTAS CONECTADAS ─────────────────────────────────────── */}
           {activeTab === 'social' && (
             <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 md:p-8 shadow-sm">
@@ -1788,6 +1715,80 @@ export default function MyAccount() {
               </button>
             </div>
           )}
+        </section>
+      </section>
+
+      {/* Modal de Crop/Zoom da Foto */}
+      {showCropModal && selectedImage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-300">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-lg font-black text-slate-900">Ajustar Foto de Perfil</h3>
+              <button onClick={() => setShowCropModal(false)} className="text-slate-400 hover:text-slate-600">
+                <LogOut className="w-5 h-5 rotate-180" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              {/* Área de visualização */}
+              <div 
+                className="relative aspect-square w-full bg-slate-100 rounded-2xl overflow-hidden cursor-move touch-none"
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+              >
+                <div 
+                  className="absolute inset-0 flex items-center justify-center transition-transform duration-75"
+                  style={{
+                    transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
+                  }}
+                >
+                  <img src={selectedImage} alt="Preview" className="max-w-none w-full h-auto" draggable={false} />
+                </div>
+                {/* Overlay de Círculo Guia */}
+                <div className="absolute inset-0 border-[40px] border-black/40 pointer-events-none">
+                   <div className="w-full h-full border-2 border-white/50 rounded-full shadow-[0_0_0_9999px_rgba(0,0,0,0.2)]"></div>
+                </div>
+              </div>
+
+              {/* Slider de Zoom */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-400">
+                  <span>Zoom</span>
+                  <span>{Math.round(zoom * 100)}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0.5" 
+                  max="3" 
+                  step="0.1" 
+                  value={zoom} 
+                  onChange={(e) => setZoom(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-slate-100 rounded-full appearance-none cursor-pointer accent-blue-600"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowCropModal(false)}
+                  className="flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={confirmAvatarUpload}
+                  disabled={uploadingAvatar}
+                  className="flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  {uploadingAvatar ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Salvar Foto
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

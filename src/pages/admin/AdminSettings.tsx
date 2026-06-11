@@ -2352,7 +2352,7 @@ export default function AdminSettings() {
                                     {lgpdConsentKeyLabel(c.consent_key)}
                                   </p>
                                   <p className="text-sm font-black text-slate-800 mt-1">
-                                    {c.user_name || 'Usuário removido'} <span className="text-slate-500">({c.user_email || 'sem e-mail'})</span>
+                                    {c.user_name || 'Usuário removido'} <span className="text-slate-500">({c.user_email || (c.user_id ? `ID: ${c.user_id}` : 'sem e-mail')})</span>
                                   </p>
                                   <p className="text-xs text-slate-500 mt-1">
                                     Versão: {c.policy_version || '-'} • Origem: {lgpdConsentSourceLabel(c.source)} • Atualizado: {c.updated_at}
@@ -2633,7 +2633,7 @@ export default function AdminSettings() {
                           {lgpdLogs.map((l) => (
                             <div key={l.id} className="rounded-2xl border border-slate-200 p-4">
                               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{lgpdLogEventLabel(l.event_type)} • {lgpdLogActionLabel(l.action)}</p>
-                              <p className="text-sm font-black text-slate-800 mt-1">{l.user_name || 'Sistema'} <span className="text-slate-500 font-bold">({l.user_email || 'sem e-mail'})</span></p>
+                              <p className="text-sm font-black text-slate-800 mt-1">{l.user_name || (l.user_id ? 'Usuário Excluído' : 'Sistema')} <span className="text-slate-500 font-bold">({l.user_email || (l.user_id ? `ID: ${l.user_id}` : 'sem e-mail')})</span></p>
                               <p className="text-xs text-slate-500 mt-1">IP: {l.ip || '-'} • {l.created_at}</p>
                             </div>
                           ))}
