@@ -10,7 +10,7 @@ interface SocialLoginButtonsProps {
 }
 
 /**
- * Botões de login social reutilizáveis (Google + Facebook).
+ * Botões de login social reutilizáveis (Google + Facebook + Apple).
  * Redireciona o usuário para as rotas OAuth do backend.
  * Carrega dinamicamente a ativação de cada provedor a partir do banco de dados.
  */
@@ -19,8 +19,8 @@ export default function SocialLoginButtons({
   dividerText = 'ou continue com',
   className = '',
 }: SocialLoginButtonsProps) {
-  const [loading, setLoading] = useState<'google' | 'facebook' | null>(null);
-  const [config, setConfig] = useState<{ google_enabled: boolean; facebook_enabled: boolean } | null>(null);
+  const [loading, setLoading] = useState<'google' | 'facebook' | 'apple' | null>(null);
+  const [config, setConfig] = useState<{ google_enabled: boolean; facebook_enabled: boolean; apple_enabled: boolean } | null>(null);
 
   useEffect(() => {
     fetch('/api/auth/social/config')
@@ -29,11 +29,11 @@ export default function SocialLoginButtons({
       .catch(err => {
         console.error('Erro ao carregar configurações de login social:', err);
         // Fallback em caso de erro de rede
-        setConfig({ google_enabled: false, facebook_enabled: false });
+        setConfig({ google_enabled: false, facebook_enabled: false, apple_enabled: false });
       });
   }, []);
 
-  const handleSocialLogin = (provider: 'google' | 'facebook') => {
+  const handleSocialLogin = (provider: 'google' | 'facebook' | 'apple') => {
     setLoading(provider);
     const params = new URLSearchParams({ redirect: redirectTo });
     // Redireciona para o backend que inicia o fluxo OAuth
@@ -46,14 +46,15 @@ export default function SocialLoginButtons({
       <div className={`w-full animate-pulse space-y-3 ${className}`}>
         <div className="h-12 bg-slate-100 rounded-2xl w-full" />
         <div className="h-12 bg-slate-100 rounded-2xl w-full" />
+        <div className="h-12 bg-slate-100 rounded-2xl w-full" />
       </div>
     );
   }
 
-  const { google_enabled, facebook_enabled } = config;
+  const { google_enabled, facebook_enabled, apple_enabled } = config;
 
   // Se nenhum dos provedores estiver ativado no painel admin, não renderiza nada
-  if (!google_enabled && !facebook_enabled) {
+  if (!google_enabled && !facebook_enabled && !apple_enabled) {
     return null;
   }
 
@@ -72,7 +73,7 @@ export default function SocialLoginButtons({
             text-slate-700 font-bold text-sm
             py-3.5 px-4 rounded-2xl
             shadow-sm hover:shadow-md
-            hover:border-slate-300 hover:bg-slate-50
+            hover:border-slate-300 hover:bg-slate-55
             active:scale-[0.98]
             transition-all duration-200
             disabled:opacity-60 disabled:pointer-events-none
@@ -126,6 +127,7 @@ export default function SocialLoginButtons({
             active:scale-[0.98]
             transition-all duration-200
             disabled:opacity-60 disabled:pointer-events-none
+            mb-3
           "
           aria-label="Continuar com Facebook"
         >
@@ -143,8 +145,42 @@ export default function SocialLoginButtons({
         </button>
       )}
 
+      {/* Botão Apple (iCloud) */}
+      {apple_enabled && (
+        <button
+          id={`btn-social-login-apple`}
+          type="button"
+          disabled={loading !== null}
+          onClick={() => handleSocialLogin('apple')}
+          className="
+            w-full flex items-center justify-center gap-3
+            bg-black border border-black
+            text-white font-bold text-sm
+            py-3.5 px-4 rounded-2xl
+            shadow-sm hover:shadow-md
+            hover:bg-zinc-900 hover:border-zinc-900
+            active:scale-[0.98]
+            transition-all duration-200
+            disabled:opacity-60 disabled:pointer-events-none
+          "
+          aria-label="Continuar com a Apple"
+        >
+          {loading === 'apple' ? (
+            <svg className="w-5 h-5 animate-spin text-white/60" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 4.17c.66-.81 1.11-1.93.99-3.06-1 .04-2.21.67-2.93 1.49-.62.69-1.16 1.84-1.01 2.96 1.1.09 2.23-.58 2.95-1.39z" />
+            </svg>
+          )}
+          <span>{loading === 'apple' ? 'Aguarde...' : 'Continuar com a Apple'}</span>
+        </button>
+      )}
+
       {/* Divisor */}
-      {(google_enabled || facebook_enabled) && (
+      {(google_enabled || facebook_enabled || apple_enabled) && (
         <div className="flex items-center gap-3 my-6">
           <div className="flex-1 h-px bg-slate-100" />
           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">

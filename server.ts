@@ -23,6 +23,7 @@ import axios from 'axios';
 import { fileURLToPath } from 'url';
 import AdmZip from 'adm-zip';
 import sharp from 'sharp';
+import jwt from 'jsonwebtoken';
 
 // Shim para __dirname funcionar tanto em CommonJS (compilado) quanto em ESM (dev/tsx)
 const _dirname = typeof __dirname !== 'undefined'
@@ -3164,17 +3165,194 @@ async function startServer() {
     return { enabled, appId, appSecret };
   }
 
+  async function getAppleCredentials() {
+    const enabledSetting = await getSettingValue('apple_enabled');
+    const enabled = enabledSetting ? (enabledSetting === 'true') : Boolean(process.env.APPLE_CLIENT_ID);
+    const clientId = (await getSettingValue('apple_client_id')) || process.env.APPLE_CLIENT_ID || null;
+    const teamId = (await getSettingValue('apple_team_id')) || process.env.APPLE_TEAM_ID || null;
+    const keyId = (await getSettingValue('apple_key_id')) || process.env.APPLE_KEY_ID || null;
+    const privateKey = (await getSettingValue('apple_private_key')) || process.env.APPLE_PRIVATE_KEY || null;
+    return { enabled, clientId, teamId, keyId, privateKey };
+  }
+
   app.get('/api/auth/social/config', async (req, res) => {
     try {
       const google = await getGoogleCredentials();
       const facebook = await getFacebookCredentials();
+      const apple = await getAppleCredentials();
       return res.json({
         google_enabled: google.enabled && Boolean(google.clientId),
-        facebook_enabled: facebook.enabled && Boolean(facebook.appId)
+        facebook_enabled: facebook.enabled && Boolean(facebook.appId),
+        apple_enabled: apple.enabled && Boolean(apple.clientId)
       });
     } catch (error) {
       console.error('Social config fetch error:', error);
       return res.status(500).json({ error: 'Erro ao buscar configuração social' });
+    }
+  });
+
+  // ── Apple Sign In (iCloud) ──────────────────────────────────────────────────
+
+  app.get('/api/auth/apple', async (req, res) => {
+    try {
+      const { enabled, clientId } = await getAppleCredentials();
+      if (!enabled || !clientId) {
+        return res.status(503).json({ error: 'Login com Apple não está ativo ou configurado.' });
+      }
+      const state = crypto.randomBytes(32).toString('hex');
+      const redirectAfter = String(req.query.redirect || '');
+      const statePayload = { state, redirect: redirectAfter.startsWith('/') ? redirectAfter : '/minha-conta' };
+      const stateToken = jwt.sign(statePayload, process.env.JWT_SECRET || 'DgtBordados_8f92b4xP$LqM1#vK9!zX2p@W5', { expiresIn: '10m' });
+
+      res.cookie(SOCIAL_STATE_COOKIE, stateToken, getSocialStateCookieOptions(req));
+
+      const callbackUrl = process.env.APPLE_CALLBACK_URL || buildFrontendUrl('/api/auth/apple/callback');
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: callbackUrl,
+        response_type: 'code id_token',
+        response_mode: 'form_post',
+        scope: 'name email',
+        state: stateToken,
+      });
+      return res.redirect(`https://appleid.apple.com/auth/authorize?${params.toString()}`);
+    } catch (error) {
+      console.error('Apple OAuth init error:', error);
+      return res.status(500).json({ error: 'Erro interno ao iniciar login com Apple.' });
+    }
+  });
+
+  app.post('/api/auth/apple/callback', async (req, res) => {
+    try {
+      const { enabled, clientId, teamId, keyId, privateKey } = await getAppleCredentials();
+      if (!enabled || !clientId || !teamId || !keyId || !privateKey) {
+        return res.redirect(buildFrontendUrl('/login?social_error=not_configured'));
+      }
+
+      const code = String(req.body.code || '');
+      const idToken = String(req.body.id_token || '');
+      const stateToken = String(req.body.state || '');
+      const oauthError = String(req.body.error || '');
+
+      if (oauthError) {
+        return res.redirect(buildFrontendUrl(`/login?social_error=${encodeURIComponent(oauthError)}`));
+      }
+
+      if (!stateToken) {
+        return res.redirect(buildFrontendUrl('/login?social_error=csrf_invalid'));
+      }
+
+      let stateData: { redirect: string } = { redirect: '/minha-conta' };
+      try {
+        const decodedState = jwt.verify(stateToken, process.env.JWT_SECRET || 'DgtBordados_8f92b4xP$LqM1#vK9!zX2p@W5') as any;
+        if (decodedState && decodedState.redirect) {
+          stateData.redirect = decodedState.redirect;
+        }
+      } catch (err) {
+        return res.redirect(buildFrontendUrl('/login?social_error=csrf_invalid'));
+      }
+
+      res.clearCookie(SOCIAL_STATE_COOKIE);
+
+      if (!code && !idToken) {
+        return res.redirect(buildFrontendUrl('/login?social_error=no_code'));
+      }
+
+      const iat = Math.floor(Date.now() / 1000);
+      const formattedKey = privateKey.replace(/\\n/g, '\n');
+      const clientSecret = jwt.sign({}, formattedKey, {
+        algorithm: 'ES256',
+        keyid: keyId,
+        issuer: teamId,
+        audience: 'https://appleid.apple.com',
+        subject: clientId,
+        expiresIn: '1h',
+      });
+
+      let finalIdToken = idToken;
+      if (code) {
+        try {
+          const callbackUrl = process.env.APPLE_CALLBACK_URL || buildFrontendUrl('/api/auth/apple/callback');
+          const tokenRes = await axios.post('https://appleid.apple.com/auth/token', new URLSearchParams({
+             code,
+             client_id: clientId,
+             client_secret: clientSecret,
+             redirect_uri: callbackUrl,
+             grant_type: 'authorization_code',
+          }).toString(), {
+             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+             timeout: 10000,
+          });
+
+          if (tokenRes.data?.id_token) {
+            finalIdToken = tokenRes.data.id_token;
+          }
+        } catch (tokenErr: any) {
+          console.error('Apple Token Exchange error:', tokenErr?.response?.data || tokenErr?.message || tokenErr);
+          if (!finalIdToken) {
+            return res.redirect(buildFrontendUrl('/login?social_error=token_invalid'));
+          }
+        }
+      }
+
+      if (!finalIdToken) {
+        return res.redirect(buildFrontendUrl('/login?social_error=no_token'));
+      }
+
+      const [, payloadB64] = finalIdToken.split('.');
+      let applePayload: any = {};
+      try {
+        applePayload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+      } catch {
+        return res.redirect(buildFrontendUrl('/login?social_error=token_invalid'));
+      }
+
+      const validIss = ['https://appleid.apple.com', 'appleid.apple.com'].includes(String(applePayload.iss || ''));
+      const validAud = applePayload.aud === clientId;
+      const notExpired = Number(applePayload.exp || 0) > Math.floor(Date.now() / 1000);
+      if (!validIss || !validAud || !notExpired) {
+        return res.redirect(buildFrontendUrl('/login?social_error=token_invalid'));
+      }
+
+      const providerId = String(applePayload.sub || '');
+      const email = applePayload.email ? String(applePayload.email).trim().toLowerCase() : null;
+
+      let name = 'Usuário Apple';
+      if (req.body.user) {
+        try {
+          const userObj = JSON.parse(String(req.body.user));
+          if (userObj.name) {
+            const { firstName, lastName } = userObj.name;
+            name = `${firstName || ''} ${lastName || ''}`.trim() || name;
+          }
+        } catch { /* ignorar */ }
+      }
+
+      if (!email) {
+        const tempState = crypto.randomBytes(16).toString('hex');
+        return res.redirect(buildFrontendUrl(
+          `/login?social_email_required=apple&fb_name=${encodeURIComponent(name)}&fb_id=${providerId}&fb_avatar=&fb_state=${tempState}`
+        ));
+      }
+
+      const result = await findOrCreateSocialUser({
+        provider: 'apple',
+        providerId,
+        email,
+        name,
+        avatar: null,
+      });
+
+      if (!result) {
+        return res.redirect(buildFrontendUrl('/login?social_error=no_email&provider=apple'));
+      }
+
+      await issueSocialAuthToken(result.userId, req, res);
+      const redirectTo = stateData.redirect || '/minha-conta';
+      return res.redirect(buildFrontendUrl(`${redirectTo}${redirectTo.includes('?') ? '&' : '?'}social_login=success`));
+    } catch (error: any) {
+      console.error('Apple OAuth callback error:', error?.message || error);
+      return res.redirect(buildFrontendUrl('/login?social_error=server_error'));
     }
   });
 
@@ -3441,7 +3619,7 @@ async function startServer() {
   app.post('/api/auth/social/link', authenticate, async (req, res) => {
     try {
       const { provider } = req.body || {};
-      if (!provider || !['google', 'facebook'].includes(String(provider))) {
+      if (!provider || !['google', 'facebook', 'apple'].includes(String(provider))) {
         return res.status(400).json({ error: 'Provedor inválido' });
       }
       const redirectUrl = `/api/auth/${provider}?redirect=${encodeURIComponent('/minha-conta')}`;
@@ -3456,7 +3634,7 @@ async function startServer() {
     try {
       const userId = Number((req as any).user?.id);
       const { provider } = req.body || {};
-      if (!provider || !['google', 'facebook'].includes(String(provider))) {
+      if (!provider || !['google', 'facebook', 'apple'].includes(String(provider))) {
         return res.status(400).json({ error: 'Provedor inválido' });
       }
 
