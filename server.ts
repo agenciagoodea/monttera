@@ -5431,10 +5431,10 @@ async function startServer() {
   });
 
   app.post('/api/admin/categories', authenticate, isAdmin, async (req, res) => {
-    const { name, slug: rawSlug, parent_id, sort_order, status, description } = req.body;
+    const { name, slug: rawSlug, parent_id, sort_order, status, description, icon } = req.body;
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome da categoria ÃƒÆ’Ã‚Â© obrigatÃƒÆ’Ã‚Â³rio' });
+      return res.status(400).json({ error: 'Nome da categoria é obrigatório' });
     }
 
     const safeName = normalizedName.slice(0, 255);
@@ -5444,7 +5444,7 @@ async function startServer() {
 
     try {
       const existingCategory = await dbAsync.get(`
-        SELECT id, name, slug, parent_id, sort_order, status, description
+        SELECT id, name, slug, parent_id, sort_order, status, description, icon
         FROM product_categories
         WHERE slug = ?
       `, slug) as any;
@@ -5454,21 +5454,24 @@ async function startServer() {
       }
 
       const result = await dbAsync.run(`
-        INSERT IGNORE INTO product_categories (name, slug, parent_id, sort_order, status, description)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `, safeName, slug, parent_id || null, sort_order || 0, status || 'active', description || null);
+        INSERT IGNORE INTO product_categories (name, slug, parent_id, sort_order, status, description, icon)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `, safeName, slug, parent_id || null, sort_order || 0, status || 'active', description || null, icon || null);
 
       const createdCategory = await dbAsync.get(`
-        SELECT id, name, slug, parent_id, sort_order, status, description
+        SELECT id, name, slug, parent_id, sort_order, status, description, icon
         FROM product_categories
         WHERE id = ?
       `, result.lastInsertRowid) as any;
+
+      // Invalida o cache de categorias públicas
+      apiCache.delete('public_categories');
 
       return res.status(200).json(createdCategory);
     } catch (error: any) {
       if (error?.message?.includes('UNIQUE constraint failed') || error?.code === 'ER_DUP_ENTRY') {
         const existingCategory = await dbAsync.get(`
-          SELECT id, name, slug, parent_id, sort_order, status, description
+          SELECT id, name, slug, parent_id, sort_order, status, description, icon
           FROM product_categories
           WHERE slug = ?
         `, slug) as any;
@@ -5481,10 +5484,10 @@ async function startServer() {
   });
 
   app.put('/api/admin/categories/:id', authenticate, isAdmin, async (req, res) => {
-    const { name, slug: rawSlug, parent_id, sort_order, status, description } = req.body;
+    const { name, slug: rawSlug, parent_id, sort_order, status, description, icon } = req.body;
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName) {
-      return res.status(400).json({ error: 'Nome da categoria ÃƒÆ’Ã‚Â© obrigatÃƒÆ’Ã‚Â³rio' });
+      return res.status(400).json({ error: 'Nome da categoria é obrigatório' });
     }
 
     const safeName = normalizedName.slice(0, 255);
@@ -5495,7 +5498,7 @@ async function startServer() {
 
     try {
       const existingCategory = await dbAsync.get(`
-        SELECT id, name, slug, parent_id, sort_order, status, description
+        SELECT id, name, slug, parent_id, sort_order, status, description, icon
         FROM product_categories
         WHERE slug = ? AND id != ?
       `, slug, categoryId) as any;
@@ -5506,25 +5509,28 @@ async function startServer() {
 
       await dbAsync.run(`
         UPDATE product_categories 
-        SET name = ?, slug = ?, parent_id = ?, sort_order = ?, status = ?, description = ?
+        SET name = ?, slug = ?, parent_id = ?, sort_order = ?, status = ?, description = ?, icon = ?
         WHERE id = ?
-      `, safeName, slug, parent_id || null, sort_order || 0, status || 'active', description || null, categoryId);
+      `, safeName, slug, parent_id || null, sort_order || 0, status || 'active', description || null, icon || null, categoryId);
 
       const updatedCategory = await dbAsync.get(`
-        SELECT id, name, slug, parent_id, sort_order, status, description
+        SELECT id, name, slug, parent_id, sort_order, status, description, icon
         FROM product_categories
         WHERE id = ?
       `, categoryId) as any;
 
       if (!updatedCategory) {
-        return res.status(404).json({ error: 'Categoria nÃƒÆ’Ã‚Â£o encontrada' });
+        return res.status(404).json({ error: 'Categoria não encontrada' });
       }
+
+      // Invalida o cache de categorias públicas
+      apiCache.delete('public_categories');
 
       return res.status(200).json(updatedCategory);
     } catch (error: any) {
       if (error?.message?.includes('UNIQUE constraint failed') || error?.code === 'ER_DUP_ENTRY') {
         const existingCategory = await dbAsync.get(`
-          SELECT id, name, slug, parent_id, sort_order, status, description
+          SELECT id, name, slug, parent_id, sort_order, status, description, icon
           FROM product_categories
           WHERE slug = ?
         `, slug) as any;
@@ -5539,6 +5545,7 @@ async function startServer() {
   app.delete('/api/admin/categories/:id', authenticate, isAdmin, async (req, res) => {
     try {
       await dbAsync.run('DELETE FROM product_categories WHERE id = ?', req.params.id);
+      apiCache.delete('public_categories');
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: 'Erro ao excluir categoria' });
@@ -5552,12 +5559,13 @@ async function startServer() {
       .filter((value: number) => Number.isInteger(value) && value > 0);
 
     if (normalizedIds.length === 0) {
-      return res.status(400).json({ error: 'Nenhuma categoria vÃƒÆ’Ã‚Â¡lida foi informada' });
+      return res.status(400).json({ error: 'Nenhuma categoria válida foi informada' });
     }
 
     try {
       const placeholders = normalizedIds.map(() => '?').join(', ');
       const result = await dbAsync.run(`DELETE FROM product_categories WHERE id IN (${placeholders})`, ...normalizedIds);
+      apiCache.delete('public_categories');
       res.json({ success: true, deleted: result.changes });
     } catch (error) {
       res.status(500).json({ error: 'Erro ao excluir categorias em massa' });
@@ -11925,8 +11933,8 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
               name: order.customer_name || 'Cliente',
               order_id: order.id,
               order_total: `R$ ${order.total.toFixed(2)}`,
-              pix_code: 'O cÃƒÂ³digo PIX foi enviado no momento do checkout. Acesse sua conta para ver os detalhes.',
-              expires_at: '24 horas apÃƒÂ³s a compra',
+              pix_code: 'O código PIX foi enviado no momento do checkout. Acesse sua conta para ver os detalhes.',
+              expires_at: '24 horas após a compra',
             }
           }).catch(err => console.error(`[Cron] Failed to send reminder for order #${order.id}:`, err));
         }

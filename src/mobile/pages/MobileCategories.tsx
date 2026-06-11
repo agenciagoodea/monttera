@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppData } from '../../contexts/AppDataContext';
 import { useNavigate } from 'react-router-dom';
 import { Folder, ArrowRight } from 'lucide-react';
+import LucideIcon from '../../components/LucideIcon';
 
 export default function MobileCategories() {
   const { categories, loadingCategories } = useAppData();
@@ -54,9 +55,13 @@ export default function MobileCategories() {
               onClick={() => handleCategoryClick(cat.slug)}
               className="bg-white border border-slate-100 hover:border-blue-100 rounded-[2rem] p-5 shadow-[0_4px_16px_rgba(0,0,0,0.01)] hover:shadow-md transition-all duration-300 flex flex-col items-center text-center gap-3 active:scale-[0.97]"
             >
-              {/* Ícone de Pasta Grande e Elegante */}
+              {/* Ícone de Pasta Grande e Elegante ou Ícone Customizado */}
               <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner">
-                <Folder className="w-7 h-7 fill-blue-500/20" />
+                {cat.icon ? (
+                  <LucideIcon name={cat.icon} className="w-7 h-7 text-blue-600" />
+                ) : (
+                  <Folder className="w-7 h-7 fill-blue-500/20" />
+                )}
               </div>
               
               <div className="flex flex-col gap-1 w-full mt-1">

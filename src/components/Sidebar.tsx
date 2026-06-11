@@ -1,6 +1,7 @@
 import { Category } from '../types';
 import { Plus, Minus } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
+import LucideIcon from './LucideIcon';
 
 interface SidebarProps {
   categories: Category[];
@@ -69,7 +70,10 @@ export default function Sidebar({ categories, selectedCategory, onSelectCategory
                         : 'text-slate-600 hover:bg-slate-50 border border-transparent'
                     }`}
                   >
-                    <span className={hasChildren ? 'text-blue-900' : ''}>{category.name}</span>
+                    <span className={`flex items-center gap-2.5 ${hasChildren ? 'text-blue-900' : ''}`}>
+                      {category.icon && <LucideIcon name={category.icon} className="w-4 h-4 text-blue-600 flex-shrink-0" />}
+                      <span>{category.name}</span>
+                    </span>
                     {isParentSelected && !hasChildren && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
                   </button>
                   
