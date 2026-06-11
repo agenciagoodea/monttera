@@ -523,7 +523,28 @@ export default function AdminCategoryList() {
                           { name: 'School', label: 'Escolar' },
                           { name: 'Flower2', label: 'Florais' },
                           { name: 'Palette', label: 'Artes' },
-                          { name: 'Gift', label: 'Presentes' }
+                          { name: 'Gift', label: 'Presentes' },
+                          { name: 'Bug', label: 'Insetos' },
+                          { name: 'ShieldAlert', label: 'Policial / Militar' },
+                          { name: 'Compass', label: 'Texas / Maçonaria' },
+                          { name: 'Landmark', label: 'Governo / Institutos' },
+                          { name: 'Briefcase', label: 'Profissões / Empresas' },
+                          { name: 'GraduationCap', label: 'Faculdade / Univ.' },
+                          { name: 'Shield', label: 'Brasões' },
+                          { name: 'Fuel', label: 'Autos / Logomarcas' },
+                          { name: 'Wrench', label: 'Escola Técnica' },
+                          { name: 'Users', label: 'Personagens' },
+                          { name: 'Building2', label: 'Instituições' },
+                          { name: 'Church', label: 'Religiosos' },
+                          { name: 'Apple', label: 'Frutas' },
+                          { name: 'Flower', label: 'Decorativos' },
+                          { name: 'Fish', label: 'Peixe e Pesca' },
+                          { name: 'Trophy', label: 'Times e Clubes' },
+                          { name: 'Crown', label: 'Marcas Famosas' },
+                          { name: 'Notebook', label: 'Material Escolar' },
+                          { name: 'Tractor', label: 'Tratores' },
+                          { name: 'Map', label: 'Brasil / Mapas' },
+                          { name: 'Bike', label: 'Motos' }
                         ].map((sug) => (
                           <button
                             key={sug.name}
