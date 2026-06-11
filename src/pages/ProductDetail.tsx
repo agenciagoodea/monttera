@@ -287,8 +287,11 @@ export default function ProductDetail() {
       name: product.name,
       image: [buildAbsoluteUrl(imageForSeo)],
       description: productDescription,
-      sku: product.sku || String(product.id),
-      brand: product.brand ? { '@type': 'Brand', name: product.brand } : undefined,
+      sku: product.sku && String(product.sku).trim().length >= 3 ? String(product.sku).trim() : `DB-${String(product.id).padStart(5, '0')}`,
+      brand: {
+        '@type': 'Brand',
+        name: product.brand || settings.site_name || 'Digital Bordados',
+      },
       offers: {
         '@type': 'Offer',
         url: offerUrl,
@@ -296,6 +299,42 @@ export default function ProductDetail() {
         price: Number(product.sale_price || product.price || 0),
         availability: 'https://schema.org/InStock',
         itemCondition: 'https://schema.org/NewCondition',
+        priceValidUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        hasMerchantReturnPolicy: {
+          '@type': 'MerchantReturnPolicy',
+          applicableCountry: 'BR',
+          returnPolicyCategory: 'https://schema.org/MerchantReturnNotPermitted',
+          merchantReturnDays: 0,
+          returnMethod: 'https://schema.org/ReturnByMail',
+          returnFees: 'https://schema.org/FreeReturn',
+        },
+        shippingDetails: {
+          '@type': 'OfferShippingDetails',
+          shippingDestination: {
+            '@type': 'DefinedRegion',
+            addressCountry: 'BR',
+          },
+          shippingRate: {
+            '@type': 'MonetaryAmount',
+            value: 0,
+            currency: 'BRL',
+          },
+          deliveryTime: {
+            '@type': 'ShippingDeliveryTime',
+            handlingTime: {
+              '@type': 'QuantitativeValue',
+              minValue: 0,
+              maxValue: 0,
+              unitCode: 'DAY',
+            },
+            transitTime: {
+              '@type': 'QuantitativeValue',
+              minValue: 0,
+              maxValue: 0,
+              unitCode: 'DAY',
+            },
+          },
+        },
       },
     };
 
