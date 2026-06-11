@@ -80,5 +80,12 @@ export async function initDb() {
   // Campos de provider e último login
   await dbAsync.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(50) NULL DEFAULT 'local'`);
   await dbAsync.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at DATETIME NULL`);
+
+  // Adicionar coluna icon em product_categories se não existir
+  try {
+    await dbAsync.query(`ALTER TABLE product_categories ADD COLUMN icon VARCHAR(255) NULL`);
+  } catch (_) {
+    // Silencia se a coluna já existir ou a operação falhar
+  }
 }
 

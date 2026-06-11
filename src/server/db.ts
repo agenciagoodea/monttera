@@ -215,6 +215,7 @@ export function initDb() {
       parent_id INT NULL,
       image TEXT,
       description TEXT,
+      icon VARCHAR(255) NULL,
       status VARCHAR(50) DEFAULT 'active',
       sort_order INT DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
