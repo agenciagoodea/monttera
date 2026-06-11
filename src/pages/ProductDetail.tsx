@@ -336,6 +336,30 @@ export default function ProductDetail() {
           },
         },
       },
+      ...(reviews.length > 0 && avgRating > 0 ? {
+        aggregateRating: {
+          '@type': 'AggregateRating',
+          ratingValue: Number(avgRating.toFixed(1)),
+          reviewCount: reviews.length,
+          bestRating: 5,
+          worstRating: 1,
+        },
+        review: reviews.map((r) => ({
+          '@type': 'Review',
+          author: {
+            '@type': 'Person',
+            name: r.user_name || 'Cliente',
+          },
+          datePublished: new Date(r.created_at).toISOString().split('T')[0],
+          reviewBody: r.comment || 'Excelente matriz!',
+          reviewRating: {
+            '@type': 'Rating',
+            ratingValue: r.rating,
+            bestRating: 5,
+            worstRating: 1,
+          },
+        })),
+      } : {}),
     };
 
     const shouldRenderProductSchema = String(settings.seo_enable_product_schema || 'true').toLowerCase() === 'true';
@@ -367,7 +391,7 @@ export default function ProductDetail() {
       keywords: String(resolveProductTemplate(product.seo_keywords || product.tags || settings.seo_keywords || '')),
       jsonLd: combinedSchemas.length > 0 ? combinedSchemas : undefined,
     });
-  }, [product, displayedImage, settings, siteDisplayName]);
+  }, [product, displayedImage, settings, siteDisplayName, reviews, avgRating]);
 
   if (loading) {
     return (
