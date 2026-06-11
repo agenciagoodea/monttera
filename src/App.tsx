@@ -15,6 +15,7 @@ import Header from './components/Header';
 import Footer from './components/Footer';
 import CookieConsentBanner from './components/CookieConsentBanner';
 import MobileRedirectBanner from './components/MobileRedirectBanner';
+import WhatsAppWidget from './components/WhatsAppWidget';
 
 // Lazy load pages
 const Home = lazy(() => import('./pages/Home'));
@@ -330,6 +331,7 @@ export default function App() {
                             <Route path="*" element={<Navigate to="/" replace />} />
                           </Routes>
                         </Suspense>
+                        <WhatsAppWidget />
                       </MobileLayout>
                     } />
                   </Routes>
@@ -421,6 +423,7 @@ export default function App() {
               </div>
               <CookieConsentBanner />
               <MobileRedirectBanner />
+              <WhatsAppWidget />
               <Footer />
             </div>
           } />
