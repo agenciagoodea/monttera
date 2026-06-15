@@ -1,10 +1,11 @@
 const { Client } = require('ssh2');
+
 const SSH_HOST = '177.136.229.86';
 const SSH_USER = 'digitalbordados';
 const SSH_PASS = 'Commandtvidebula1593*#';
 const SSH_PORT = 22;
 
-const command = 'pm2 logs digitalbordados --lines 150 --raw --nostream';
+const command = 'mysql -u digitalbordados_novo -prG8phG4YKqxjBEeFmGfw -D digitalbordados_novo -e "SELECT id, name, slug, icon FROM product_categories WHERE parent_id IS NULL"';
 
 const conn = new Client();
 conn.on('ready', () => {
@@ -12,12 +13,14 @@ conn.on('ready', () => {
     if (err) throw err;
     let output = '';
     stream.on('close', (code, signal) => {
+      console.log('\n--- CATEGORIES ---');
       console.log(output);
+      console.log('------------------');
       conn.end();
     }).on('data', (data) => {
       output += data.toString();
     }).stderr.on('data', (data) => {
-      process.stderr.write(data.toString());
+      console.log('STDERR: ' + data);
     });
   });
 }).connect({

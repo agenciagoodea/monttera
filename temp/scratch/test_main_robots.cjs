@@ -1,23 +1,27 @@
 const { Client } = require('ssh2');
+const conn = new Client();
+
 const SSH_HOST = '177.136.229.86';
 const SSH_USER = 'digitalbordados';
 const SSH_PASS = 'Commandtvidebula1593*#';
 const SSH_PORT = 22;
 
-const command = 'pm2 logs digitalbordados --lines 150 --raw --nostream';
+const commands = [
+  'echo "=== Testing https://digitalbordados.com.br/robots.txt ==="',
+  'curl -Iv https://digitalbordados.com.br/robots.txt || true',
+  'echo "=== Testing https://www.digitalbordados.com.br/robots.txt ==="',
+  'curl -Iv https://www.digitalbordados.com.br/robots.txt || true'
+].join(' && ');
 
-const conn = new Client();
 conn.on('ready', () => {
-  conn.exec(command, (err, stream) => {
+  conn.exec(commands, (err, stream) => {
     if (err) throw err;
-    let output = '';
     stream.on('close', (code, signal) => {
-      console.log(output);
       conn.end();
     }).on('data', (data) => {
-      output += data.toString();
+      process.stdout.write(data);
     }).stderr.on('data', (data) => {
-      process.stderr.write(data.toString());
+      process.stderr.write(data);
     });
   });
 }).connect({

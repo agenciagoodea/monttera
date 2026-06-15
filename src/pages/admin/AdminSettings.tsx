@@ -34,6 +34,7 @@ import {
   ArrowDown,
   Smartphone,
   Monitor,
+  MessageSquare,
 } from 'lucide-react';
 import AdminEmailTemplates from './AdminEmailTemplates';
 import AdminEmailLogs from './AdminEmailLogs';
@@ -117,6 +118,7 @@ export default function AdminSettings() {
   const [backupActionId, setBackupActionId] = useState<number | null>(null);
 
   const [settings, setSettings] = useState({
+    social_proof_enabled: 'true',
     // Home/Info
     site_name: 'Digital Bordados',
     site_description: 'Excelência em Matrizes de Bordado',
@@ -3771,6 +3773,47 @@ APPLE_CALLBACK_URL="${window.location.origin}/api/auth/apple/callback"`}
                           </pre>
                         </li>
                       </ol>
+                    </div>
+                  </div>
+
+                  {/* Prova Social Config Card */}
+                  <div className="rounded-[2rem] border border-slate-200 p-6 md:p-8 space-y-6">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                      <div>
+                        <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                          <MessageSquare className="w-5 h-5 shrink-0 text-blue-500" />
+                          Prova Social de Compra
+                        </h3>
+                        <p className="text-xs text-slate-500 font-medium mt-1">Exiba notificações flutuantes simulando compras recentes de matrizes para incentivar vendas.</p>
+                      </div>
+                      
+                      {/* Enable Switch */}
+                      <button
+                        type="button"
+                        onClick={() => setSettings({ ...settings, social_proof_enabled: settings.social_proof_enabled === 'true' ? 'false' : 'true' })}
+                        className={`px-5 py-2.5 rounded-2xl border flex items-center gap-3 transition-all ${
+                          settings.social_proof_enabled === 'true' 
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-bold text-xs' 
+                            : 'bg-slate-50 border-slate-200 text-slate-500 font-bold text-xs'
+                        }`}
+                      >
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                          settings.social_proof_enabled === 'true' ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300'
+                        }`}>
+                          {settings.social_proof_enabled === 'true' && <Check className="w-2.5 h-2.5" />}
+                        </span>
+                        Notificações {settings.social_proof_enabled === 'true' ? 'Ativadas' : 'Desativadas'}
+                      </button>
+                    </div>
+
+                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-5 space-y-2">
+                      <p className="text-xs text-slate-600 font-semibold leading-relaxed">
+                        Ao ativar este recurso, um widget discreto e moderno aparecerá no canto inferior esquerdo da tela pública, exibindo notificações periódicas a cada 8 a 15 segundos sobre novos produtos adicionados à loja.
+                      </p>
+                      <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                        Status atual: {settings.social_proof_enabled === 'true' ? 'Visível para os clientes' : 'Oculto na loja'}
+                      </div>
                     </div>
                   </div>
 

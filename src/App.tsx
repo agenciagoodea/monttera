@@ -16,6 +16,7 @@ import Footer from './components/Footer';
 import CookieConsentBanner from './components/CookieConsentBanner';
 import MobileRedirectBanner from './components/MobileRedirectBanner';
 import WhatsAppWidget from './components/WhatsAppWidget';
+import SocialProofNotification from './components/SocialProofNotification';
 
 // Lazy load pages
 const Home = lazy(() => import('./pages/Home'));
@@ -332,6 +333,7 @@ export default function App() {
                           </Routes>
                         </Suspense>
                         <WhatsAppWidget />
+                        <SocialProofNotification />
                       </MobileLayout>
                     } />
                   </Routes>
@@ -424,6 +426,7 @@ export default function App() {
               <CookieConsentBanner />
               <MobileRedirectBanner />
               <WhatsAppWidget />
+              <SocialProofNotification />
               <Footer />
             </div>
           } />

@@ -4,7 +4,7 @@ const SSH_USER = 'digitalbordados';
 const SSH_PASS = 'Commandtvidebula1593*#';
 const SSH_PORT = 22;
 
-const command = 'pm2 logs digitalbordados --lines 150 --raw --nostream';
+const command = 'pm2 logs digitalbordados --lines 100 --raw --nostream';
 
 const conn = new Client();
 conn.on('ready', () => {

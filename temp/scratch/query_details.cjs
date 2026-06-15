@@ -4,11 +4,19 @@ const SSH_USER = 'digitalbordados';
 const SSH_PASS = 'Commandtvidebula1593*#';
 const SSH_PORT = 22;
 
-const command = 'pm2 logs digitalbordados --lines 150 --raw --nostream';
+const mysqlCmd = (sql) => {
+  return `mysql -u digitalbordados_novo -prG8phG4YKqxjBEeFmGfw -h 127.0.0.1 -P 3306 -D digitalbordados_novo -t -e "${sql}"`;
+};
+
+const sql = `
+  SELECT id, user_id, actor_user_id, event_type, action, details_json, created_at 
+  FROM lgpd_logs 
+  WHERE user_id IN (1314, 1309);
+`;
 
 const conn = new Client();
 conn.on('ready', () => {
-  conn.exec(command, (err, stream) => {
+  conn.exec(mysqlCmd(sql), (err, stream) => {
     if (err) throw err;
     let output = '';
     stream.on('close', (code, signal) => {

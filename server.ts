@@ -2036,6 +2036,7 @@ async function buildUserLgpdExportPayload(userId: number) {
 
 async function initSettings() {
   const defaultSettings = {
+    social_proof_enabled: 'true',
     site_name: 'Digital Bordados',
     site_description: 'ExcelÃƒÆ’Ã‚Âªncia em Matrizes de Bordado',
     logo_url: '',
@@ -2388,6 +2389,27 @@ async function startServer() {
     },
     credentials: true,
   }));
+
+  // Servir uploads antes dos cookies e do middleware de CSRF para evitar cookies nas imagens e permitir cache eficiente
+  app.use('/uploads', express.static('public/uploads', {
+    index: false,
+    dotfiles: 'deny',
+    setHeaders: (res) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; media-src 'self';");
+      // Cache longo para otimização de SEO e Cloudflare (1 ano)
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    },
+  }));
+  const wpUploadsRoots = getWpUploadsRoots();
+  wpUploadsRoots.forEach((root) => {
+    app.use('/wp-content/uploads', express.static(root, {
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    }));
+  });
+
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ extended: true, limit: '15mb' }));
   app.use(cookieParser());
@@ -2448,18 +2470,7 @@ async function startServer() {
     }
     next();
   });
-  app.use('/uploads', express.static('public/uploads', {
-    index: false,
-    dotfiles: 'deny',
-    setHeaders: (res) => {
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; media-src 'self';");
-    },
-  }));
-  const wpUploadsRoots = getWpUploadsRoots();
-  wpUploadsRoots.forEach((root) => {
-    app.use('/wp-content/uploads', express.static(root));
-  });
+  // Servidores estáticos de uploads movidos para o topo da cadeia de middlewares
 
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (err instanceof multer.MulterError) {
@@ -10143,7 +10154,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const cached = apiCache.get('public_settings');
       if (cached) return res.json(cached);
 
-      const rows = await dbAsync.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "redirect_to_checkout_after_add_to_cart", "brand_logos", "home_sliders", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies", "top_bar_message", "top_bar_enabled", "home_company_enabled", "home_company_title", "home_company_subtitle", "home_company_text", "home_company_mission", "home_company_vision", "home_company_values", "home_company_image_main", "home_company_image_secondary", "home_company_cta_text", "home_company_cta_link", "home_company_bg_color", "home_company_text_color", "home_company_icons", "seo_meta_title", "seo_meta_description", "seo_keywords", "seo_robots_index", "seo_robots_follow", "seo_og_image", "favicon_url", "seo_twitter_card", "seo_facebook_url", "seo_instagram_url", "seo_twitter_url", "seo_organization_name", "seo_organization_logo", "seo_enable_product_schema", "seo_enable_organization_schema", "seo_enable_breadcrumb_schema", "seo_sitemap_enabled", "seo_robots_custom_rules")') as any[];
+      const rows = await dbAsync.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "redirect_to_checkout_after_add_to_cart", "brand_logos", "home_sliders", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies", "top_bar_message", "top_bar_enabled", "home_company_enabled", "home_company_title", "home_company_subtitle", "home_company_text", "home_company_mission", "home_company_vision", "home_company_values", "home_company_image_main", "home_company_image_secondary", "home_company_cta_text", "home_company_cta_link", "home_company_bg_color", "home_company_text_color", "home_company_icons", "seo_meta_title", "seo_meta_description", "seo_keywords", "seo_robots_index", "seo_robots_follow", "seo_og_image", "favicon_url", "seo_twitter_card", "seo_facebook_url", "seo_instagram_url", "seo_twitter_url", "seo_organization_name", "seo_organization_logo", "seo_enable_product_schema", "seo_enable_organization_schema", "seo_enable_breadcrumb_schema", "seo_sitemap_enabled", "seo_robots_custom_rules", "social_proof_enabled")') as any[];
       const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
       apiCache.set('public_settings', settings, 600); // 10 minutes cache
       res.json(settings);
@@ -11633,20 +11644,19 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       return res.status(500).type('text/plain').send('Asset delivery error');
     });
 
-    app.use(
-      express.static(distPath, {
-        fallthrough: true,
-        index: false
-      }),
-    );
+
 
     app.get('*', async (req, res, next) => {
+      console.log('[Prerender Debug] Rota * acionada:', { method: req.method, path: req.path, accept: req.headers.accept, ua: req.headers['user-agent'] });
       if (req.method !== 'GET') return next();
       if (req.path.startsWith('/api/')) return next();
       if (req.path.startsWith('/assets/')) return next();
 
       const accept = String(req.headers.accept || '');
-      if (!accept.includes('text/html')) return next();
+      const ua = String(req.headers['user-agent'] || '');
+      const isBot = /bot|crawl|spider|facebook|whatsapp|telegram|twitter|slack|meta-externalagent/i.test(ua);
+
+      if (!accept.includes('text/html') && !isBot) return next();
 
       try {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -11670,7 +11680,8 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           'seo_meta_description',
           'seo_og_image',
           'seo_organization_name',
-          'seo_organization_logo'
+          'seo_organization_logo',
+          'favicon_url'
         ]);
 
         const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
@@ -11681,13 +11692,21 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
         let title = s.seo_meta_title || siteName;
         let description = s.seo_meta_description || s.site_description || 'Matrizes de Bordados Computadorizados';
-        let canonicalUrl = `${appUrl}${req.path}`;
+        
+        let reqPath = req.path;
+        if (reqPath === '/index.html') {
+          reqPath = '/';
+        }
+        let canonicalUrl = `${appUrl}${reqPath === '/' ? '' : reqPath}`;
         if (req.query.category) {
           canonicalUrl += `?category=${encodeURIComponent(String(req.query.category))}`;
         }
         let ogImage = s.seo_og_image || s.logo_url || '/logo.png';
         let absoluteOgImage = ogImage.startsWith('http') ? ogImage : `${appUrl}${ogImage.startsWith('/') ? '' : '/'}${ogImage}`;
         let ogType = 'website';
+        
+        let faviconUrl = s.favicon_url || '/favicon.ico';
+        let absoluteFavicon = faviconUrl.startsWith('http') ? faviconUrl : `${appUrl}${faviconUrl.startsWith('/') ? '' : '/'}${faviconUrl}`;
         
         const jsonLdGraph: any[] = [];
 
@@ -11738,14 +11757,51 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           `, productSlug) as any;
 
           if (product) {
-            title = `${product.name} | ${siteName}`;
+            const siteDisplayName = String(s.site_name || 'Digital Bordados').trim();
+            const resolveProductTemplate = (value: unknown) => {
+              const template = String(value ?? '');
+              const map: Record<string, string> = {
+                'site_nome': siteDisplayName,
+                'site_name': siteDisplayName,
+                'nome_produto': String(product.name || '').trim(),
+                'slug_produto': String(product.slug || '').trim(),
+                'preco': String(product.price ?? '').trim(),
+                'preco_promocional': String(product.sale_price ?? product.price ?? '').trim(),
+                'pontos': String(product.stitch_count ?? '').trim(),
+                'cores': String(product.colors || '').trim(),
+                'categoria_principal': String(product.category_name || '').trim(),
+              };
+              return template.replace(/{{\s*([a-z_]+)\s*}}/gi, (match, key) => {
+                const cleanKey = key.toLowerCase();
+                return map[cleanKey] ?? match;
+              });
+            };
+
+            const cleanHtmlDescription = (text: unknown) => {
+              if (!text) return '';
+              return String(text)
+                .replace(/&lt;.*?&gt;/gi, '')
+                .replace(/<[^>]*>/g, '')
+                .replace(/&nbsp;/gi, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            };
+
+            title = String(resolveProductTemplate(product.seo_title || `${product.name} | ${siteName}`)).trim();
             
             // Gerar descrição dinamicamente se estiver muito curta ou vazia
-            let rawDesc = product.description ? String(product.description).replace(/<[^>]*>/g, '').trim() : '';
-            if (rawDesc.length < 10) {
+            const rawDesc = cleanHtmlDescription(product.description);
+            const shortDesc = cleanHtmlDescription(product.short_description);
+            const seoDesc = cleanHtmlDescription(product.seo_description);
+
+            const resolvedDesc = String(resolveProductTemplate(seoDesc || shortDesc || rawDesc || `Compre ${product.name} na ${siteName}.`))
+              .replace(/\s+/g, ' ')
+              .trim();
+
+            if (resolvedDesc.length < 10) {
               description = `Compre a matriz de bordado ${product.name} na Digital Bordados. Arquivo digital de alta qualidade pronto para download imediato em PES, JEF, DST, XXX, EXP.`;
             } else {
-              description = rawDesc.slice(0, 160);
+              description = resolvedDesc.slice(0, 160);
             }
 
             canonicalUrl = `${appUrl}/produto/${product.slug}`;
@@ -11872,6 +11928,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   <title>${xmlEscape(title)}</title>
   <meta name="description" content="${xmlEscape(description)}" />
   <link rel="canonical" href="${xmlEscape(canonicalUrl)}" />
+  <link rel="icon" href="${xmlEscape(absoluteFavicon)}" />
   <meta property="og:title" content="${xmlEscape(title)}" />
   <meta property="og:description" content="${xmlEscape(description)}" />
   <meta property="og:url" content="${xmlEscape(canonicalUrl)}" />
@@ -11888,8 +11945,22 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   })}</script>
 `;
 
-        // Substitui a tag title original e insere as tags SEO + JSON-LD no head
-        html = html.replace(/<title>.*?<\/title>/i, '');
+        // Limpa as tags originais do head que serão reinjetadas de forma dinâmica para evitar duplicidades
+        html = html.replace(/<title>.*?<\/title>/gi, '');
+        html = html.replace(/<meta[^>]*name=["']description["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*property=["']og:title["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*property=["']og:description["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*property=["']og:image["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*property=["']og:type["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*property=["']og:site_name["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*name=["']twitter:card["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*name=["']twitter:title["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*name=["']twitter:description["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*name=["']twitter:image["'][^>]*>/gi, '');
+        html = html.replace(/<link[^>]*rel=["']canonical["'][^>]*>/gi, '');
+        html = html.replace(/<link[^>]*rel=["'](?:shortcut )?icon["'][^>]*>/gi, '');
+
+        // Insere as novas tags SEO + JSON-LD no head
         html = html.replace('</head>', `${seoTags}\n</head>`);
 
         return res.type('text/html').send(html);
@@ -11898,6 +11969,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         return res.sendFile(indexFilePath);
       }
     });
+
+    app.use(
+      express.static(distPath, {
+        fallthrough: true,
+        index: false
+      }),
+    );
   }
 
   // Cron Job: Pending PIX Reminder (Runs every 30 minutes)
