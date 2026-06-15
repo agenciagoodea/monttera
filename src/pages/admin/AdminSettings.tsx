@@ -119,6 +119,7 @@ export default function AdminSettings() {
 
   const [settings, setSettings] = useState({
     social_proof_enabled: 'true',
+    social_proof_delay: '10',
     // Home/Info
     site_name: 'Digital Bordados',
     site_description: 'Excelência em Matrizes de Bordado',
@@ -3806,12 +3807,29 @@ APPLE_CALLBACK_URL="${window.location.origin}/api/auth/apple/callback"`}
                       </button>
                     </div>
 
-                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-5 space-y-2">
+                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-5 space-y-4">
                       <p className="text-xs text-slate-600 font-semibold leading-relaxed">
-                        Ao ativar este recurso, um widget discreto e moderno aparecerá no canto inferior esquerdo da tela pública, exibindo notificações periódicas a cada 8 a 15 segundos sobre novos produtos adicionados à loja.
+                        Ao ativar este recurso, um widget discreto e moderno aparecerá no canto inferior esquerdo da tela pública, exibindo notificações periódicas de forma aleatória com base nos novos produtos adicionados à loja.
                       </p>
-                      <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-200/60">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Tempo de Alternância (segundos)</label>
+                          <input
+                            type="number"
+                            min="5"
+                            max="300"
+                            placeholder="Padrão: 10"
+                            className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-xs font-bold"
+                            value={settings.social_proof_delay || '10'}
+                            onChange={e => setSettings({ ...settings, social_proof_delay: e.target.value })}
+                          />
+                          <p className="text-[9px] text-slate-400 font-semibold">Define o intervalo entre as notificações (mínimo 5s).</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-wider pt-2 border-t border-slate-200/30">
+                        <span className={`w-2 h-2 rounded-full ${settings.social_proof_enabled === 'true' ? 'bg-emerald-500 animate-ping' : 'bg-slate-300'}`}></span>
                         Status atual: {settings.social_proof_enabled === 'true' ? 'Visível para os clientes' : 'Oculto na loja'}
                       </div>
                     </div>

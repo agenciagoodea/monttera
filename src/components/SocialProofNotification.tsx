@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation, Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppData } from '../contexts/AppDataContext';
 import { X, ShoppingBag } from 'lucide-react';
 import { normalizePublicMediaUrl } from '../lib/utils';
@@ -32,6 +32,7 @@ interface SimpleProduct {
 
 export default function SocialProofNotification() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { settings } = useAppData();
   
   const [products, setProducts] = useState<SimpleProduct[]>([]);
@@ -87,6 +88,11 @@ export default function SocialProofNotification() {
     let displayTimeout: NodeJS.Timeout;
     let nextNotificationTimeout: NodeJS.Timeout;
 
+    // Tempo de delay configurado pelo admin (mínimo de 5s, padrão 10s)
+    const delaySeconds = Math.max(5, Number(settings.social_proof_delay || 10));
+    // Duração que a notificação fica visível (no máximo 5.5s ou metade do delay configurado para dar tempo de sumir)
+    const displayTime = Math.min(5500, (delaySeconds * 1000) / 2);
+
     function triggerNext() {
       // Seleciona um produto aleatório da lista de recentes
       const randomProduct = products[Math.floor(Math.random() * products.length)];
@@ -103,14 +109,13 @@ export default function SocialProofNotification() {
       
       setIsVisible(true);
 
-      // A notificação fica exibida por 5.5 segundos
+      // A notificação fica exibida pela duração calculada
       displayTimeout = setTimeout(() => {
         setIsVisible(false);
-      }, 5500);
+      }, displayTime);
 
-      // Agenda a próxima notificação para ocorrer entre 8 e 15 segundos depois
-      const nextDelay = Math.floor(Math.random() * (15000 - 8000 + 1)) + 8000;
-      nextNotificationTimeout = setTimeout(triggerNext, nextDelay + 5500); // soma o tempo de exibição
+      // Agenda a próxima notificação usando o intervalo de alternância total configurado
+      nextNotificationTimeout = setTimeout(triggerNext, delaySeconds * 1000);
     }
 
     // Dispara a primeira notificação após 4 segundos do carregamento inicial
@@ -121,7 +126,7 @@ export default function SocialProofNotification() {
       clearTimeout(displayTimeout);
       clearTimeout(nextNotificationTimeout);
     };
-  }, [products]);
+  }, [products, settings.social_proof_delay]);
 
   // Se não houver notificação ativa ou produtos, não renderiza nada na DOM
   if (!currentNotification) {
@@ -131,11 +136,21 @@ export default function SocialProofNotification() {
   const { product, buyerName, timeAgo } = currentNotification;
   const productImageUrl = product.image ? normalizePublicMediaUrl(product.image) : '';
 
-  const handleClose = (e: React.MouseEvent) => {
+  // Handler para fechar o widget (com suporte a clique e toque em mobile)
+  const handleClose = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsVisible(false);
     setHasDismissed(true);
+  };
+
+  // Handler para navegar programaticamente se clicar no card
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Se o clique se originou ou passou pelo botão de fechar, ignora a navegação
+    if ((e.target as HTMLElement).closest('.close-btn')) {
+      return;
+    }
+    navigate(`/produto/${product.slug}`);
   };
 
   return (
@@ -185,17 +200,11 @@ export default function SocialProofNotification() {
       `}</style>
 
       <div 
-        className={`social-proof-card rounded-[20px] p-3 flex items-center gap-3 relative transition-all duration-300 ${
+        onClick={handleCardClick}
+        className={`social-proof-card rounded-[20px] p-3 flex items-center gap-3 relative transition-all duration-300 cursor-pointer ${
           isVisible ? 'social-proof-enter' : 'social-proof-exit'
         }`}
       >
-        {/* Link que cobre o card inteiro para levar ao produto */}
-        <Link 
-          to={`/produto/${product.slug}`} 
-          className="absolute inset-0 rounded-[20px] z-10"
-          aria-label={`Ver produto ${product.name}`}
-        />
-
         {/* Imagem em Miniatura do Produto */}
         <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl overflow-hidden bg-slate-50 border border-slate-100 flex-shrink-0 relative flex items-center justify-center">
           {productImageUrl ? (
@@ -223,7 +232,7 @@ export default function SocialProofNotification() {
         </div>
 
         {/* Informações da Notificação */}
-        <div className="flex-1 min-w-0 pr-4">
+        <div className="flex-1 min-w-0 pr-6">
           <p className="text-[11px] md:text-xs text-slate-500 font-semibold leading-none mb-1">
             <span className="font-extrabold text-slate-800">{buyerName}</span> comprou uma matriz
           </p>
@@ -235,13 +244,15 @@ export default function SocialProofNotification() {
           </span>
         </div>
 
-        {/* Botão de Fechar */}
+        {/* Botão de Fechar com maior área de toque e classe identificadora */}
         <button 
           onClick={handleClose}
-          className="absolute top-2 right-2 text-slate-400 hover:text-slate-600 rounded-full p-1 hover:bg-slate-100/50 transition-colors z-20 pointer-events-auto"
+          onTouchStart={handleClose}
+          className="absolute top-1 right-1 md:top-2 md:right-2 text-slate-400 hover:text-slate-600 rounded-full p-2.5 hover:bg-slate-100/50 transition-colors z-30 pointer-events-auto close-btn"
+          aria-label="Fechar notificação"
           title="Fechar"
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-4 h-4 md:w-3.5 md:h-3.5" />
         </button>
       </div>
     </div>
