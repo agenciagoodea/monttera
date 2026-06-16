@@ -45,18 +45,14 @@ export default function SocialProofNotification() {
   const [isVisible, setIsVisible] = useState(false);
   const [hasDismissed, setHasDismissed] = useState(false);
 
-  // 1. Verificações de exibição inicial
-  const isEnabled = String(settings.social_proof_enabled || 'true') === 'true';
-  const isAdminRoute = location.pathname.startsWith('/admin');
-  const isLoginRoute = location.pathname === '/login';
-
-  // Se o recurso estiver desativado ou estiver em rotas administrativas/login, não renderiza nada
-  if (!isEnabled || isAdminRoute || isLoginRoute || hasDismissed) {
-    return null;
-  }
-
-  // 2. Carregar produtos recentes da API
+  // 1. Carregar produtos recentes da API (Executado incondicionalmente no topo)
   useEffect(() => {
+    // Evita carregar se o recurso estiver nativamente desativado ou for rota administrativa
+    const isEnabled = String(settings.social_proof_enabled || 'true') === 'true';
+    const isAdminRoute = location.pathname.startsWith('/admin');
+    const isLoginRoute = location.pathname === '/login';
+    if (!isEnabled || isAdminRoute || isLoginRoute) return;
+
     async function loadRecentProducts() {
       try {
         const res = await fetch('/api/products?limit=50');
@@ -78,11 +74,14 @@ export default function SocialProofNotification() {
     }
 
     loadRecentProducts();
-  }, []);
+  }, [settings.social_proof_enabled, location.pathname]);
 
-  // 3. Controlar o ciclo de exibição das notificações
+  // 2. Controlar o ciclo de exibição das notificações (Executado incondicionalmente)
   useEffect(() => {
-    if (products.length === 0) return;
+    const isEnabled = String(settings.social_proof_enabled || 'true') === 'true';
+    const isAdminRoute = location.pathname.startsWith('/admin');
+    const isLoginRoute = location.pathname === '/login';
+    if (products.length === 0 || !isEnabled || isAdminRoute || isLoginRoute || hasDismissed) return;
 
     let displayTimeout: NodeJS.Timeout;
     let nextNotificationTimeout: NodeJS.Timeout;
@@ -107,16 +106,13 @@ export default function SocialProofNotification() {
       
       setIsVisible(true);
 
-      // A notificação fica exibida pela duração calculada
       displayTimeout = setTimeout(() => {
         setIsVisible(false);
       }, displayTime);
 
-      // Agenda a próxima notificação usando o intervalo de alternância total configurado
       nextNotificationTimeout = setTimeout(triggerNext, delaySeconds * 1000);
     }
 
-    // Dispara a primeira notificação após 4 segundos do carregamento inicial
     const initialTimer = setTimeout(triggerNext, 4000);
 
     return () => {
@@ -124,9 +120,17 @@ export default function SocialProofNotification() {
       clearTimeout(displayTimeout);
       clearTimeout(nextNotificationTimeout);
     };
-  }, [products, settings.social_proof_delay, hasDismissed]);
+  }, [products, settings.social_proof_delay, hasDismissed, settings.social_proof_enabled, location.pathname]);
 
-  // Se não houver notificação ativa ou produtos, não renderiza nada na DOM
+  // 3. Verificações de exibição inicial para renderização (APÓS DECLARAR OS HOOKS)
+  const isEnabled = String(settings.social_proof_enabled || 'true') === 'true';
+  const isAdminRoute = location.pathname.startsWith('/admin');
+  const isLoginRoute = location.pathname === '/login';
+
+  if (!isEnabled || isAdminRoute || isLoginRoute || hasDismissed) {
+    return null;
+  }
+
   if (!currentNotification) {
     return null;
   }
@@ -134,14 +138,13 @@ export default function SocialProofNotification() {
   const { product, buyerName, timeAgo } = currentNotification;
   const productImageUrl = product.image ? normalizePublicMediaUrl(product.image) : '';
 
-  // Handler para fechar o widget (correção para evitar tela branca de desmonte síncrono no React)
+  // Handler para fechar o widget
   const handleClose = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsVisible(false);
     
-    // Apenas desmonsta fisicamente o componente após terminar a transição de saída do CSS (400ms)
-    // Isso evita o erro 'Minified React error #300' na propagação de eventos
+    // Desmonta fisicamente o componente após terminar a transição de saída do CSS (400ms)
     setTimeout(() => {
       setHasDismissed(true);
     }, 400);
@@ -157,7 +160,6 @@ export default function SocialProofNotification() {
 
   return (
     <div className="fixed top-4 left-1/2 -translate-x-1/2 md:top-auto md:bottom-6 md:left-6 md:translate-x-0 z-[9999] font-sans pointer-events-none select-none max-w-[340px] w-[calc(100vw-32px)]">
-      {/* Estilos CSS com suporte responsivo a animações via Media Queries */}
       <style>{`
         /* Animações Padrão (Mobile - Topo Centro) */
         @keyframes social-proof-in-mobile {
