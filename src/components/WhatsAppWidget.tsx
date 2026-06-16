@@ -79,7 +79,7 @@ export default function WhatsAppWidget() {
   };
 
   return (
-    <div ref={widgetRef} className="fixed bottom-20 md:bottom-6 right-6 z-[999] font-sans">
+    <div ref={widgetRef} className="fixed bottom-32 md:bottom-6 right-6 z-[999] font-sans">
       {/* Estilos customizados locais para efeitos de luz, pulsação e animações */}
       <style>{`
         @keyframes whatsapp-glow-pulse {

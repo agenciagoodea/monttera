@@ -64,7 +64,6 @@ export default function SocialProofNotification() {
         const data = await res.json();
         
         if (data && Array.isArray(data.products) && data.products.length > 0) {
-          // Filtra produtos ativos (a API já retorna ativos, mas garante segurança de campos mínimos)
           const activeList = data.products.map((p: any) => ({
             id: p.id,
             name: p.name,
@@ -94,11 +93,10 @@ export default function SocialProofNotification() {
     const displayTime = Math.min(5500, (delaySeconds * 1000) / 2);
 
     function triggerNext() {
-      // Seleciona um produto aleatório da lista de recentes
+      if (hasDismissed) return;
+
       const randomProduct = products[Math.floor(Math.random() * products.length)];
-      // Seleciona um nome aleatório
       const randomName = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
-      // Seleciona um tempo decorrido aleatório
       const randomTime = RELATIVE_TIMES[Math.floor(Math.random() * RELATIVE_TIMES.length)];
 
       setCurrentNotification({
@@ -126,7 +124,7 @@ export default function SocialProofNotification() {
       clearTimeout(displayTimeout);
       clearTimeout(nextNotificationTimeout);
     };
-  }, [products, settings.social_proof_delay]);
+  }, [products, settings.social_proof_delay, hasDismissed]);
 
   // Se não houver notificação ativa ou produtos, não renderiza nada na DOM
   if (!currentNotification) {
@@ -136,17 +134,21 @@ export default function SocialProofNotification() {
   const { product, buyerName, timeAgo } = currentNotification;
   const productImageUrl = product.image ? normalizePublicMediaUrl(product.image) : '';
 
-  // Handler para fechar o widget (com suporte a clique e toque em mobile)
+  // Handler para fechar o widget (correção para evitar tela branca de desmonte síncrono no React)
   const handleClose = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsVisible(false);
-    setHasDismissed(true);
+    
+    // Apenas desmonsta fisicamente o componente após terminar a transição de saída do CSS (400ms)
+    // Isso evita o erro 'Minified React error #300' na propagação de eventos
+    setTimeout(() => {
+      setHasDismissed(true);
+    }, 400);
   };
 
   // Handler para navegar programaticamente se clicar no card
   const handleCardClick = (e: React.MouseEvent) => {
-    // Se o clique se originou ou passou pelo botão de fechar, ignora a navegação
     if ((e.target as HTMLElement).closest('.close-btn')) {
       return;
     }
@@ -154,12 +156,13 @@ export default function SocialProofNotification() {
   };
 
   return (
-    <div className="fixed bottom-24 left-4 md:bottom-6 md:left-6 z-[999] font-sans pointer-events-none select-none max-w-[340px] w-[calc(100vw-32px)]">
-      {/* Estilos CSS inline para animações de entrada/saída com curvas modernas de transição */}
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 md:top-auto md:bottom-6 md:left-6 md:translate-x-0 z-[9999] font-sans pointer-events-none select-none max-w-[340px] w-[calc(100vw-32px)]">
+      {/* Estilos CSS com suporte responsivo a animações via Media Queries */}
       <style>{`
-        @keyframes social-proof-in {
+        /* Animações Padrão (Mobile - Topo Centro) */
+        @keyframes social-proof-in-mobile {
           0% {
-            transform: translateY(24px) scale(0.96);
+            transform: translateY(-40px) scale(0.96);
             opacity: 0;
           }
           100% {
@@ -167,35 +170,69 @@ export default function SocialProofNotification() {
             opacity: 1;
           }
         }
-        @keyframes social-proof-out {
+        @keyframes social-proof-out-mobile {
           0% {
             transform: translateY(0) scale(1);
             opacity: 1;
           }
           100% {
-            transform: translateY(16px) scale(0.96);
+            transform: translateY(-40px) scale(0.96);
             opacity: 0;
           }
         }
+        
         .social-proof-card {
-          box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08), 0 4px 12px -2px rgba(0, 0, 0, 0.03);
-          border: 1px solid rgba(226, 232, 240, 0.8);
-          background: rgba(255, 255, 255, 0.94);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
+          box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.12), 0 4px 12px -2px rgba(0, 0, 0, 0.05);
+          border: 1px solid rgba(226, 232, 240, 0.85);
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(14px);
+          -webkit-backdrop-filter: blur(14px);
           transition: border-color 0.3s, transform 0.2s;
         }
         .social-proof-card:hover {
           border-color: rgba(59, 130, 246, 0.3);
-          transform: translateY(-2px);
+          transform: translateY(1px);
         }
         .social-proof-enter {
-          animation: social-proof-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          animation: social-proof-in-mobile 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
           pointer-events: auto;
         }
         .social-proof-exit {
-          animation: social-proof-out 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          animation: social-proof-out-mobile 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
           pointer-events: none;
+        }
+
+        /* Estilos e Animações para Desktop (md) */
+        @media (min-width: 768px) {
+          @keyframes social-proof-in-desktop {
+            0% {
+              transform: translateY(24px) scale(0.96);
+              opacity: 0;
+            }
+            100% {
+              transform: translateY(0) scale(1);
+              opacity: 1;
+            }
+          }
+          @keyframes social-proof-out-desktop {
+            0% {
+              transform: translateY(0) scale(1);
+              opacity: 1;
+            }
+            100% {
+              transform: translateY(16px) scale(0.96);
+              opacity: 0;
+            }
+          }
+          .social-proof-card:hover {
+            transform: translateY(-2px);
+          }
+          .social-proof-enter {
+            animation: social-proof-in-desktop 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          }
+          .social-proof-exit {
+            animation: social-proof-out-desktop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          }
         }
       `}</style>
 
@@ -213,7 +250,6 @@ export default function SocialProofNotification() {
               alt={product.name}
               className="w-full h-full object-cover"
               onError={(e) => {
-                // Fallback caso a imagem dê erro ao carregar
                 (e.target as HTMLImageElement).src = '';
                 (e.target as HTMLImageElement).style.display = 'none';
                 const parent = (e.target as HTMLElement).parentElement;
@@ -225,7 +261,6 @@ export default function SocialProofNotification() {
             />
           ) : null}
 
-          {/* Ícone de Fallback se não tiver imagem */}
           <div className={`fallback-icon w-full h-full bg-slate-100 text-slate-400 flex items-center justify-center ${productImageUrl ? 'hidden' : ''}`}>
             <ShoppingBag className="w-5 h-5 text-blue-500/80" />
           </div>
@@ -244,10 +279,9 @@ export default function SocialProofNotification() {
           </span>
         </div>
 
-        {/* Botão de Fechar com maior área de toque e classe identificadora */}
+        {/* Botão de Fechar */}
         <button 
           onClick={handleClose}
-          onTouchStart={handleClose}
           className="absolute top-1 right-1 md:top-2 md:right-2 text-slate-400 hover:text-slate-600 rounded-full p-2.5 hover:bg-slate-100/50 transition-colors z-30 pointer-events-auto close-btn"
           aria-label="Fechar notificação"
           title="Fechar"
