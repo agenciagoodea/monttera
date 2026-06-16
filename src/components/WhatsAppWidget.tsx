@@ -14,6 +14,12 @@ export default function WhatsAppWidget() {
   const [timeStr, setTimeStr] = useState('');
   const widgetRef = useRef<HTMLDivElement>(null);
 
+  // Estados e refs para lógica de arrastar (drag) no celular
+  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const wasDraggedRef = useRef(false);
+
   // Ocultar se estiver nas rotas do painel admin
   if (location.pathname.startsWith('/admin')) {
     return null;
@@ -66,6 +72,47 @@ export default function WhatsAppWidget() {
     setShowTooltip(false);
   };
 
+  // Lógica de arrastar em celular (Touch Screen)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    dragStartRef.current = {
+      x: touch.clientX - dragPos.x,
+      y: touch.clientY - dragPos.y
+    };
+    setIsDragging(true);
+    wasDraggedRef.current = false;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging) return;
+    const touch = e.touches[0];
+    const newX = touch.clientX - dragStartRef.current.x;
+    const newY = touch.clientY - dragStartRef.current.y;
+
+    // Se moveu mais de 8px, consideramos que houve arrasto
+    const deltaX = Math.abs(newX - dragPos.x);
+    const deltaY = Math.abs(newY - dragPos.y);
+    if (deltaX > 8 || deltaY > 8) {
+      wasDraggedRef.current = true;
+    }
+
+    setDragPos({ x: newX, y: newY });
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+  };
+
+  const handleButtonClick = (e: React.MouseEvent) => {
+    if (wasDraggedRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      wasDraggedRef.current = false; // reseta flag
+      return;
+    }
+    handleToggleChat();
+  };
+
   const handleSendMessage = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     
@@ -79,7 +126,13 @@ export default function WhatsAppWidget() {
   };
 
   return (
-    <div ref={widgetRef} className="fixed bottom-32 md:bottom-6 right-6 z-[999] font-sans">
+    <div 
+      ref={widgetRef} 
+      className="fixed bottom-32 md:bottom-6 right-6 z-[999] font-sans"
+      style={{
+        transform: `translate3d(${dragPos.x}px, ${dragPos.y}px, 0)`,
+      }}
+    >
       {/* Estilos customizados locais para efeitos de luz, pulsação e animações */}
       <style>{`
         @keyframes whatsapp-glow-pulse {
@@ -162,10 +215,16 @@ export default function WhatsAppWidget() {
 
       {/* Botão Flutuante Principal do WhatsApp */}
       <button
-        onClick={handleToggleChat}
+        onClick={handleButtonClick}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         className={`w-14 h-14 bg-[#25D366] hover:bg-[#20ba5a] active:scale-95 text-white rounded-full flex items-center justify-center shadow-lg transition-all duration-300 relative focus:outline-none whatsapp-glow-pulse attention-light group ${
           isOpen ? 'rotate-90' : 'hover:scale-105'
         }`}
+        style={{
+          touchAction: 'none' // Evita scroll do site ao arrastar a bolinha
+        }}
         aria-label="Atendimento via WhatsApp"
       >
         {isOpen ? (
