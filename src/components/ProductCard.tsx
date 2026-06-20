@@ -64,12 +64,17 @@ export default function ProductCard({ product }: ProductCardProps) {
 
       {/* Image Container — object-cover fills the square completely */}
       <Link to={`/produto/${product.slug}`} className="relative aspect-square mb-4 bg-slate-50 rounded-2xl overflow-hidden group-hover:bg-slate-100/50 transition-colors block">
-        <img 
-          src={productImageUrl} 
-          alt={product.name}
-          loading="lazy"
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-        />
+        <picture>
+          {product.image_webp && (
+            <source srcSet={normalizePublicMediaUrl(product.image_webp)} type="image/webp" />
+          )}
+          <img 
+            src={productImageUrl} 
+            alt={product.name}
+            loading="lazy"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+          />
+        </picture>
       </Link>
 
       {/* Content */}

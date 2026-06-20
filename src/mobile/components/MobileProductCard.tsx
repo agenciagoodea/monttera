@@ -75,12 +75,17 @@ export default function MobileProductCard({ product }: MobileProductCardProps) {
         to={`/produto/${product.slug}`} 
         className="relative aspect-square w-full rounded-2xl overflow-hidden bg-slate-50 border border-slate-50 flex-shrink-0 block"
       >
-        <img 
-          src={productImageUrl} 
-          alt={product.name}
-          loading="lazy"
-          className="w-full h-full object-cover"
-        />
+        <picture>
+          {product.image_webp && (
+            <source srcSet={normalizePublicMediaUrl(product.image_webp)} type="image/webp" />
+          )}
+          <img 
+            src={productImageUrl} 
+            alt={product.name}
+            loading="lazy"
+            className="w-full h-full object-cover"
+          />
+        </picture>
       </Link>
 
       {/* Conteúdo do Card */}

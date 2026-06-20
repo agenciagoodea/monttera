@@ -263,6 +263,27 @@ export default function ProductDetail() {
     return resolveAltTemplate(String(raw || '').trim()) || product?.name || 'Imagem do produto';
   };
 
+  const webpMapping = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (!product) return map;
+    
+    const mainJpg = getPublicAssetUrl(product.image);
+    const mainWebp = product.image_webp ? getPublicAssetUrl(product.image_webp) : '';
+    if (mainJpg && mainWebp) {
+      map[mainJpg] = mainWebp;
+    }
+    
+    (product.gallery || []).forEach((img) => {
+      const jpgUrl = getPublicAssetUrl(img.url);
+      const webpUrl = img.url_webp ? getPublicAssetUrl(img.url_webp) : '';
+      if (jpgUrl && webpUrl) {
+        map[jpgUrl] = webpUrl;
+      }
+    });
+    
+    return map;
+  }, [product]);
+
   useEffect(() => {
     if (!product) return;
     const siteName = siteDisplayName;
@@ -285,11 +306,23 @@ export default function ProductDetail() {
     const canonical = canonicalTemplate || `/produto/${product.slug}`;
 
     const offerUrl = buildAbsoluteUrl(canonical);
+    
+    // Lista de imagens absolutas para o Schema de Produto (Google Images / Merchant Center)
+    const schemaImages = [buildAbsoluteUrl(imageForSeo)];
+    if (product.gallery && product.gallery.length > 0) {
+      product.gallery.forEach((img) => {
+        const absUrl = buildAbsoluteUrl(img.full_url || img.url);
+        if (absUrl && !schemaImages.includes(absUrl)) {
+          schemaImages.push(absUrl);
+        }
+      });
+    }
+
     const schemaProduct: Record<string, unknown> = {
       '@context': 'https://schema.org',
       '@type': 'Product',
       name: product.name,
-      image: [buildAbsoluteUrl(imageForSeo)],
+      image: schemaImages,
       description: productDescription,
       sku: product.sku && String(product.sku).trim().length >= 3 ? String(product.sku).trim() : `DB-${String(product.id).padStart(5, '0')}`,
       brand: {
@@ -517,23 +550,32 @@ export default function ProductDetail() {
               </div>
               
               <AnimatePresence mode="wait">
-                <motion.img 
+                <motion.div
                   key={displayedImage}
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: isImageHovered ? 1.08 : 1 }}
                   exit={{ opacity: 0, scale: 1.05 }}
                   transition={{ duration: 0.35, ease: 'easeOut' }}
-                  src={displayedImage} 
-                  alt={getImageAlt(displayedImage)}
-                  onError={(event) => {
-                    const failedSrc = (event.currentTarget as HTMLImageElement).src;
-                    setFailedImages((prev) => ({ ...prev, [failedSrc]: true }));
-                    if (import.meta.env.DEV) {
-                      console.debug('[ProductDetail] image load error:', failedSrc);
-                    }
-                  }}
-                  className="w-full h-full object-cover relative z-10 will-change-transform" 
-                />
+                  className="w-full h-full object-cover relative z-10 will-change-transform"
+                >
+                  <picture>
+                    {displayedImage && webpMapping[displayedImage] && (
+                      <source srcSet={webpMapping[displayedImage]} type="image/webp" />
+                    )}
+                    <img 
+                      src={displayedImage} 
+                      alt={getImageAlt(displayedImage)}
+                      onError={(event) => {
+                        const failedSrc = (event.currentTarget as HTMLImageElement).src;
+                        setFailedImages((prev) => ({ ...prev, [failedSrc]: true }));
+                        if (import.meta.env.DEV) {
+                          console.debug('[ProductDetail] image load error:', failedSrc);
+                        }
+                      }}
+                      className="w-full h-full object-cover" 
+                    />
+                  </picture>
+                </motion.div>
               </AnimatePresence>
 
               {gallery.length > 1 && (
@@ -641,19 +683,24 @@ export default function ProductDetail() {
                       Sem imagem
                     </div>
                   ) : (
-                    <img
-                      src={img}
-                      alt={getImageAlt(img) || `${product.name} - ${idx}`}
-                      loading="lazy"
-                      onError={(event) => {
-                        const failedSrc = (event.currentTarget as HTMLImageElement).src;
-                        setFailedImages((prev) => ({ ...prev, [img]: true, [failedSrc]: true }));
-                        if (import.meta.env.DEV) {
-                          console.debug('[ProductDetail] gallery image load error:', failedSrc);
-                        }
-                      }}
-                      className="w-full h-full object-cover"
-                    />
+                    <picture>
+                      {webpMapping[img] && (
+                        <source srcSet={webpMapping[img]} type="image/webp" />
+                      )}
+                      <img
+                        src={img}
+                        alt={getImageAlt(img) || `${product.name} - ${idx}`}
+                        loading="lazy"
+                        onError={(event) => {
+                          const failedSrc = (event.currentTarget as HTMLImageElement).src;
+                          setFailedImages((prev) => ({ ...prev, [img]: true, [failedSrc]: true }));
+                          if (import.meta.env.DEV) {
+                            console.debug('[ProductDetail] gallery image load error:', failedSrc);
+                          }
+                        }}
+                        className="w-full h-full object-cover"
+                      />
+                    </picture>
                   )}
                 </button>
               ))}
@@ -909,12 +956,17 @@ export default function ProductDetail() {
           >
             <ChevronLeft className="w-6 h-6" />
           </button>
-          <img
-            src={gallery[activeImageIndex]}
-            alt={getImageAlt(gallery[activeImageIndex])}
-            className="max-h-[90vh] max-w-[90vw] object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
+          <picture>
+            {gallery[activeImageIndex] && webpMapping[gallery[activeImageIndex]] && (
+              <source srcSet={webpMapping[gallery[activeImageIndex]]} type="image/webp" />
+            )}
+            <img
+              src={gallery[activeImageIndex]}
+              alt={getImageAlt(gallery[activeImageIndex])}
+              className="max-h-[90vh] max-w-[90vw] object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </picture>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); goNextImage(); }}
@@ -1101,7 +1153,12 @@ export default function ProductDetail() {
                 className="group snap-start shrink-0 basis-[82%] sm:basis-[46%] lg:basis-[31%] xl:basis-[24%] bg-white border border-slate-100 rounded-3xl p-4 transition-all hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1"
               >
                 <div className="aspect-square bg-slate-50 rounded-2xl overflow-hidden mb-4 relative">
-                  <img src={rel.image} alt={rel.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  <picture>
+                    {rel.image_webp && (
+                      <source srcSet={normalizePublicMediaUrl(rel.image_webp)} type="image/webp" />
+                    )}
+                    <img src={rel.image} alt={rel.name} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  </picture>
                   {rel.sale_price && (
                     <div className="absolute top-3 right-3 bg-red-500 text-white text-[9px] font-black px-2 py-1 rounded-full uppercase">
                       {Math.round((1 - rel.sale_price / rel.price) * 100)}% OFF

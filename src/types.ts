@@ -20,6 +20,7 @@ export interface Product {
   price: number;
   sale_price?: number | null;
   image: string;
+  image_webp?: string | null;
   image_alt?: string | null;
   production_sheet?: string | null;
   category_id: number;
@@ -57,7 +58,9 @@ export interface ProductGalleryImage {
   id: number;
   product_id: number;
   url: string;
+  url_webp?: string;
   full_url: string;
+  full_url_webp?: string;
   alt_text?: string;
   is_featured?: number | boolean;
   created_at?: string | null;

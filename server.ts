@@ -86,6 +86,29 @@ async function applyWatermark(inputPath: string, outputPath: string): Promise<vo
   }
 }
 
+/**
+ * Gera uma versão WebP a partir de um arquivo JPEG existente.
+ * Mantém dimensões e qualidade visual, aplicando compressão de qualidade 82.
+ */
+async function generateWebpFromJpeg(jpegPath: string, webpPath: string): Promise<void> {
+  if (!fs.existsSync(jpegPath)) {
+    throw new Error(`Arquivo JPEG de origem não encontrado: ${jpegPath}`);
+  }
+  await sharp(jpegPath)
+    .webp({ quality: 82 })
+    .toFile(webpPath);
+
+  // Validação física
+  if (!fs.existsSync(webpPath)) {
+    throw new Error('Erro de gravação física: O arquivo WebP derivado não pôde ser encontrado no disco.');
+  }
+  const stats = fs.statSync(webpPath);
+  if (stats.size === 0) {
+    throw new Error('Erro de gravação física: O arquivo WebP derivado possui tamanho igual a zero.');
+  }
+}
+
+
 
 function createBasicRateLimit(options: {
   windowMs: number;
@@ -4270,6 +4293,238 @@ async function startServer() {
     }
   });
 
+  // API para obter relatório detalhado de conversão de imagens para WebP
+  app.get('/api/admin/seo/images/conversion-report', authenticate, isAdmin, async (req, res) => {
+    try {
+      const publicPath = path.join(process.cwd(), 'public');
+
+      // Buscar imagens principais ativas
+      const mainImages = await dbAsync.all(
+        "SELECT id, name, image, image_webp FROM products WHERE status = 'active' AND image IS NOT NULL AND image != ''"
+      ) as any[];
+
+      // Buscar imagens da galeria de produtos ativos
+      const galleryImages = await dbAsync.all(
+        "SELECT pi.id, pi.product_id, pi.url, pi.url_webp, p.name as product_name FROM product_images pi JOIN products p ON pi.product_id = p.id WHERE p.status = 'active'"
+      ) as any[];
+
+      let totalImages = mainImages.length + galleryImages.length;
+      let converted = 0;
+      let pendentes = 0;
+      let erros = 0;
+      let totalSavingsBytes = 0;
+
+      const checkLocalFile = (fileUrl: string): boolean => {
+        if (!fileUrl) return false;
+        try {
+          const cleanPath = fileUrl.split('?')[0].split('#')[0];
+          const absolutePath = path.join(publicPath, cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath);
+          return fs.existsSync(absolutePath);
+        } catch {
+          return false;
+        }
+      };
+
+      const getFileSize = (fileUrl: string): number => {
+        try {
+          const cleanPath = fileUrl.split('?')[0].split('#')[0];
+          const absolutePath = path.join(publicPath, cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath);
+          return fs.existsSync(absolutePath) ? fs.statSync(absolutePath).size : 0;
+        } catch {
+          return 0;
+        }
+      };
+
+      // Processar imagens principais
+      for (const p of mainImages) {
+        if (p.image.startsWith('http')) {
+          converted++;
+          continue;
+        }
+        if (p.image_webp) {
+          const jpgExists = checkLocalFile(p.image);
+          const webpExists = checkLocalFile(p.image_webp);
+          if (jpgExists && webpExists) {
+            converted++;
+            const jpgSize = getFileSize(p.image);
+            const webpSize = getFileSize(p.image_webp);
+            totalSavingsBytes += Math.max(0, jpgSize - webpSize);
+          } else {
+            erros++;
+          }
+        } else {
+          pendentes++;
+        }
+      }
+
+      // Processar galeria
+      for (const img of galleryImages) {
+        if (img.url.startsWith('http')) {
+          converted++;
+          continue;
+        }
+        if (img.url_webp) {
+          const jpgExists = checkLocalFile(img.url);
+          const webpExists = checkLocalFile(img.url_webp);
+          if (jpgExists && webpExists) {
+            converted++;
+            const jpgSize = getFileSize(img.url);
+            const webpSize = getFileSize(img.url_webp);
+            totalSavingsBytes += Math.max(0, jpgSize - webpSize);
+          } else {
+            erros++;
+          }
+        } else {
+          pendentes++;
+        }
+      }
+
+      return res.json({
+        success: true,
+        report: {
+          totalImages,
+          converted,
+          pending: pendentes,
+          errors: erros,
+          savingsBytes: totalSavingsBytes,
+          savingsMb: parseFloat((totalSavingsBytes / (1024 * 1024)).toFixed(2))
+        }
+      });
+    } catch (error) {
+      console.error('Error WebP conversion report:', error);
+      return res.status(500).json({ error: 'Erro ao gerar relatório de conversão WebP' });
+    }
+  });
+
+  // API para converter imagens legadas em lote de até 20 imagens por ciclo
+  app.post('/api/admin/seo/images/convert-batch', authenticate, isAdmin, async (req, res) => {
+    try {
+      const publicPath = path.join(process.cwd(), 'public');
+      const limit = 20;
+      let processedCount = 0;
+      let errorsCount = 0;
+      let savingsBytes = 0;
+
+      // 1. Obter imagens principais pendentes (sem image_webp)
+      const pendingMain = await dbAsync.all(
+        `SELECT id, name, slug, image FROM products 
+         WHERE status = 'active' AND image IS NOT NULL AND image != '' AND (image_webp IS NULL OR image_webp = '') 
+         LIMIT ?`,
+        limit
+      ) as any[];
+
+      // Se não atingiu o limite, buscar na galeria
+      let pendingGallery: any[] = [];
+      if (pendingMain.length < limit) {
+        const missing = limit - pendingMain.length;
+        pendingGallery = await dbAsync.all(
+          `SELECT pi.id, pi.product_id, pi.url, p.name as product_name, p.slug as product_slug 
+           FROM product_images pi 
+           JOIN products p ON pi.product_id = p.id 
+           WHERE p.status = 'active' AND pi.url IS NOT NULL AND pi.url != '' AND (pi.url_webp IS NULL OR pi.url_webp = '') 
+           LIMIT ?`,
+          missing
+        ) as any[];
+      }
+
+      const getAbsoluteFsPath = (fileUrl: string): string => {
+        const cleanPath = fileUrl.split('?')[0].split('#')[0];
+        return path.join(publicPath, cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath);
+      };
+
+      // Processar imagens principais
+      for (const p of pendingMain) {
+        // Ignora imagens remotas (http)
+        if (p.image.startsWith('http')) {
+          await dbAsync.run("UPDATE products SET image_webp = ? WHERE id = ?", p.image, p.id);
+          processedCount++;
+          continue;
+        }
+
+        const jpgFsPath = getAbsoluteFsPath(p.image);
+        if (fs.existsSync(jpgFsPath)) {
+          const webpName = buildProductMediaName(p.slug || 'produto', p.id, '.webp');
+          const webpFsPath = path.join(publicPath, 'uploads', webpName);
+          const webpPublicPath = `/uploads/${webpName}`;
+
+          try {
+            await generateWebpFromJpeg(jpgFsPath, webpFsPath);
+            await dbAsync.run("UPDATE products SET image_webp = ? WHERE id = ?", webpPublicPath, p.id);
+            
+            const jpgSize = fs.statSync(jpgFsPath).size;
+            const webpSize = fs.statSync(webpFsPath).size;
+            savingsBytes += Math.max(0, jpgSize - webpSize);
+            processedCount++;
+          } catch (err) {
+            console.error(`[WebP Batch] Erro ao converter imagem principal do produto ID ${p.id}:`, err);
+            errorsCount++;
+          }
+        } else {
+          console.warn(`[WebP Batch] Arquivo JPEG não existe no disco para produto ID ${p.id}: ${jpgFsPath}`);
+          errorsCount++;
+        }
+      }
+
+      // Processar galeria
+      for (const img of pendingGallery) {
+        if (img.url.startsWith('http')) {
+          await dbAsync.run("UPDATE product_images SET url_webp = ? WHERE id = ?", img.url, img.id);
+          processedCount++;
+          continue;
+        }
+
+        const jpgFsPath = getAbsoluteFsPath(img.url);
+        if (fs.existsSync(jpgFsPath)) {
+          // Usamos o id da galeria como sufixo único
+          const webpName = buildProductMediaName(img.product_slug || 'produto', img.product_id, '.webp', `gimg${img.id}`);
+          const webpFsPath = path.join(publicPath, 'uploads', webpName);
+          const webpPublicPath = `/uploads/${webpName}`;
+
+          try {
+            await generateWebpFromJpeg(jpgFsPath, webpFsPath);
+            await dbAsync.run("UPDATE product_images SET url_webp = ? WHERE id = ?", webpPublicPath, img.id);
+
+            const jpgSize = fs.statSync(jpgFsPath).size;
+            const webpSize = fs.statSync(webpFsPath).size;
+            savingsBytes += Math.max(0, jpgSize - webpSize);
+            processedCount++;
+          } catch (err) {
+            console.error(`[WebP Batch] Erro ao converter imagem de galeria ID ${img.id}:`, err);
+            errorsCount++;
+          }
+        } else {
+          console.warn(`[WebP Batch] Arquivo JPEG de galeria não existe no disco para imagem ID ${img.id}: ${jpgFsPath}`);
+          errorsCount++;
+        }
+      }
+
+      // Obter quantidade restante na fila
+      const remainingMainRes = await dbAsync.get(
+        "SELECT COUNT(*) as count FROM products WHERE status = 'active' AND image IS NOT NULL AND image != '' AND (image_webp IS NULL OR image_webp = '')"
+      ) as any;
+      const remainingGalleryRes = await dbAsync.get(
+        "SELECT COUNT(*) as count FROM product_images pi JOIN products p ON pi.product_id = p.id WHERE p.status = 'active' AND pi.url IS NOT NULL AND pi.url != '' AND (pi.url_webp IS NULL OR pi.url_webp = '')"
+      ) as any;
+      
+      const remaining = Number(remainingMainRes?.count || 0) + Number(remainingGalleryRes?.count || 0);
+
+      // Limpar caches relevantes
+      apiCache.delete('public_products');
+
+      return res.json({
+        success: true,
+        processedCount,
+        errorsCount,
+        savingsBytes,
+        savingsMb: parseFloat((savingsBytes / (1024 * 1024)).toFixed(2)),
+        remaining
+      });
+    } catch (error) {
+      console.error('Error WebP batch conversion:', error);
+      return res.status(500).json({ error: 'Erro ao converter lote de imagens WebP' });
+    }
+  });
+
   // Resumo de estatísticas
   app.get('/api/admin/analytics/summary', authenticate, isAdmin, async (req, res) => {
     try {
@@ -4699,6 +4954,7 @@ async function startServer() {
       const normalizedSlug = uniqueSlug;
 
       let mainImagePath: string | null = null;
+      let mainImageWebpPath: string | null = null;
       if (files['image']?.[0]) {
         const file = files['image'][0];
         // A saída final sempre será .jpg (após watermark)
@@ -4708,6 +4964,16 @@ async function startServer() {
 
         // Aplicar marca d'água
         await applyWatermark(tempPath, physicalPath);
+
+        // Gerar versão WebP derivada
+        const finalWebpName = buildProductMediaName(normalizedSlug, productIdNumber, '.webp');
+        const physicalWebpPath = path.join(publicUploadsDir, finalWebpName);
+        try {
+          await generateWebpFromJpeg(physicalPath, physicalWebpPath);
+          mainImageWebpPath = `/uploads/${finalWebpName}`;
+        } catch (webpErr) {
+          console.error('[WebP] Falha ao gerar WebP derivado da imagem principal:', webpErr);
+        }
 
         // Remover arquivo temporário original
         if (fs.existsSync(tempPath) && tempPath !== physicalPath) {
@@ -4748,7 +5014,7 @@ async function startServer() {
         productionSheetValue = `/uploads/${finalName}`;
       }
 
-      await dbAsync.run('UPDATE products SET image = ?, production_sheet = ? WHERE id = ?', mainImagePath, productionSheetValue, productIdNumber);
+      await dbAsync.run('UPDATE products SET image = ?, image_webp = ?, production_sheet = ? WHERE id = ?', mainImagePath, mainImageWebpPath, productionSheetValue, productIdNumber);
 
       const parsedCategoryIds = parseIdArray(category_ids);
       const finalCategoryIds = parsedCategoryIds.length > 0
@@ -4769,11 +5035,23 @@ async function startServer() {
           const physicalPath = path.join(publicUploadsDir, finalName);
           // Aplicar marca d'água sobre a imagem de galeria
           await applyWatermark(f.path, physicalPath);
+
+          // Gerar versão WebP derivada para a galeria
+          const finalWebpName = buildProductMediaName(normalizedSlug, productIdNumber, '.webp', `g${index + 1}`);
+          const physicalWebpPath = path.join(publicUploadsDir, finalWebpName);
+          let galleryWebpPath: string | null = null;
+          try {
+            await generateWebpFromJpeg(physicalPath, physicalWebpPath);
+            galleryWebpPath = `/uploads/${finalWebpName}`;
+          } catch (webpErr) {
+            console.error('[WebP] Falha ao gerar WebP para galeria:', webpErr);
+          }
+
           // Remover arquivo temporário original
           if (fs.existsSync(f.path) && f.path !== physicalPath) {
             try { fs.unlinkSync(f.path); } catch (_) { /* ignorar */ }
           }
-          await dbAsync.run('INSERT IGNORE INTO product_images (product_id, url, alt_text, file_type) VALUES (?, ?, ?, ?)', productId, `/uploads/${finalName}`, parsedGalleryAltsNew[index] || null, 'gallery');
+          await dbAsync.run('INSERT IGNORE INTO product_images (product_id, url, url_webp, alt_text, file_type) VALUES (?, ?, ?, ?, ?)', productId, `/uploads/${finalName}`, galleryWebpPath, parsedGalleryAltsNew[index] || null, 'gallery');
         }
       }
 
@@ -5008,6 +5286,7 @@ async function startServer() {
 
     const imageUpload = files['image']?.[0];
     let nextImagePath = existingProduct.image;
+    let nextImageWebpPath = existingProduct.image_webp;
     if (imageUpload) {
       // A saída final sempre será .jpg (após watermark)
       const finalName = buildProductMediaName(nextSlug, productId, '.jpg');
@@ -5016,6 +5295,16 @@ async function startServer() {
 
       // Aplicar marca d'água
       await applyWatermark(tempPath, physicalPath);
+
+      // Gerar versão WebP derivada
+      const finalWebpName = buildProductMediaName(nextSlug, productId, '.webp');
+      const physicalWebpPath = path.join(publicUploadsDir, finalWebpName);
+      try {
+        await generateWebpFromJpeg(physicalPath, physicalWebpPath);
+        nextImageWebpPath = `/uploads/${finalWebpName}`;
+      } catch (webpErr) {
+        console.error('[WebP] Falha ao gerar WebP derivado da imagem principal no PUT:', webpErr);
+      }
 
       // Remover arquivo temporário original
       if (fs.existsSync(tempPath) && tempPath !== physicalPath) {
@@ -5043,6 +5332,26 @@ async function startServer() {
               console.log(`[Slug Change] Imagem principal física renomeada de ${oldImageName} para ${newImageName}`);
             } catch (err) {
               console.error('Erro ao renomear imagem física por mudança de slug:', err);
+            }
+          }
+        }
+      }
+      // Renomear também a versão WebP correspondente
+      if (existingProduct.image_webp && typeof existingProduct.image_webp === 'string' && existingProduct.image_webp.startsWith('/uploads/')) {
+        const oldWebpName = existingProduct.image_webp.split('/').pop();
+        if (oldWebpName) {
+          const newWebpName = buildProductMediaName(nextSlug, productId, '.webp');
+          if (oldWebpName !== newWebpName) {
+            const oldWebpPhysicalPath = path.join(publicUploadsDir, oldWebpName);
+            const newWebpPhysicalPath = path.join(publicUploadsDir, newWebpName);
+            if (fs.existsSync(oldWebpPhysicalPath)) {
+              try {
+                fs.renameSync(oldWebpPhysicalPath, newWebpPhysicalPath);
+                nextImageWebpPath = `/uploads/${newWebpName}`;
+                console.log(`[Slug Change] Imagem WebP física renomeada de ${oldWebpName} para ${newWebpName}`);
+              } catch (err) {
+                console.error('Erro ao renomear imagem WebP física por mudança de slug:', err);
+              }
             }
           }
         }
@@ -5106,6 +5415,7 @@ async function startServer() {
           stitch_count = ?,
           colors = ?,
           image = ?,
+          image_webp = ?,
           image_alt = ?,
           production_sheet = ?,
           seo_title = ?,
@@ -5115,7 +5425,7 @@ async function startServer() {
           noindex = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextImageAlt, nextProductionSheet, nextSeoTitle, nextSeoDescription, nextSeoKeywords, nextCanonicalUrl, nextNoindex, productId);
+      `, nextName, nextSlug, nextDescription, nextShortDescription, nextPrice, nextSalePrice, nextCategoryId, nextStitchCount, nextColors, nextImagePath, nextImageWebpPath, nextImageAlt, nextProductionSheet, nextSeoTitle, nextSeoDescription, nextSeoKeywords, nextCanonicalUrl, nextNoindex, productId);
 
       if (nextImagePath !== existingProduct.image && existingProduct.image && typeof existingProduct.image === 'string' && existingProduct.image.includes('/uploads/')) {
         // Verificar se os nomes físicos de arquivo base são diferentes antes de apagar
@@ -5139,6 +5449,29 @@ async function startServer() {
             }
           } else {
             console.info(`[PUT /products/${productId}] Imagem antiga compartilhada com produto #${(otherProductWithSameImage as any).id} — arquivo mantido.`);
+          }
+        }
+      }
+
+      // Remover fisicamente o WebP antigo correspondente caso a imagem tenha mudado
+      if (nextImagePath !== existingProduct.image && existingProduct.image_webp && typeof existingProduct.image_webp === 'string' && existingProduct.image_webp.includes('/uploads/')) {
+        const oldWebpBase = path.basename(existingProduct.image_webp.split('?')[0]);
+        const newWebpBase = nextImageWebpPath ? path.basename(nextImageWebpPath.split('?')[0]) : '';
+        if (oldWebpBase !== newWebpBase) {
+          const otherProductWithSameWebp = await dbAsync.get(
+            'SELECT id FROM products WHERE image_webp = ? AND id <> ? LIMIT 1',
+            existingProduct.image_webp, productId
+          );
+          if (!otherProductWithSameWebp) {
+            const oldWebpRelative = existingProduct.image_webp.replace(/^https?:\/\/[^/]+/i, '');
+            const oldWebpFsPath = path.join(process.cwd(), 'public', oldWebpRelative.replace('/uploads/', 'uploads/'));
+            try {
+              if (fs.existsSync(oldWebpFsPath)) {
+                fs.unlinkSync(oldWebpFsPath);
+              }
+            } catch (fileError) {
+              console.warn('Falha ao remover imagem WebP antiga:', fileError);
+            }
           }
         }
       }
@@ -5231,11 +5564,23 @@ async function startServer() {
             const physicalPath = path.join(publicUploadsDir, finalName);
             // Aplicar marca d'água sobre a imagem de galeria
             await applyWatermark(file.path, physicalPath);
+
+            // Gerar versão WebP derivada para a galeria
+            const finalWebpName = buildProductMediaName(nextSlug, productId, '.webp', `g${index + 1}`);
+            const physicalWebpPath = path.join(publicUploadsDir, finalWebpName);
+            let galleryWebpPath: string | null = null;
+            try {
+              await generateWebpFromJpeg(physicalPath, physicalWebpPath);
+              galleryWebpPath = `/uploads/${finalWebpName}`;
+            } catch (webpErr) {
+              console.error('[WebP] Falha ao gerar WebP para galeria no PUT:', webpErr);
+            }
+
             // Remover o arquivo temporário original
             if (fs.existsSync(file.path) && file.path !== physicalPath) {
               try { fs.unlinkSync(file.path); } catch (_) { /* ignorar */ }
             }
-            await dbAsync.run('INSERT INTO product_images (product_id, url, alt_text, file_type) VALUES (?, ?, ?, ?)', productId, `/uploads/${finalName}`, parsedGalleryAltsNew[index] || null, 'gallery');
+            await dbAsync.run('INSERT INTO product_images (product_id, url, url_webp, alt_text, file_type) VALUES (?, ?, ?, ?, ?)', productId, `/uploads/${finalName}`, galleryWebpPath, parsedGalleryAltsNew[index] || null, 'gallery');
           }
         }
       }
@@ -5582,6 +5927,17 @@ async function startServer() {
       // Aplicar marca d'água: lê o arquivo temporário, processa, salva em physicalPath
       await applyWatermark(tempPath, physicalPath);
 
+      // Gerar versão WebP derivada
+      const finalWebpName = buildProductMediaName(activeSlug, productId, '.webp');
+      const physicalWebpPath = path.join(publicUploadsDir, finalWebpName);
+      let finalPublicWebpUrl: string | null = null;
+      try {
+        await generateWebpFromJpeg(physicalPath, physicalWebpPath);
+        finalPublicWebpUrl = `/uploads/${finalWebpName}`;
+      } catch (webpErr) {
+        console.error('[WebP] Falha ao gerar WebP derivado da imagem principal (main-image):', webpErr);
+      }
+
       // Remover arquivo temporário original (sem watermark)
       if (fs.existsSync(tempPath) && tempPath !== physicalPath) {
         try { fs.unlinkSync(tempPath); } catch (_) { /* ignorar */ }
@@ -5608,8 +5964,24 @@ async function startServer() {
         }
       }
 
+      // Remover fisicamente o WebP antigo correspondente
+      const oldImageWebp = product.image_webp;
+      if (oldImageWebp && oldImageWebp !== `/uploads/${finalWebpName}`) {
+        const oldWebpName = oldImageWebp.split('/').pop();
+        if (oldWebpName) {
+          const oldWebpPhysicalPath = path.join(publicUploadsDir, oldWebpName);
+          if (fs.existsSync(oldWebpPhysicalPath)) {
+            try {
+              fs.unlinkSync(oldWebpPhysicalPath);
+            } catch (err) {
+              console.error('Erro ao deletar WebP substituído:', err);
+            }
+          }
+        }
+      }
+
       const finalPublicUrl = `/uploads/${finalName}`;
-      await dbAsync.run('UPDATE products SET image = ? WHERE id = ?', finalPublicUrl, productId);
+      await dbAsync.run('UPDATE products SET image = ?, image_webp = ? WHERE id = ?', finalPublicUrl, finalPublicWebpUrl, productId);
 
       return res.json({ success: true, image: finalPublicUrl });
     } catch (error: any) {
@@ -5631,7 +6003,7 @@ async function startServer() {
         return res.status(404).json({ error: 'Produto não encontrado.' });
       }
 
-      await dbAsync.run('UPDATE products SET image = NULL WHERE id = ?', productId);
+      await dbAsync.run('UPDATE products SET image = NULL, image_webp = NULL WHERE id = ?', productId);
       
       console.log(`[Admin Product Image Remove] Vínculo de imagem principal removido para produto ID ${productId} pelo admin`);
       
@@ -10276,8 +10648,8 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
       const siteName = s.site_name || 'Digital Bordados';
-      const products = await dbAsync.all(`SELECT id, name, slug, image, image_alt, created_at, updated_at FROM products WHERE status = 'active'`) as any[];
-      const galleryImages = await dbAsync.all(`SELECT product_id, url, alt_text FROM product_images`) as any[];
+      const products = await dbAsync.all(`SELECT id, name, slug, image, image_webp, image_alt, created_at, updated_at FROM products WHERE status = 'active'`) as any[];
+      const galleryImages = await dbAsync.all(`SELECT product_id, url, url_webp, alt_text FROM product_images`) as any[];
 
       const formatLastMod = (dateVal: any): string => {
         if (!dateVal) return new Date().toISOString().slice(0, 10);
@@ -10323,6 +10695,18 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     </image:image>`);
         }
 
+        // Imagem Principal WebP
+        if (p.image_webp && p.image_webp.trim() !== '') {
+          const mainWebpUrl = p.image_webp.startsWith('http') ? p.image_webp : `${appUrl}${p.image_webp.startsWith('/') ? '' : '/'}${p.image_webp}`;
+          const mainCaption = p.image_alt ? resolveTemplate(p.image_alt, p.name) : p.name;
+          imageTags.push(`
+    <image:image>
+      <image:loc>${xmlEscape(mainWebpUrl)}</image:loc>
+      <image:title>${xmlEscape(p.name)}</image:title>
+      <image:caption>${xmlEscape(mainCaption)}</image:caption>
+    </image:image>`);
+        }
+
         // Imagens da Galeria
         const pGallery = galleryMap.get(p.id) || [];
         pGallery.forEach(img => {
@@ -10334,6 +10718,16 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       <image:title>${xmlEscape(p.name)}</image:title>
       <image:caption>${xmlEscape(secCaption)}</image:caption>
     </image:image>`);
+
+          if (img.url_webp && img.url_webp.trim() !== '') {
+            const secWebpUrl = img.url_webp.startsWith('http') ? img.url_webp : `${appUrl}${img.url_webp.startsWith('/') ? '' : '/'}${img.url_webp}`;
+            imageTags.push(`
+    <image:image>
+      <image:loc>${xmlEscape(secWebpUrl)}</image:loc>
+      <image:title>${xmlEscape(p.name)}</image:title>
+      <image:caption>${xmlEscape(secCaption)}</image:caption>
+    </image:image>`);
+          }
         });
 
         // Se o produto não tiver nenhuma imagem (principal ou galeria), não renderiza loc no sitemap de imagens
@@ -10839,7 +11233,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       // Gallery images
       const galleryRows = await dbAsync.all(`
-        SELECT id, product_id, url, alt_text, is_featured, created_at, file_type
+        SELECT id, product_id, url, url_webp, alt_text, is_featured, created_at, file_type
         FROM product_images
         WHERE product_id = ?
           AND (
@@ -10853,24 +11247,29 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         id: row.id,
         product_id: row.product_id,
         url: String(row?.url || '').trim(),
+        url_webp: String(row?.url_webp || '').trim(),
         alt_text: String(row?.alt_text || '').trim(),
         full_url: normalizePublicMediaUrl(row?.url),
+        full_url_webp: normalizePublicMediaUrl(row?.url_webp),
         is_featured: row?.is_featured ?? 0,
         created_at: row?.created_at ?? null,
         file_type: row?.file_type ?? null,
       }));
 
       const resolvedMainImage = resolvePublicMediaWithFallback(product?.image, product?.slug || '', 'image', Number(product?.id || 0));
+      const resolvedMainImageWebp = resolvePublicMediaWithFallback(product?.image_webp, product?.slug || '', 'image', Number(product?.id || 0));
       const resolvedProductionSheet = resolvePublicMediaWithFallback(product?.production_sheet, product?.slug || '', 'pdf', Number(product?.id || 0));
 
       const normalizedProduct = {
         ...product,
         image: resolvedMainImage,
+        image_webp: resolvedMainImageWebp,
         production_sheet: resolvedProductionSheet,
       };
       const normalizedRelatedProducts = relatedProducts.map((relatedProduct) => ({
         ...relatedProduct,
         image: normalizePublicMediaUrl(relatedProduct?.image),
+        image_webp: normalizePublicMediaUrl(relatedProduct?.image_webp),
       }));
 
       // Carregar todas as categorias vinculadas ao produto

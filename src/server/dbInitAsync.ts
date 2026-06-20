@@ -87,5 +87,16 @@ export async function initDb() {
   } catch (_) {
     // Silencia se a coluna já existir ou a operação falhar
   }
+
+  // Adicionar coluna image_webp em products se não existir
+  try {
+    await dbAsync.query(`ALTER TABLE products ADD COLUMN image_webp TEXT NULL AFTER image`);
+  } catch (_) {}
+
+  // Adicionar coluna url_webp em product_images se não existir
+  try {
+    await dbAsync.query(`ALTER TABLE product_images ADD COLUMN url_webp TEXT NULL AFTER url`);
+  } catch (_) {}
 }
+
 

@@ -44,6 +44,15 @@ interface SeoMetrics {
   brokenImagesCount: number;
 }
 
+interface WebpReport {
+  totalImages: number;
+  converted: number;
+  pending: number;
+  errors: number;
+  savingsBytes: number;
+  savingsMb: number;
+}
+
 export default function AdminSeoDashboard() {
   const [metrics, setMetrics] = useState<SeoMetrics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,6 +62,18 @@ export default function AdminSeoDashboard() {
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [activeTab, setActiveTab] = useState<'general' | 'images'>('general');
   const [runningAction, setRunningAction] = useState(false);
+
+  // Estados do processamento de WebP
+  const [webpReport, setWebpReport] = useState<WebpReport | null>(null);
+  const [webpReportLoading, setWebpReportLoading] = useState(false);
+  const [convertingWebp, setConvertingWebp] = useState(false);
+  const [conversionProgress, setConversionProgress] = useState<{
+    total: number;
+    current: number;
+    processed: number;
+    errors: number;
+    savingsMb: number;
+  } | null>(null);
 
   const fetchMetrics = async () => {
     try {
@@ -70,13 +91,136 @@ export default function AdminSeoDashboard() {
     }
   };
 
+  const fetchWebpReport = async () => {
+    try {
+      setWebpReportLoading(true);
+      const res = await fetch('/api/admin/seo/images/conversion-report', { credentials: 'include' });
+      if (!res.ok) throw new Error('Falha ao carregar relatório WebP.');
+      const data = await res.json();
+      if (data.success) {
+        setWebpReport(data.report);
+      }
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setWebpReportLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchMetrics();
   }, []);
 
+  useEffect(() => {
+    if (activeTab === 'images') {
+      fetchWebpReport();
+    }
+  }, [activeTab]);
+
   const handleRefresh = () => {
     setRefreshing(true);
     fetchMetrics();
+    if (activeTab === 'images') {
+      fetchWebpReport();
+    }
+  };
+
+  const handleConvertWebpImages = async () => {
+    if (convertingWebp) return;
+    setConvertingWebp(true);
+    setRunningAction(true);
+    
+    let currentPending = 0;
+    let totalImagesToProcess = 0;
+
+    try {
+      const resReport = await fetch('/api/admin/seo/images/conversion-report', { credentials: 'include' });
+      const dataReport = await resReport.json();
+      if (dataReport.success) {
+        currentPending = dataReport.report.pending;
+        totalImagesToProcess = currentPending;
+        setWebpReport(dataReport.report);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar relatório inicial:', err);
+    }
+
+    if (currentPending === 0) {
+      setMessage({ text: 'Não há imagens pendentes para conversão!', type: 'success' });
+      setConvertingWebp(false);
+      setRunningAction(false);
+      return;
+    }
+
+    setConversionProgress({
+      total: totalImagesToProcess,
+      current: 0,
+      processed: 0,
+      errors: 0,
+      savingsMb: 0
+    });
+
+    let keepGoing = true;
+    let processedInThisSession = 0;
+    let errorsInThisSession = 0;
+    let savingsInThisSession = 0;
+
+    while (keepGoing) {
+      try {
+        const res = await fetch('/api/admin/seo/images/convert-batch', {
+          method: 'POST',
+          credentials: 'include'
+        });
+        if (!res.ok) {
+          throw new Error('Falha na resposta do servidor.');
+        }
+        const data = await res.json();
+        if (data.success) {
+          processedInThisSession += data.processedCount;
+          errorsInThisSession += data.errorsCount;
+          savingsInThisSession += data.savingsBytes;
+
+          const currentTotalProcessed = processedInThisSession + errorsInThisSession;
+          
+          setConversionProgress({
+            total: totalImagesToProcess,
+            current: Math.min(totalImagesToProcess, currentTotalProcessed),
+            processed: processedInThisSession,
+            errors: errorsInThisSession,
+            savingsMb: parseFloat((savingsInThisSession / (1024 * 1024)).toFixed(2))
+          });
+
+          setWebpReport(prev => prev ? {
+            ...prev,
+            converted: prev.converted + data.processedCount,
+            pending: data.remaining,
+            errors: prev.errors + data.errorsCount,
+            savingsBytes: prev.savingsBytes + data.savingsBytes,
+            savingsMb: parseFloat(((prev.savingsBytes + data.savingsBytes) / (1024 * 1024)).toFixed(2))
+          } : null);
+
+          if (data.remaining === 0 || (data.processedCount === 0 && data.errorsCount === 0)) {
+            keepGoing = false;
+          }
+        } else {
+          throw new Error(data.error || 'Erro desconhecido no processamento em lote.');
+        }
+      } catch (err: any) {
+        console.error('Erro no lote de conversão:', err);
+        setMessage({ text: `Erro durante a conversão: ${err.message || err}`, type: 'error' });
+        keepGoing = false;
+      }
+    }
+
+    setConvertingWebp(false);
+    setRunningAction(false);
+    setMessage({ 
+      text: `Conversão concluída! Processadas: ${processedInThisSession} imagens. Erros: ${errorsInThisSession}. Economia: ${(savingsInThisSession / (1024 * 1024)).toFixed(2)} MB`, 
+      type: 'success' 
+    });
+    fetchMetrics();
+    fetchWebpReport();
+    setConversionProgress(null);
   };
 
   const handleVerifyBrokenImages = async () => {
@@ -568,6 +712,99 @@ export default function AdminSeoDashboard() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Painel de Conversão WebP */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-50 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                  <RefreshCw className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Conversão de Imagens Existentes para WebP</h3>
+                  <p className="text-[10px] text-slate-400 font-bold">Otimização de performance e Lighthouse com coexistência WebP + JPEG.</p>
+                </div>
+              </div>
+            </div>
+
+            {webpReportLoading && !webpReport ? (
+              <div className="flex items-center justify-center py-6">
+                <RefreshCw className="w-6 h-6 text-blue-600 animate-spin" />
+                <span className="text-xs font-bold text-slate-500 ml-2">Buscando relatório de imagens WebP...</span>
+              </div>
+            ) : webpReport ? (
+              <div className="space-y-6">
+                {/* Métricas WebP */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 text-center">
+                    <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Total de Imagens</p>
+                    <p className="text-xl font-black text-slate-700 mt-1">{webpReport.totalImages}</p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100 text-center">
+                    <p className="text-[9px] font-black uppercase tracking-wider text-emerald-600">Convertidas (WebP)</p>
+                    <p className="text-xl font-black text-emerald-700 mt-1">{webpReport.converted}</p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-amber-50 border border-amber-100 text-center">
+                    <p className="text-[9px] font-black uppercase tracking-wider text-amber-600">Pendentes</p>
+                    <p className="text-xl font-black text-amber-700 mt-1">{webpReport.pending}</p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-rose-50 border border-rose-100 text-center">
+                    <p className="text-[9px] font-black uppercase tracking-wider text-rose-600">Erros / Inexistentes</p>
+                    <p className="text-xl font-black text-rose-700 mt-1">{webpReport.errors}</p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 text-center col-span-2 md:col-span-1">
+                    <p className="text-[9px] font-black uppercase tracking-wider text-blue-600">Espaço Economizado</p>
+                    <p className="text-xl font-black text-blue-700 mt-1">{webpReport.savingsMb} MB</p>
+                  </div>
+                </div>
+
+                {/* Barra de Progresso de Conversão */}
+                {conversionProgress && (
+                  <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 space-y-3">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                      <span className="flex items-center gap-1.5">
+                        <RefreshCw className="w-3.5 h-3.5 text-blue-600 animate-spin" />
+                        Convertendo imagens legadas ({conversionProgress.current} de {conversionProgress.total})
+                      </span>
+                      <span>{Math.round((conversionProgress.current / conversionProgress.total) * 100)}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                      <div 
+                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                        style={{ width: `${(conversionProgress.current / conversionProgress.total) * 100}%` }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-slate-400 font-mono">
+                      <span>Sucesso: {conversionProgress.processed} | Falhas: {conversionProgress.errors}</span>
+                      <span className="text-emerald-600 font-bold">Economia parcial: {conversionProgress.savingsMb} MB</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Botão de Ação */}
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="text-xs text-slate-500 font-semibold max-w-xl">
+                    A conversão processa imagens em lotes de 20 por ciclo. Não há risco de timeout.
+                    As fotos JPEG originais permanecem intactas para garantir compatibilidade com navegadores legados e Google Shopping.
+                  </div>
+                  <button
+                    onClick={handleConvertWebpImages}
+                    disabled={runningAction || convertingWebp || webpReport.pending === 0}
+                    className="w-full md:w-auto px-8 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-widest transition-all shadow-md active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
+                  >
+                    {convertingWebp ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Convertendo...
+                      </>
+                    ) : (
+                      'Converter Imagens Existentes para WebP'
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </>
       )}
