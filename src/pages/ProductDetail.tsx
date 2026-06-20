@@ -47,6 +47,10 @@ export default function ProductDetail() {
   const [activeReviewIndex, setActiveReviewIndex] = useState(0);
 
   useEffect(() => {
+    setActiveReviewIndex(0);
+  }, [reviews]);
+
+  useEffect(() => {
     if (reviews.length <= 1) return;
     const interval = window.setInterval(() => {
       setActiveReviewIndex((prev) => (prev + 1) % reviews.length);
@@ -135,7 +139,7 @@ export default function ProductDetail() {
       if (res.ok) {
         const data = await res.json();
         setReviews(data.reviews || []);
-        setAvgRating(data.avgRating || 0);
+        setAvgRating(Number(data.avgRating || 0));
       }
     } catch (error) {
       console.error('Failed to fetch reviews:', error);
@@ -339,7 +343,7 @@ export default function ProductDetail() {
       ...(reviews.length > 0 && avgRating > 0 ? {
         aggregateRating: {
           '@type': 'AggregateRating',
-          ratingValue: Number(avgRating.toFixed(1)),
+          ratingValue: Number(Number(avgRating || 0).toFixed(1)),
           reviewCount: reviews.length,
           bestRating: 5,
           worstRating: 1,
@@ -673,27 +677,35 @@ export default function ProductDetail() {
                     transition={{ duration: 0.3 }}
                     className="space-y-3"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex text-amber-400">
-                        {Array.from({ length: 5 }).map((_, i) => (
-                          <Star
-                            key={i}
-                            className={`w-3.5 h-3.5 ${
-                              i < reviews[activeReviewIndex].rating ? 'fill-current' : 'text-slate-200'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-[9px] font-bold text-slate-400">
-                        {new Date(reviews[activeReviewIndex].created_at).toLocaleDateString('pt-BR')}
-                      </span>
-                    </div>
-                    <p className="text-slate-600 text-xs font-semibold italic leading-relaxed">
-                      "{reviews[activeReviewIndex].comment}"
-                    </p>
-                    <p className="text-slate-800 text-[10px] font-black uppercase tracking-wider">
-                      - {reviews[activeReviewIndex].user_name}
-                    </p>
+                    {(() => {
+                      const currentReview = reviews[activeReviewIndex] || reviews[0];
+                      if (!currentReview) return null;
+                      return (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <div className="flex text-amber-400">
+                              {Array.from({ length: 5 }).map((_, i) => (
+                                <Star
+                                  key={i}
+                                  className={`w-3.5 h-3.5 ${
+                                    i < currentReview.rating ? 'fill-current' : 'text-slate-200'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <span className="text-[9px] font-bold text-slate-400">
+                              {new Date(currentReview.created_at).toLocaleDateString('pt-BR')}
+                            </span>
+                          </div>
+                          <p className="text-slate-600 text-xs font-semibold italic leading-relaxed">
+                            "{currentReview.comment}"
+                          </p>
+                          <p className="text-slate-800 text-[10px] font-black uppercase tracking-wider">
+                            - {currentReview.user_name}
+                          </p>
+                        </>
+                      );
+                    })()}
                   </motion.div>
                 </AnimatePresence>
               </div>

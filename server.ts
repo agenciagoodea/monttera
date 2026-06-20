@@ -10052,33 +10052,88 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
   app.get('/sitemap-images.xml', async (req, res) => {
     try {
-      const s = await loadSettingsMapAsync(['seo_sitemap_enabled', 'app_url']);
+      const s = await loadSettingsMapAsync(['seo_sitemap_enabled', 'app_url', 'site_name']);
       const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
       if (!sitemapEnabled) return res.status(404).type('text/plain').send('Sitemap desabilitado');
 
       const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
-      const products = await dbAsync.all(`SELECT name, slug, image, image_alt FROM products WHERE status = 'active' AND image IS NOT NULL AND image != ''`) as any[];
+      const siteName = s.site_name || 'Digital Bordados';
+      const products = await dbAsync.all(`SELECT id, name, slug, image, image_alt, created_at, updated_at FROM products WHERE status = 'active'`) as any[];
+      const galleryImages = await dbAsync.all(`SELECT product_id, url, alt_text FROM product_images`) as any[];
+
+      const formatLastMod = (dateVal: any): string => {
+        if (!dateVal) return new Date().toISOString().slice(0, 10);
+        try {
+          const d = new Date(dateVal);
+          return isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
+        } catch {
+          return new Date().toISOString().slice(0, 10);
+        }
+      };
 
       const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
+      const resolveTemplate = (text: string, prodName: string) => {
+        if (!text) return '';
+        return text
+          .replace(/{{\s*nome_produto\s*}}/gi, prodName)
+          .replace(/{{\s*site_nome\s*}}/gi, siteName);
+      };
+
+      const galleryMap = new Map<number, any[]>();
+      galleryImages.forEach(img => {
+        if (img.product_id && img.url) {
+          if (!galleryMap.has(img.product_id)) {
+            galleryMap.set(img.product_id, []);
+          }
+          galleryMap.get(img.product_id)!.push(img);
+        }
+      });
+
       const body = products.map(p => {
-        const imgUrl = p.image.startsWith('http') ? p.image : `${appUrl}${p.image.startsWith('/') ? '' : '/'}${p.image}`;
+        const imageTags: string[] = [];
+
+        // Imagem Principal
+        if (p.image && p.image.trim() !== '') {
+          const mainImgUrl = p.image.startsWith('http') ? p.image : `${appUrl}${p.image.startsWith('/') ? '' : '/'}${p.image}`;
+          const mainCaption = p.image_alt ? resolveTemplate(p.image_alt, p.name) : p.name;
+          imageTags.push(`
+    <image:image>
+      <image:loc>${xmlEscape(mainImgUrl)}</image:loc>
+      <image:title>${xmlEscape(p.name)}</image:title>
+      <image:caption>${xmlEscape(mainCaption)}</image:caption>
+    </image:image>`);
+        }
+
+        // Imagens da Galeria
+        const pGallery = galleryMap.get(p.id) || [];
+        pGallery.forEach(img => {
+          const secImgUrl = img.url.startsWith('http') ? img.url : `${appUrl}${img.url.startsWith('/') ? '' : '/'}${img.url}`;
+          const secCaption = img.alt_text ? resolveTemplate(img.alt_text, p.name) : `${p.name} - Detalhe`;
+          imageTags.push(`
+    <image:image>
+      <image:loc>${xmlEscape(secImgUrl)}</image:loc>
+      <image:title>${xmlEscape(p.name)}</image:title>
+      <image:caption>${xmlEscape(secCaption)}</image:caption>
+    </image:image>`);
+        });
+
+        // Se o produto não tiver nenhuma imagem (principal ou galeria), não renderiza loc no sitemap de imagens
+        if (imageTags.length === 0) return '';
+
         return `
   <url>
     <loc>${appUrl}/produto/${xmlEscape(p.slug)}</loc>
-    <image:image>
-      <image:loc>${xmlEscape(imgUrl)}</image:loc>
-      <image:title>${xmlEscape(p.name)}</image:title>
-      <image:caption>${xmlEscape(p.image_alt || p.name)}</image:caption>
-    </image:image>
+    <lastmod>${formatLastMod(p.updated_at || p.created_at)}</lastmod>${imageTags.join('')}
   </url>`;
-      }).join('');
+      }).filter(Boolean).join('');
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">${body}
 </urlset>`;
-      res.type('application/xml; charset=utf-8');
+      
+      res.setHeader('Content-Type', 'application/xml');
       return res.send(xml);
     } catch (error) {
       console.error('sitemap-images.xml error:', error);
@@ -11864,6 +11919,16 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
               }
             });
 
+            const formatIsoDate = (dateVal: any): string => {
+              if (!dateVal) return new Date().toISOString();
+              try {
+                const d = new Date(dateVal);
+                return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+              } catch {
+                return new Date().toISOString();
+              }
+            };
+
             jsonLdGraph.push({
               "@type": "Product",
               "@id": `${canonicalUrl}/#product`,
@@ -11876,7 +11941,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
                 "@type": "Brand",
                 "name": orgName
               },
-              "offers": offers
+              "offers": offers,
+              "datePublished": formatIsoDate(product.created_at),
+              "dateModified": formatIsoDate(product.updated_at || product.created_at)
             });
 
             // Adicionar ImageObject no grafo para o Google Imagens
