@@ -3951,6 +3951,7 @@ async function startServer() {
   }
 
   // API de Métricas de SEO
+  // API de Métricas de SEO
   app.get('/api/admin/seo/dashboard-metrics', authenticate, isAdmin, async (req, res) => {
     try {
       const totalProductsRes = await dbAsync.get('SELECT COUNT(*) as count FROM products WHERE status = "active"') as any;
@@ -3989,22 +3990,69 @@ async function startServer() {
       `) as any;
       const shoppingEligible = Number(shoppingEligibleRes?.count || 0);
 
+      // --- Métricas de SEO de Imagens ---
+      const totalImagesCountRes = await dbAsync.get(`
+        SELECT 
+          (SELECT COUNT(*) FROM products WHERE status = 'active' AND image IS NOT NULL AND image != '') +
+          (SELECT COUNT(*) FROM product_images pi JOIN products p ON pi.product_id = p.id WHERE p.status = 'active') as count
+      `) as any;
+      const totalImages = Number(totalImagesCountRes?.count || 0);
+
+      // Buscar imagens de galeria sem ALT
+      const galleryWithoutAlt = await dbAsync.all(`
+        SELECT pi.id, pi.product_id, pi.url, p.name as product_name 
+        FROM product_images pi 
+        JOIN products p ON pi.product_id = p.id 
+        WHERE p.status = "active" AND (pi.alt_text IS NULL OR TRIM(pi.alt_text) = "")
+      `) as any[];
+
+      // Buscar imagens principais não WebP/SVG
+      const mainNotWebp = await dbAsync.all(`
+        SELECT id, name, image FROM products 
+        WHERE status = "active" 
+        AND image IS NOT NULL AND image != '' 
+        AND LOWER(image) NOT LIKE '%.webp' AND LOWER(image) NOT LIKE '%.svg'
+      `) as any[];
+
+      // Buscar imagens de galeria não WebP/SVG
+      const galleryNotWebp = await dbAsync.all(`
+        SELECT pi.id, pi.product_id, pi.url, p.name as product_name 
+        FROM product_images pi 
+        JOIN products p ON pi.product_id = p.id 
+        WHERE p.status = "active" 
+        AND LOWER(pi.url) NOT LIKE '%.webp' AND LOWER(pi.url) NOT LIKE '%.svg'
+      `) as any[];
+
+      // Imagens Quebradas do Cache
+      const brokenImages = (apiCache.get('seo_broken_images') as any[]) || [];
+      const brokenImagesCount = brokenImages.length;
+
       const alerts: any[] = [];
       
       withoutAltRes.forEach(p => {
         alerts.push({
           type: 'alt_missing',
           severity: 'warning',
-          message: `O produto "${p.name}" está sem texto descritivo ALT na imagem principal.`,
+          message: `A imagem principal do produto "${p.name}" está sem texto descritivo ALT.`,
           productId: p.id,
           productName: p.name
+        });
+      });
+
+      galleryWithoutAlt.forEach(img => {
+        alerts.push({
+          type: 'alt_missing',
+          severity: 'warning',
+          message: `A imagem secundária (${img.url}) da galeria do produto "${img.product_name}" está sem texto descritivo ALT.`,
+          productId: img.product_id,
+          productName: img.product_name
         });
       });
 
       withoutDescRes.forEach(p => {
         const isShort = p.description && p.description.trim().length > 0;
         alerts.push({
-          type: isShort ? 'description_short' : 'description_short',
+          type: 'description_short',
           severity: 'warning',
           message: isShort 
             ? `O produto "${p.name}" tem uma descrição curta (${p.description.trim().length} carac.). SEO fraco.`
@@ -4034,21 +4082,191 @@ async function startServer() {
         });
       });
 
+      mainNotWebp.forEach(p => {
+        alerts.push({
+          type: 'image_not_webp',
+          severity: 'warning',
+          message: `A imagem principal do produto "${p.name}" (${p.image.split('.').pop()}) não está no formato WebP ou SVG.`,
+          productId: p.id,
+          productName: p.name
+        });
+      });
+
+      galleryNotWebp.forEach(img => {
+        alerts.push({
+          type: 'image_not_webp',
+          severity: 'warning',
+          message: `Uma imagem da galeria do produto "${img.product_name}" (${img.url}) não está no formato WebP ou SVG.`,
+          productId: img.product_id,
+          productName: img.product_name
+        });
+      });
+
+      brokenImages.forEach((img: any) => {
+        alerts.push({
+          type: 'image_broken',
+          severity: 'danger',
+          message: `Imagem quebrada/inacessível detectada no servidor: ${img.url}`,
+          productId: img.productId,
+          productName: img.productName
+        });
+      });
+
       const sitemapsCount = 4; // Static, Products, Categories, Images
       
       return res.json({
         totalProducts,
         shoppingEligible,
-        productsWithoutAlt: withoutAltRes.length,
+        productsWithoutAlt: withoutAltRes.length + galleryWithoutAlt.length,
         productsWithoutDescription: withoutDescRes.length,
         productsWithoutCategory: withoutCategoryRes.length,
         productsWithDuplicateTitles: duplicateProducts.length,
         sitemapsCount,
+        // Métricas adicionais de imagens
+        totalImages,
+        imagesWithoutAlt: withoutAltRes.length + galleryWithoutAlt.length,
+        imagesNotWebpCount: mainNotWebp.length + galleryNotWebp.length,
+        brokenImagesCount,
         alerts
       });
     } catch (error) {
       console.error('SEO Dashboard metrics error:', error);
       return res.status(500).json({ error: 'Erro ao buscar métricas de SEO' });
+    }
+  });
+
+  // API para verificar imagens quebradas
+  app.post('/api/admin/seo/images/verify-broken', authenticate, isAdmin, async (req, res) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const http = require('http');
+      const https = require('https');
+
+      const products = await dbAsync.all('SELECT id, name, image FROM products WHERE status = "active" AND image IS NOT NULL AND image != ""') as any[];
+      const gallery = await dbAsync.all('SELECT pi.product_id, pi.url, p.name as product_name FROM product_images pi JOIN products p ON pi.product_id = p.id WHERE p.status = "active"') as any[];
+
+      const broken: any[] = [];
+      const publicPath = path.join(process.cwd(), 'public');
+
+      const checkLocalFile = (fileUrl: string): boolean => {
+        try {
+          const cleanPath = fileUrl.split('?')[0].split('#')[0];
+          const absolutePath = path.join(publicPath, cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath);
+          return fs.existsSync(absolutePath);
+         } catch {
+          return false;
+        }
+      };
+
+      const checkRemoteUrl = (urlStr: string): Promise<boolean> => {
+        return new Promise((resolve) => {
+          try {
+            const parsedUrl = new URL(urlStr);
+            const client = parsedUrl.protocol === 'https:' ? https : http;
+            const req = client.request({
+              hostname: parsedUrl.hostname,
+              port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+              path: parsedUrl.pathname + parsedUrl.search,
+              method: 'HEAD',
+              timeout: 3000
+            }, (res) => {
+              resolve(res.statusCode >= 200 && res.statusCode < 400);
+            });
+            req.on('error', () => resolve(false));
+            req.on('timeout', () => {
+              req.destroy();
+              resolve(false);
+            });
+            req.end();
+          } catch {
+            resolve(false);
+          }
+        });
+      };
+
+      // Verificar imagens principais
+      for (const p of products) {
+        if (p.image.startsWith('http')) {
+          const ok = await checkRemoteUrl(p.image);
+          if (!ok) broken.push({ url: p.image, productId: p.id, productName: p.name });
+        } else {
+          const ok = checkLocalFile(p.image);
+          if (!ok) broken.push({ url: p.image, productId: p.id, productName: p.name });
+        }
+      }
+
+      // Verificar imagens da galeria
+      for (const img of gallery) {
+        if (img.url.startsWith('http')) {
+          const ok = await checkRemoteUrl(img.url);
+          if (!ok) broken.push({ url: img.url, productId: img.product_id, productName: img.product_name });
+        } else {
+          const ok = checkLocalFile(img.url);
+          if (!ok) broken.push({ url: img.url, productId: img.product_id, productName: img.product_name });
+        }
+      }
+
+      apiCache.set('seo_broken_images', broken, 86400); // Salvar cache por 24 horas
+      return res.json({ success: true, brokenCount: broken.length, broken });
+    } catch (error) {
+      console.error('Verify broken images error:', error);
+      return res.status(500).json({ error: 'Erro ao verificar imagens quebradas' });
+    }
+  });
+
+  // API para regenerar legendas ALT vazias
+  app.post('/api/admin/seo/images/regenerate-alt', authenticate, isAdmin, async (req, res) => {
+    try {
+      const products = await dbAsync.all('SELECT id, name FROM products WHERE status = "active" AND image IS NOT NULL AND image != "" AND (image_alt IS NULL OR TRIM(image_alt) = "")') as any[];
+      const gallery = await dbAsync.all(`
+        SELECT pi.id, pi.url, p.name as product_name, pi.product_id 
+        FROM product_images pi 
+        JOIN products p ON pi.product_id = p.id 
+        WHERE p.status = "active" AND (pi.alt_text IS NULL OR TRIM(pi.alt_text) = "")
+      `) as any[];
+
+      let correctedProducts = 0;
+      let correctedGallery = 0;
+
+      // Corrigir imagens principais
+      for (const p of products) {
+        const newAlt = `Matriz de Bordado ${p.name.trim()}`;
+        await dbAsync.run('UPDATE products SET image_alt = ? WHERE id = ?', newAlt, p.id);
+        correctedProducts++;
+      }
+
+      // Corrigir galeria agrupando
+      const galleryByProd = new Map<number, any[]>();
+      gallery.forEach(img => {
+        if (!galleryByProd.has(img.product_id)) {
+          galleryByProd.set(img.product_id, []);
+        }
+        galleryByProd.get(img.product_id)!.push(img);
+      });
+
+      for (const [prodId, imgs] of galleryByProd.entries()) {
+        for (let idx = 0; idx < imgs.length; idx++) {
+          const img = imgs[idx];
+          const newAlt = `Matriz de Bordado ${img.product_name.trim()} - Detalhe ${idx + 1}`;
+          await dbAsync.run('UPDATE product_images SET alt_text = ? WHERE id = ?', newAlt, img.id);
+          correctedGallery++;
+        }
+      }
+
+      // Limpar caches
+      apiCache.delete('public_products');
+      apiCache.delete('admin_dashboard_stats');
+
+      return res.json({
+        success: true,
+        correctedProducts,
+        correctedGallery,
+        totalCorrected: correctedProducts + correctedGallery
+      });
+    } catch (error) {
+      console.error('Regenerate ALT error:', error);
+      return res.status(500).json({ error: 'Erro ao regenerar legendas ALT' });
     }
   });
 

@@ -12,7 +12,12 @@ import {
   RefreshCw, 
   FileCode,
   Link,
-  Edit2
+  Edit2,
+  Activity,
+  Cpu,
+  Layers,
+  Wrench,
+  Star
 } from 'lucide-react';
 
 interface SeoAlert {
@@ -32,6 +37,11 @@ interface SeoMetrics {
   productsWithDuplicateTitles: number;
   sitemapsCount: number;
   alerts: SeoAlert[];
+  // Novos campos de imagens
+  totalImages: number;
+  imagesWithoutAlt: number;
+  imagesNotWebpCount: number;
+  brokenImagesCount: number;
 }
 
 export default function AdminSeoDashboard() {
@@ -41,6 +51,8 @@ export default function AdminSeoDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<string>('all');
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [activeTab, setActiveTab] = useState<'general' | 'images'>('general');
+  const [runningAction, setRunningAction] = useState(false);
 
   const fetchMetrics = async () => {
     try {
@@ -65,6 +77,56 @@ export default function AdminSeoDashboard() {
   const handleRefresh = () => {
     setRefreshing(true);
     fetchMetrics();
+  };
+
+  const handleVerifyBrokenImages = async () => {
+    setRunningAction(true);
+    setMessage({ text: 'Iniciando verificação de imagens quebradas...', type: 'success' });
+    try {
+      const res = await fetch('/api/admin/seo/images/verify-broken', { 
+        method: 'POST', 
+        credentials: 'include' 
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage({ 
+          text: `Verificação concluída! ${data.brokenCount} imagens quebradas identificadas.`, 
+          type: 'success' 
+        });
+        fetchMetrics();
+      } else {
+        throw new Error(data.error || 'Erro na verificação.');
+      }
+    } catch (err: any) {
+      setMessage({ text: err.message || 'Erro ao verificar imagens.', type: 'error' });
+    } finally {
+      setRunningAction(false);
+    }
+  };
+
+  const handleRegenerateAlts = async () => {
+    setRunningAction(true);
+    setMessage({ text: 'Regenerando legendas ALT vazias...', type: 'success' });
+    try {
+      const res = await fetch('/api/admin/seo/images/regenerate-alt', { 
+        method: 'POST', 
+        credentials: 'include' 
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage({ 
+          text: `Sucesso! ${data.totalCorrected} legendas ALT geradas automaticamente.`, 
+          type: 'success' 
+        });
+        fetchMetrics();
+      } else {
+        throw new Error(data.error || 'Erro ao regenerar legendas.');
+      }
+    } catch (err: any) {
+      setMessage({ text: err.message || 'Erro ao regenerar legendas.', type: 'error' });
+    } finally {
+      setRunningAction(false);
+    }
   };
 
   const copyToClipboard = (urlPath: string) => {
@@ -99,22 +161,46 @@ export default function AdminSeoDashboard() {
     );
   }
 
-  // Filtrar alertas baseando-se no tipo selecionado
-  const filteredAlerts = metrics.alerts.filter(alert => {
+  // Filtrar alertas baseado no canal (SEO Geral vs SEO de Imagens)
+  const isImageAlert = (type: string) => {
+    return type === 'image_not_webp' || type === 'image_broken' || type === 'alt_missing';
+  };
+
+  const activeAlerts = metrics.alerts.filter(alert => {
+    if (activeTab === 'general') {
+      // Alertas de SEO Geral (ignora formato de imagem/imagens quebradas, mas mantém alt_missing dos produtos se for geral)
+      return alert.type !== 'image_not_webp' && alert.type !== 'image_broken';
+    } else {
+      // Apenas alertas relacionados a imagens
+      return isImageAlert(alert.type);
+    }
+  });
+
+  const filteredAlerts = activeAlerts.filter(alert => {
     if (filterType === 'all') return true;
     return alert.type === filterType;
   });
 
-  // Cálculo da pontuação SEO da plataforma baseado nos problemas
-  const totalIssuesCount = metrics.alerts.length;
+  // Cálculo da pontuação SEO Geral
+  const generalIssuesCount = metrics.alerts.filter(a => a.type !== 'image_not_webp' && a.type !== 'image_broken').length;
   let seoHealthScore = 100;
   if (metrics.totalProducts > 0) {
-    const penaltyPerIssue = 40 / Math.max(1, metrics.totalProducts); // Penalidade balanceada por quantidade de produtos
-    seoHealthScore = Math.max(50, Math.round(100 - (totalIssuesCount * penaltyPerIssue)));
+    const penaltyPerIssue = 40 / Math.max(1, metrics.totalProducts);
+    seoHealthScore = Math.max(50, Math.round(100 - (generalIssuesCount * penaltyPerIssue)));
+  }
+
+  // Cálculo da pontuação SEO de Imagem
+  const totalImgs = metrics.totalImages || 0;
+  const altMissing = metrics.imagesWithoutAlt || 0;
+  const brokenCount = metrics.brokenImagesCount || 0;
+  let imageHealthScore = 100;
+  if (totalImgs > 0) {
+    const scoreVal = 100 - ((altMissing * 15 + brokenCount * 45) / totalImgs);
+    imageHealthScore = Math.max(40, Math.round(scoreVal));
   }
 
   return (
-    <div className="p-6 md:p-10 space-y-10 max-w-[1600px] mx-auto">
+    <div className="p-6 md:p-10 space-y-8 max-w-[1600px] mx-auto">
       
       {/* Toast Messages */}
       {message && (
@@ -134,7 +220,7 @@ export default function AdminSeoDashboard() {
         </div>
         <button
           onClick={handleRefresh}
-          disabled={refreshing}
+          disabled={refreshing || runningAction}
           className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-bold shadow-sm transition-all disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
@@ -142,207 +228,349 @@ export default function AdminSeoDashboard() {
         </button>
       </div>
 
-      {/* Visão Geral da Saúde e Pontuação */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Saúde SEO Geral */}
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm flex flex-col md:flex-row items-center gap-8 lg:col-span-2">
-          <div className="relative w-36 h-36 flex items-center justify-center">
-            {/* Círculo de Progresso da Saúde */}
-            <svg className="absolute w-full h-full transform -rotate-90">
-              <circle cx="72" cy="72" r="64" className="stroke-slate-100" strokeWidth="12" fill="transparent" />
-              <circle 
-                cx="72" 
-                cy="72" 
-                r="64" 
-                className={`transition-all duration-500 ${
-                  seoHealthScore >= 85 ? 'stroke-emerald-500' : seoHealthScore >= 70 ? 'stroke-amber-500' : 'stroke-rose-500'
-                }`}
-                strokeWidth="12" 
-                fill="transparent"
-                strokeDasharray={2 * Math.PI * 64}
-                strokeDashoffset={2 * Math.PI * 64 * (1 - seoHealthScore / 100)}
-                strokeLinecap="round"
-              />
-            </svg>
-            <div className="flex flex-col items-center">
-              <span className="text-3xl font-black text-slate-800">{seoHealthScore}%</span>
-              <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Saúde SEO</span>
-            </div>
-          </div>
-
-          <div className="flex-1 space-y-4">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Diagnóstico da Plataforma</h3>
-            <p className="text-xs text-slate-500 leading-relaxed font-semibold">
-              Sua pontuação de saúde reflete a qualidade dos metadados e da estruturação das informações na loja. 
-              {seoHealthScore >= 90 ? ' Excelente! Quase todos os seus produtos estão totalmente otimizados e prontos para decolar no Google.' : 
-               seoHealthScore >= 75 ? ' Bom, mas há alguns pontos de melhoria que impedem sua loja de atingir o potencial máximo de vendas orgânicas.' : 
-               ' Atenção! Existem problemas significativos em títulos, descrições ou imagens que prejudicam a indexação orgânica.'}
-            </p>
-            <div className="flex flex-wrap gap-4 text-xs font-bold text-slate-600">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>WWW para não-WWW 301 ativo</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>Dados estruturados dinâmicos</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Cobertura de Canais do Google */}
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
-          <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Elegibilidade nos Canais</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
-              <div className="flex items-center gap-3">
-                <Search className="w-4 h-4 text-blue-600" />
-                <span className="text-xs font-bold text-slate-700">Google Search</span>
-              </div>
-              <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                <CheckCircle2 className="w-3 h-3" /> Elegível
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
-              <div className="flex items-center gap-3">
-                <Image className="w-4 h-4 text-emerald-600" />
-                <span className="text-xs font-bold text-slate-700">Google Imagens</span>
-              </div>
-              <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                <CheckCircle2 className="w-3 h-3" /> Elegível
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
-              <div className="flex items-center gap-3">
-                <ShoppingBag className="w-4 h-4 text-violet-600" />
-                <span className="text-xs font-bold text-slate-700">Google Shopping</span>
-              </div>
-              <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
-                <CheckCircle2 className="w-3 h-3" /> Elegível
-              </span>
-            </div>
-          </div>
-        </div>
-
+      {/* Seletor de Abas */}
+      <div className="flex gap-6 border-b border-slate-200 pb-px">
+        <button
+          onClick={() => { setActiveTab('general'); setFilterType('all'); }}
+          disabled={runningAction}
+          className={`pb-4 px-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${
+            activeTab === 'general'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <Globe className="w-4 h-4" />
+          SEO Geral e Páginas
+        </button>
+        <button
+          onClick={() => { setActiveTab('images'); setFilterType('all'); }}
+          disabled={runningAction}
+          className={`pb-4 px-2 text-xs font-black uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${
+            activeTab === 'images'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <Image className="w-4 h-4" />
+          SEO de Imagens
+        </button>
       </div>
 
-      {/* Cards de Métricas Principais */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-        
-        {/* Total de Produtos */}
-        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total de Produtos Ativos</p>
-          <div className="flex items-end justify-between mt-4">
-            <span className="text-3xl font-black text-slate-800">{metrics.totalProducts}</span>
-            <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-              <ShoppingBag className="w-4 h-4" />
-            </div>
-          </div>
-        </div>
+      {activeTab === 'general' ? (
+        <>
+          {/* Visão Geral da Saúde e Pontuação */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            {/* Saúde SEO Geral */}
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm flex flex-col md:flex-row items-center gap-8 lg:col-span-2">
+              <div className="relative w-36 h-36 flex items-center justify-center shrink-0">
+                <svg className="absolute w-full h-full transform -rotate-90">
+                  <circle cx="72" cy="72" r="64" className="stroke-slate-100" strokeWidth="12" fill="transparent" />
+                  <circle 
+                    cx="72" 
+                    cy="72" 
+                    r="64" 
+                    className={`transition-all duration-500 ${
+                      seoHealthScore >= 85 ? 'stroke-emerald-500' : seoHealthScore >= 70 ? 'stroke-amber-500' : 'stroke-rose-500'
+                    }`}
+                    strokeWidth="12" 
+                    fill="transparent"
+                    strokeDasharray={2 * Math.PI * 64}
+                    strokeDashoffset={2 * Math.PI * 64 * (1 - seoHealthScore / 100)}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="flex flex-col items-center">
+                  <span className="text-3xl font-black text-slate-800">{seoHealthScore}%</span>
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Saúde SEO</span>
+                </div>
+              </div>
 
-        {/* Elegibilidade Shopping */}
-        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Elegíveis no Google Shopping</p>
-          <div className="flex items-end justify-between mt-4">
-            <span className="text-3xl font-black text-slate-800">{metrics.shoppingEligible}</span>
-            <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4" />
+              <div className="flex-1 space-y-4">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">Diagnóstico da Plataforma</h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-semibold">
+                  Sua pontuação de saúde reflete a qualidade dos metadados e da estruturação das informações na loja. 
+                  {seoHealthScore >= 90 ? ' Excelente! Quase todos os seus produtos estão totalmente otimizados e prontos para decolar no Google.' : 
+                   seoHealthScore >= 75 ? ' Bom, mas há alguns pontos de melhoria que impedem sua loja de atingir o potencial máximo de vendas orgânicas.' : 
+                   ' Atenção! Existem problemas significativos em títulos, descrições ou imagens que prejudicam a indexação orgânica.'}
+                </p>
+                <div className="flex flex-wrap gap-4 text-xs font-bold text-slate-600">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <span>WWW para não-WWW 301 ativo</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    <span>Dados estruturados dinâmicos</span>
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* Produtos sem ALT */}
-        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32 border-l-4 border-l-amber-400">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-mono">Sem ALT Text</p>
-          <div className="flex items-end justify-between mt-4">
-            <span className="text-3xl font-black text-amber-600">{metrics.productsWithoutAlt}</span>
-            <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center">
-              <Image className="w-4 h-4" />
-            </div>
-          </div>
-        </div>
+            {/* Cobertura de Canais do Google */}
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Elegibilidade nos Canais</h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <Search className="w-4 h-4 text-blue-600" />
+                    <span className="text-xs font-bold text-slate-700">Google Search</span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                    <CheckCircle2 className="w-3 h-3" /> Elegível
+                  </span>
+                </div>
 
-        {/* Sem Descrição Completa */}
-        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32 border-l-4 border-l-rose-400">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sem Descrição/Muito Curta</p>
-          <div className="flex items-end justify-between mt-4">
-            <span className="text-3xl font-black text-rose-600">{metrics.productsWithoutDescription}</span>
-            <div className="w-8 h-8 bg-rose-50 text-rose-600 rounded-lg flex items-center justify-center">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-          </div>
-        </div>
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <Image className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold text-slate-700">Google Imagens</span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                    <CheckCircle2 className="w-3 h-3" /> Elegível
+                  </span>
+                </div>
 
-      </div>
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <ShoppingBag className="w-4 h-4 text-violet-600" />
+                    <span className="text-xs font-bold text-slate-700">Google Shopping</span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                    <CheckCircle2 className="w-3 h-3" /> Elegível
+                  </span>
+                </div>
+              </div>
+            </div>
 
-      {/* Sitemaps e Integrações Google */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
-        <div className="flex items-center gap-3 border-b border-slate-50 pb-5">
-          <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
-            <FileCode className="w-4 h-4" />
-          </div>
-          <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Sitemaps XML e Google Merchant Feed</h3>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          
-          {/* Sitemap Index */}
-          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-between space-y-4">
-            <div>
-              <p className="text-xs font-black text-slate-800">Sitemap XML Indexador</p>
-              <p className="text-[10px] text-slate-400 font-bold font-mono">/sitemap.xml</p>
-              <p className="text-xs text-slate-500 font-semibold mt-2">Aponta automaticamente para todos os outros sub-sitemaps (estático, produtos, categorias, imagens).</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <a href="/sitemap.xml" target="_blank" className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 hover:bg-slate-50">
-                Ver Sitemap <ExternalLink className="w-3 h-3" />
-              </a>
-              <button onClick={() => copyToClipboard('/sitemap.xml')} className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50" title="Copiar URL">
-                <Copy className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Sitemap Imagens */}
-          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-between space-y-4">
-            <div>
-              <p className="text-xs font-black text-slate-800">Sitemap de Imagens</p>
-              <p className="text-[10px] text-slate-400 font-bold font-mono">/sitemap-images.xml</p>
-              <p className="text-xs text-slate-500 font-semibold mt-2">Específico com todas as URLs de fotos dos produtos e títulos correspondentes para otimizar o Google Imagens.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <a href="/sitemap-images.xml" target="_blank" className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 hover:bg-slate-50">
-                Ver Sitemap <ExternalLink className="w-3 h-3" />
-              </a>
-              <button onClick={() => copyToClipboard('/sitemap-images.xml')} className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50" title="Copiar URL">
-                <Copy className="w-3.5 h-3.5" />
-              </button>
-            </div>
           </div>
 
-          {/* Google Merchant */}
-          <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-between space-y-4">
-            <div>
-              <p className="text-xs font-black text-slate-800">Feed Google Merchant Center</p>
-              <p className="text-[10px] text-slate-400 font-bold font-mono">/google-merchant.xml</p>
-              <p className="text-xs text-slate-500 font-semibold mt-2">Feed RSS de produtos XML oficial exigido pelo Google Merchant Center e Google Shopping. Atualizado dinamicamente.</p>
+          {/* Cards de Métricas Principais */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total de Produtos Ativos</p>
+              <div className="flex items-end justify-between mt-4">
+                <span className="text-3xl font-black text-slate-800">{metrics.totalProducts}</span>
+                <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                  <ShoppingBag className="w-4 h-4" />
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <a href="/google-merchant.xml" target="_blank" className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 hover:bg-slate-50">
-                Ver Feed XML <ExternalLink className="w-3 h-3" />
-              </a>
-              <button onClick={() => copyToClipboard('/google-merchant.xml')} className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50" title="Copiar URL">
-                <Copy className="w-3.5 h-3.5" />
-              </button>
+
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Elegíveis no Google Shopping</p>
+              <div className="flex items-end justify-between mt-4">
+                <span className="text-3xl font-black text-slate-800">{metrics.shoppingEligible}</span>
+                <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32 border-l-4 border-l-amber-400">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-mono">Sem ALT Text (Principais)</p>
+              <div className="flex items-end justify-between mt-4">
+                <span className="text-3xl font-black text-amber-600">{metrics.productsWithoutAlt}</span>
+                <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center">
+                  <Image className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32 border-l-4 border-l-rose-400">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sem Descrição/Muito Curta</p>
+              <div className="flex items-end justify-between mt-4">
+                <span className="text-3xl font-black text-rose-600">{metrics.productsWithoutDescription}</span>
+                <div className="w-8 h-8 bg-rose-50 text-rose-600 rounded-lg flex items-center justify-center">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+              </div>
             </div>
           </div>
 
-        </div>
-      </div>
+          {/* Sitemaps e Integrações Google */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
+            <div className="flex items-center gap-3 border-b border-slate-50 pb-5">
+              <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
+                <FileCode className="w-4 h-4" />
+              </div>
+              <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Sitemaps XML e Google Merchant Feed</h3>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-between space-y-4">
+                <div>
+                  <p className="text-xs font-black text-slate-800">Sitemap XML Indexador</p>
+                  <p className="text-[10px] text-slate-400 font-bold font-mono">/sitemap.xml</p>
+                  <p className="text-xs text-slate-500 font-semibold mt-2">Aponta automaticamente para todos os outros sub-sitemaps (estático, produtos, categorias, imagens).</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a href="/sitemap.xml" target="_blank" className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 hover:bg-slate-50">
+                    Ver Sitemap <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <button onClick={() => copyToClipboard('/sitemap.xml')} className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50" title="Copiar URL">
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-between space-y-4">
+                <div>
+                  <p className="text-xs font-black text-slate-800">Sitemap de Imagens</p>
+                  <p className="text-[10px] text-slate-400 font-bold font-mono">/sitemap-images.xml</p>
+                  <p className="text-xs text-slate-500 font-semibold mt-2">Específico com todas as URLs de fotos dos produtos e títulos correspondentes para otimizar o Google Imagens.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a href="/sitemap-images.xml" target="_blank" className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 hover:bg-slate-50">
+                    Ver Sitemap <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <button onClick={() => copyToClipboard('/sitemap-images.xml')} className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50" title="Copiar URL">
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-between space-y-4">
+                <div>
+                  <p className="text-xs font-black text-slate-800">Feed Google Merchant Center</p>
+                  <p className="text-[10px] text-slate-400 font-bold font-mono">/google-merchant.xml</p>
+                  <p className="text-xs text-slate-500 font-semibold mt-2">Feed RSS de produtos XML oficial exigido pelo Google Merchant Center e Google Shopping. Atualizado dinamicamente.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a href="/google-merchant.xml" target="_blank" className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 hover:bg-slate-50">
+                    Ver Feed XML <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <button onClick={() => copyToClipboard('/google-merchant.xml')} className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50" title="Copiar URL">
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* SEO DE IMAGENS - Visão Geral */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            {/* Saúde do SEO de Imagem */}
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm flex flex-col md:flex-row items-center gap-8 lg:col-span-2">
+              <div className="relative w-36 h-36 flex items-center justify-center shrink-0">
+                <svg className="absolute w-full h-full transform -rotate-90">
+                  <circle cx="72" cy="72" r="64" className="stroke-slate-100" strokeWidth="12" fill="transparent" />
+                  <circle 
+                    cx="72" 
+                    cy="72" 
+                    r="64" 
+                    className={`transition-all duration-500 ${
+                      imageHealthScore >= 85 ? 'stroke-emerald-500' : imageHealthScore >= 65 ? 'stroke-amber-500' : 'stroke-rose-500'
+                    }`}
+                    strokeWidth="12" 
+                    fill="transparent"
+                    strokeDasharray={2 * Math.PI * 64}
+                    strokeDashoffset={2 * Math.PI * 64 * (1 - imageHealthScore / 100)}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="flex flex-col items-center">
+                  <span className="text-3xl font-black text-slate-800">{imageHealthScore}%</span>
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Saúde Imagens</span>
+                </div>
+              </div>
+
+              <div className="flex-1 space-y-4">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-blue-600" />
+                  Auditoria de Arquivos e Legendas
+                </h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-semibold">
+                  Esta auditoria analisa a presença do atributo ALT (essencial para acessibilidade e Google Lens), a extensão dos arquivos (formatos modernos como WebP/SVG têm prioridade) e a acessibilidade física das fotos no servidor.
+                </p>
+                <div className="flex flex-wrap gap-3.5 text-[10px] font-black uppercase tracking-wider">
+                  <span className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-100 text-slate-600 flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-blue-500" />
+                    fs.existsSync Ativo
+                  </span>
+                  <span className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-100 text-slate-600 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-emerald-500" />
+                    Sitemap Sincronizado
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Ações Rápidas de Correção */}
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-5">
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+                <Wrench className="w-4 h-4 text-blue-600" />
+                Ações de Correção
+              </h3>
+              <div className="space-y-3">
+                <button
+                  onClick={handleVerifyBrokenImages}
+                  disabled={runningAction || refreshing}
+                  className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-widest transition-all shadow-md active:scale-95 disabled:opacity-50"
+                >
+                  Verificar Imagens Quebradas
+                </button>
+                <button
+                  onClick={handleRegenerateAlts}
+                  disabled={runningAction || refreshing}
+                  className="w-full py-3.5 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-black uppercase tracking-widest transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                >
+                  Regenerar ALTs Vazios
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Cards de Métricas de Imagens */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total de Imagens Ativas</p>
+              <div className="flex items-end justify-between mt-4">
+                <span className="text-3xl font-black text-slate-800">{metrics.totalImages || 0}</span>
+                <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                  <Image className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32 border-l-4 border-l-amber-400">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 font-mono">Imagens Sem ALT</p>
+              <div className="flex items-end justify-between mt-4">
+                <span className="text-3xl font-black text-amber-600">{metrics.imagesWithoutAlt || 0}</span>
+                <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center">
+                  <Star className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32 border-l-4 border-l-rose-400">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Imagens Quebradas</p>
+              <div className="flex items-end justify-between mt-4">
+                <span className={`text-3xl font-black ${(metrics.brokenImagesCount || 0) > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                  {metrics.brokenImagesCount || 0}
+                </span>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${(metrics.brokenImagesCount || 0) > 0 ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-400'}`}>
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between min-h-32">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Imagens não WebP/SVG</p>
+              <div className="flex items-end justify-between mt-4">
+                <span className="text-3xl font-black text-slate-700">{metrics.imagesNotWebpCount || 0}</span>
+                <div className="w-8 h-8 bg-slate-50 text-slate-600 rounded-lg flex items-center justify-center">
+                  <FileCode className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Lista de Alertas e Correções */}
       <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
@@ -351,7 +579,9 @@ export default function AdminSeoDashboard() {
             <div className="w-8 h-8 bg-rose-50 text-rose-600 rounded-lg flex items-center justify-center">
               <AlertTriangle className="w-4 h-4" />
             </div>
-            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Pendências de SEO Encontradas ({metrics.alerts.length})</h3>
+            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">
+              Pendências Identificadas ({filteredAlerts.length})
+            </h3>
           </div>
 
           {/* Filtros de Tipos de Alerta */}
@@ -364,39 +594,70 @@ export default function AdminSeoDashboard() {
             >
               Todos
             </button>
-            <button 
-              onClick={() => setFilterType('alt_missing')} 
-              className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors ${
-                filterType === 'alt_missing' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
-              }`}
-            >
-              Sem Alt ({metrics.productsWithoutAlt})
-            </button>
-            <button 
-              onClick={() => setFilterType('description_short')} 
-              className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors ${
-                filterType === 'description_short' ? 'bg-rose-500 text-white' : 'bg-rose-50 text-rose-600 hover:bg-rose-100'
-              }`}
-            >
-              Sem Descrição / Curta ({metrics.productsWithoutDescription})
-            </button>
-            <button 
-              onClick={() => setFilterType('duplicate_title')} 
-              className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors ${
-                filterType === 'duplicate_title' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-600 hover:bg-red-100'
-              }`}
-            >
-              Duplicados ({metrics.productsWithDuplicateTitles})
-            </button>
+            {activeTab === 'general' ? (
+              <>
+                <button 
+                  onClick={() => setFilterType('alt_missing')} 
+                  className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors ${
+                    filterType === 'alt_missing' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+                  }`}
+                >
+                  Sem Alt ({metrics.productsWithoutAlt})
+                </button>
+                <button 
+                  onClick={() => setFilterType('description_short')} 
+                  className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors ${
+                    filterType === 'description_short' ? 'bg-rose-500 text-white' : 'bg-rose-50 text-rose-600 hover:bg-rose-100'
+                  }`}
+                >
+                  Sem Descrição ({metrics.productsWithoutDescription})
+                </button>
+                <button 
+                  onClick={() => setFilterType('duplicate_title')} 
+                  className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors ${
+                    filterType === 'duplicate_title' ? 'bg-red-600 text-white' : 'bg-red-50 text-red-600 hover:bg-red-100'
+                  }`}
+                >
+                  Duplicados ({metrics.productsWithDuplicateTitles})
+                </button>
+              </>
+            ) : (
+              <>
+                <button 
+                  onClick={() => setFilterType('alt_missing')} 
+                  className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors ${
+                    filterType === 'alt_missing' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+                  }`}
+                >
+                  Sem Alt ({metrics.imagesWithoutAlt})
+                </button>
+                <button 
+                  onClick={() => setFilterType('image_not_webp')} 
+                  className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors ${
+                    filterType === 'image_not_webp' ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Não WebP ({metrics.imagesNotWebpCount})
+                </button>
+                <button 
+                  onClick={() => setFilterType('image_broken')} 
+                  className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors ${
+                    filterType === 'image_broken' ? 'bg-rose-500 text-white' : 'bg-rose-50 text-rose-600 hover:bg-rose-100'
+                  }`}
+                >
+                  Quebradas ({metrics.brokenImagesCount})
+                </button>
+              </>
+            )}
           </div>
         </div>
 
         {/* Tabela de Alertas */}
         {filteredAlerts.length === 0 ? (
-          <div className="text-center py-10">
-            <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3 animate-pulse" />
-            <h4 className="text-xs font-black uppercase tracking-widest text-slate-700">Tudo limpo!</h4>
-            <p className="text-xs font-semibold text-slate-400 mt-1">Nenhum problema de SEO encontrado com este filtro.</p>
+          <div className="text-center py-12 bg-slate-50/50 rounded-3xl border border-dashed border-slate-200">
+            <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
+            <h4 className="text-xs font-black uppercase tracking-widest text-slate-700">SEO Otimizado!</h4>
+            <p className="text-xs font-semibold text-slate-400 mt-1">Nenhuma pendência crítica identificada para este filtro.</p>
           </div>
         ) : (
           <div className="overflow-x-auto rounded-3xl border border-slate-100">
@@ -416,11 +677,11 @@ export default function AdminSeoDashboard() {
                     <td className="py-4 px-6 font-bold text-slate-800">{alert.productName}</td>
                     <td className="py-4 px-6">
                       <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider font-mono ${
-                        alert.type === 'duplicate_title' 
+                        alert.type === 'duplicate_title' || alert.type === 'image_broken'
                           ? 'bg-rose-50 text-rose-600 border border-rose-100' 
                           : alert.type === 'alt_missing'
                           ? 'bg-amber-50 text-amber-600 border border-amber-100'
-                          : 'bg-rose-50 text-rose-600 border border-rose-100'
+                          : 'bg-slate-50 text-slate-600 border border-slate-100'
                       }`}>
                         {alert.type.replace('_', ' ')}
                       </span>
@@ -442,7 +703,7 @@ export default function AdminSeoDashboard() {
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors"
                       >
                         <Edit2 className="w-3 h-3" />
-                        Corrigir
+                        Editar
                       </a>
                     </td>
                   </tr>
