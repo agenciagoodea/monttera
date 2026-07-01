@@ -99,6 +99,7 @@ export default function CartPage() {
     neighborhood: '',
     city: '',
     state: '',
+    country: '',
   });
 
   const [pixExpiresAt, setPixExpiresAt] = useState<number | null>(null);
@@ -146,17 +147,26 @@ export default function CartPage() {
     if (payer.first_name.trim().length < 2) errors.push('Nome inválido');
     if (payer.last_name.trim().length < 2) errors.push('Sobrenome inválido');
     if (!isValidEmail(payer.email)) errors.push('E-mail inválido');
-    if (!isValidCPF(payer.cpf)) errors.push('CPF inválido');
-    if (payer.phone.replace(/\D/g, '').length < 10) errors.push('Telefone inválido');
+    
+    const isForeignUser = payer.country === 'Estrangeiro' || payer.country !== 'Brasil';
+    if (!isForeignUser) {
+      if (!isValidCPF(payer.cpf)) errors.push('CPF inválido');
+      if (payer.phone.replace(/\D/g, '').length < 10) errors.push('Telefone inválido');
+    } else {
+      if (payer.phone.trim().length < 5) errors.push('Telefone inválido');
+    }
     setPayerErrors(errors);
   }, [payer]);
 
+  const isForeignUser = payer.country === 'Estrangeiro' || payer.country !== 'Brasil';
   const fieldError = {
     first_name: payer.first_name.trim().length < 2 ? 'Nome inválido' : '',
     last_name: payer.last_name.trim().length < 2 ? 'Sobrenome inválido' : '',
     email: !isValidEmail(payer.email) ? 'E-mail inválido' : '',
-    cpf: !isValidCPF(payer.cpf) ? 'CPF inválido' : '',
-    phone: payer.phone.replace(/\D/g, '').length < 10 ? 'Telefone inválido' : '',
+    cpf: !isForeignUser && !isValidCPF(payer.cpf) ? 'CPF inválido' : '',
+    phone: isForeignUser 
+      ? (payer.phone.trim().length < 5 ? 'Telefone inválido' : '')
+      : (payer.phone.replace(/\D/g, '').length < 10 ? 'Telefone inválido' : ''),
   };
 
   // Atualiza refs sincronamente a cada render (não causa re-render)
@@ -227,13 +237,14 @@ export default function CartPage() {
               neighborhood: String(profile.billing_neighborhood || profile.neighborhood || profile.district || prev.neighborhood),
               city: String(profile.billing_city || profile.city || prev.city),
               state: String(profile.billing_state || profile.state || prev.state),
+              country: String(profile.billing_country || profile.country || prev.country || 'Brasil'),
             }));
           } else {
-            setPayer((prev) => ({ ...prev, email: prev.email || user.email || '' }));
+            setPayer((prev) => ({ ...prev, email: prev.email || user.email || '', country: prev.country || 'Brasil' }));
           }
         })
         .catch(() => {
-          setPayer((prev) => ({ ...prev, email: prev.email || user.email || '' }));
+          setPayer((prev) => ({ ...prev, email: prev.email || user.email || '', country: prev.country || 'Brasil' }));
         });
     }
   }, [user]);
@@ -290,6 +301,12 @@ export default function CartPage() {
     }
     loadPayPalConfig();
   }, []);
+
+  useEffect(() => {
+    if (isForeignUser) {
+      setCheckoutMethod('paypal');
+    }
+  }, [isForeignUser]);
 
   // SDK do MercadoPago: monta EXATAMENTE UMA VEZ quando o método de cartão é selecionado.
   // Não desmonta ao trocar entre crédito e débito — apenas oculta via CSS.
@@ -678,24 +695,29 @@ export default function CartPage() {
                   className={`${inputClassName('email')} w-full`}
                 />
               </div>
-              <div className="space-y-1 col-span-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">CPF</label>
-                <input
-                  type="text"
-                  placeholder="000.000.000-00"
-                  value={payer.cpf}
-                  onChange={(e) => setPayer((prev) => ({ ...prev, cpf: maskCPF(e.target.value) }))}
-                  onBlur={() => setPayerTouched((prev) => ({ ...prev, cpf: true }))}
-                  className={`${inputClassName('cpf')} w-full`}
-                />
-              </div>
+              {!isForeignUser && (
+                <div className="space-y-1 col-span-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">CPF</label>
+                  <input
+                    type="text"
+                    placeholder="000.000.000-00"
+                    value={payer.cpf}
+                    onChange={(e) => setPayer((prev) => ({ ...prev, cpf: maskCPF(e.target.value) }))}
+                    onBlur={() => setPayerTouched((prev) => ({ ...prev, cpf: true }))}
+                    className={`${inputClassName('cpf')} w-full`}
+                  />
+                </div>
+              )}
               <div className="space-y-1 col-span-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Telefone / WhatsApp</label>
                 <input
                   type="text"
-                  placeholder="(00) 00000-0000"
+                  placeholder={isForeignUser ? "Código do país + número" : "(00) 00000-0000"}
                   value={payer.phone}
-                  onChange={(e) => setPayer((prev) => ({ ...prev, phone: maskPhone(e.target.value) }))}
+                  onChange={(e) => setPayer((prev) => ({ 
+                    ...prev, 
+                    phone: isForeignUser ? e.target.value : maskPhone(e.target.value) 
+                  }))}
                   onBlur={() => setPayerTouched((prev) => ({ ...prev, phone: true }))}
                   className={`${inputClassName('phone')} w-full`}
                 />
@@ -706,13 +728,23 @@ export default function CartPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1 col-span-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">CEP</label>
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">
+                  {isForeignUser ? "Código Postal (Zip Code)" : "CEP"}
+                </label>
                 <input
                   type="text"
-                  placeholder="00000-000"
+                  placeholder={isForeignUser ? "Zip Code" : "00000-000"}
                   value={payer.zip_code}
-                  onChange={(e) => setPayer((prev) => ({ ...prev, zip_code: maskCEP(e.target.value) }))}
-                  onBlur={handleCepBlur}
+                  onChange={(e) => setPayer((prev) => ({ 
+                    ...prev, 
+                    zip_code: isForeignUser ? e.target.value : maskCEP(e.target.value) 
+                  }))}
+                  onBlur={() => {
+                    setPayerTouched(prev => ({ ...prev, zip_code: true }));
+                    if (!isForeignUser) {
+                      handleCepBlur();
+                    }
+                  }}
                   className={`${inputClassName('zip_code')} w-full`}
                 />
               </div>
@@ -781,21 +813,31 @@ export default function CartPage() {
             <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">Pagamento</h2>
 
             <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => setCheckoutMethod('pix')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'pix' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                PIX
-              </button>
-              <button type="button" onClick={() => setCheckoutMethod('credit_card')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'credit_card' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                Crédito
-              </button>
-              <button type="button" onClick={() => setCheckoutMethod('debit_card')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'debit_card' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                Débito
-              </button>
+              {!isForeignUser ? (
+                <>
+                  <button type="button" onClick={() => setCheckoutMethod('pix')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'pix' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    PIX
+                  </button>
+                  <button type="button" onClick={() => setCheckoutMethod('credit_card')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'credit_card' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    Crédito
+                  </button>
+                  <button type="button" onClick={() => setCheckoutMethod('debit_card')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'debit_card' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    Débito
+                  </button>
+                </>
+              ) : null}
               {paypalConfig?.enabled && (
-                <button type="button" onClick={() => setCheckoutMethod('paypal')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'paypal' ? 'bg-[#0070ba] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                <button type="button" onClick={() => setCheckoutMethod('paypal')} className={`px-2 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${checkoutMethod === 'paypal' ? 'bg-[#0070ba] text-white' : 'bg-slate-100 text-slate-600'} ${isForeignUser ? 'col-span-2' : ''}`}>
                   PayPal
                 </button>
               )}
             </div>
+
+            {isForeignUser && (
+              <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl text-[10px] font-bold text-slate-600 leading-relaxed">
+                Compras fora do Brasil são processadas exclusivamente via PayPal (em dólares/euros ou cartão internacional).
+              </div>
+            )}
 
             {/* PIX UI - visível apenas quando método = pix */}
             <div className={checkoutMethod === 'pix' ? '' : 'hidden'}>

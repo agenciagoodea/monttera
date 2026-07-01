@@ -92,13 +92,60 @@ export function applySeo(input: SeoInput) {
   const siteName = String(input.siteName || 'Digital Bordados').trim();
   const title = String(input.title || siteName).trim();
   const description = String(input.description || 'Matrizes de bordado digitais com qualidade profissional.').trim();
-  const canonical = buildAbsoluteUrl(input.canonical || window.location.pathname + window.location.search);
   const image = buildAbsoluteUrl(input.image || '/uploads/seo-default-share.jpg');
-  const robots = String(input.robots || 'index,follow').trim();
   const keywords = String(input.keywords || '').trim();
   const twitterCard = String(input.twitterCard || 'summary_large_image').trim();
   const ogType = String(input.ogType || 'website').trim();
   const favicon = buildAbsoluteUrl(input.favicon || '/favicon.ico');
+
+  // 1. Limpeza da URL canonical no frontend
+  // Apenas preserva o parâmetro legítimo de categoria ('category') se ele estiver presente
+  const urlParams = new URLSearchParams(window.location.search);
+  let cleanSearch = '';
+  if (urlParams.has('category')) {
+    cleanSearch = `?category=${encodeURIComponent(urlParams.get('category') || '')}`;
+  }
+
+  let rawCanonical = input.canonical || window.location.pathname;
+  let canonical = buildAbsoluteUrl(rawCanonical);
+
+  try {
+    const canonicalUrlObj = new URL(canonical);
+    canonicalUrlObj.search = cleanSearch;
+    canonical = canonicalUrlObj.toString();
+  } catch (e) {
+    console.warn('[SEO] Erro ao processar URL canonical:', e);
+  }
+
+  // Forçar canônico para o domínio desktop principal
+  const desktopCanonical = canonical
+    .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
+    .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
+
+  // 2. Determinação dinâmica do robots noindex
+  let robots = String(input.robots || 'index,follow').trim();
+
+  const pathLower = window.location.pathname.toLowerCase();
+  const noindexPaths = [
+    '/carrinho',
+    '/checkout',
+    '/cadastro',
+    '/login',
+    '/favoritos',
+    '/minha-conta',
+    '/admin',
+    '/esqueci-senha',
+    '/redefinir-senha',
+    '/obrigado-compra'
+  ];
+  const isNoindexPath = noindexPaths.some(p => pathLower.startsWith(p));
+
+  const noindexParams = ['nocache', 'add-to-cart', 'remove_item', 'redirect', 'pagenum'];
+  const hasNoindexParam = noindexParams.some(param => urlParams.has(param));
+
+  if (isNoindexPath || hasNoindexParam) {
+    robots = 'noindex,follow';
+  }
 
   document.title = title;
   upsertMetaByName('description', description);
@@ -109,7 +156,7 @@ export function applySeo(input: SeoInput) {
   upsertMetaByProperty('og:site_name', siteName);
   upsertMetaByProperty('og:title', title);
   upsertMetaByProperty('og:description', description);
-  upsertMetaByProperty('og:url', canonical);
+  upsertMetaByProperty('og:url', desktopCanonical);
   upsertMetaByProperty('og:image', image);
 
   upsertMetaByName('twitter:card', twitterCard);
@@ -117,8 +164,6 @@ export function applySeo(input: SeoInput) {
   upsertMetaByName('twitter:description', description);
   upsertMetaByName('twitter:image', image);
 
-  // Forçar canônico para o domínio desktop principal
-  const desktopCanonical = canonical.replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
   upsertCanonical(desktopCanonical);
   
   // Se for o host desktop, adiciona alternate apontando para o mobile

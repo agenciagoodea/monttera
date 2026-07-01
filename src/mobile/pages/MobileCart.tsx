@@ -144,6 +144,7 @@ export default function MobileCart() {
     neighborhood: '',
     city: '',
     state: '',
+    country: '',
   });
 
   const [pixExpiresAt, setPixExpiresAt] = useState<number | null>(null);
@@ -185,10 +186,18 @@ export default function MobileCart() {
     if (payer.first_name.trim().length < 2) errors.push('Nome inválido');
     if (payer.last_name.trim().length < 2) errors.push('Sobrenome inválido');
     if (!isValidEmail(payer.email)) errors.push('E-mail inválido');
-    if (!isValidCPF(payer.cpf)) errors.push('CPF inválido');
-    if (payer.phone.replace(/\D/g, '').length < 10) errors.push('Telefone inválido');
+    
+    const isForeignUser = payer.country === 'Estrangeiro' || payer.country !== 'Brasil';
+    if (!isForeignUser) {
+      if (!isValidCPF(payer.cpf)) errors.push('CPF inválido');
+      if (payer.phone.replace(/\D/g, '').length < 10) errors.push('Telefone inválido');
+    } else {
+      if (payer.phone.trim().length < 5) errors.push('Telefone inválido');
+    }
     setPayerErrors(errors);
   }, [payer]);
+
+  const isForeignUser = payer.country === 'Estrangeiro' || payer.country !== 'Brasil';
 
   payerRef.current = payer;
   itemsRef.current = items;
@@ -227,13 +236,14 @@ export default function MobileCart() {
               neighborhood: String(profile.billing_neighborhood || prev.neighborhood),
               city: String(profile.billing_city || prev.city),
               state: String(profile.billing_state || prev.state),
+              country: String(profile.billing_country || profile.country || prev.country || 'Brasil'),
             }));
           } else {
-            setPayer(prev => ({ ...prev, email: prev.email || user.email || '' }));
+            setPayer(prev => ({ ...prev, email: prev.email || user.email || '', country: prev.country || 'Brasil' }));
           }
         })
         .catch(() => {
-          setPayer(prev => ({ ...prev, email: prev.email || user.email || '' }));
+          setPayer(prev => ({ ...prev, email: prev.email || user.email || '', country: prev.country || 'Brasil' }));
         });
     }
   }, [user]);
@@ -274,6 +284,12 @@ export default function MobileCart() {
       })
       .catch(() => setPaypalConfig({ enabled: false, currency: 'USD', brl_usd_rate: 5.2 }));
   }, []);
+
+  useEffect(() => {
+    if (isForeignUser) {
+      setCheckoutMethod('paypal');
+    }
+  }, [isForeignUser]);
 
   // Inicializa o Mercado Pago SDK
   useEffect(() => {
@@ -725,28 +741,33 @@ export default function MobileCart() {
           </div>
 
           {/* CPF */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">CPF</label>
-            <input
-              type="text"
-              placeholder="000.000.000-00"
-              value={payer.cpf}
-              onChange={(e) => setPayer(prev => ({ ...prev, cpf: maskCPF(e.target.value) }))}
-              onBlur={() => setPayerTouched(prev => ({ ...prev, cpf: true }))}
-              className={inputClassName('cpf', !isValidCPF(payer.cpf))}
-            />
-          </div>
+          {!isForeignUser && (
+            <div className="flex flex-col gap-1">
+              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">CPF</label>
+              <input
+                type="text"
+                placeholder="000.000.000-00"
+                value={payer.cpf}
+                onChange={(e) => setPayer(prev => ({ ...prev, cpf: maskCPF(e.target.value) }))}
+                onBlur={() => setPayerTouched(prev => ({ ...prev, cpf: true }))}
+                className={inputClassName('cpf', !isValidCPF(payer.cpf))}
+              />
+            </div>
+          )}
 
           {/* Telefone */}
           <div className="flex flex-col gap-1">
             <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Telefone / WhatsApp</label>
             <input
               type="text"
-              placeholder="(00) 00000-0000"
+              placeholder={isForeignUser ? "Código do país + número" : "(00) 00000-0000"}
               value={payer.phone}
-              onChange={(e) => setPayer(prev => ({ ...prev, phone: maskPhone(e.target.value) }))}
+              onChange={(e) => setPayer(prev => ({ 
+                ...prev, 
+                phone: isForeignUser ? e.target.value : maskPhone(e.target.value) 
+              }))}
               onBlur={() => setPayerTouched(prev => ({ ...prev, phone: true }))}
-              className={inputClassName('phone', payer.phone.replace(/\D/g, '').length < 10)}
+              className={inputClassName('phone', isForeignUser ? payer.phone.trim().length < 5 : payer.phone.replace(/\D/g, '').length < 10)}
             />
           </div>
 
@@ -755,13 +776,22 @@ export default function MobileCart() {
           {/* CEP e Rua */}
           <div className="grid grid-cols-3 gap-3">
             <div className="flex flex-col gap-1 col-span-1">
-              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">CEP</label>
+              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                {isForeignUser ? "Zip Code" : "CEP"}
+              </label>
               <input
                 type="text"
-                placeholder="00000-000"
+                placeholder={isForeignUser ? "Zip Code" : "00000-000"}
                 value={payer.zip_code}
-                onChange={(e) => setPayer(prev => ({ ...prev, zip_code: maskCEP(e.target.value) }))}
-                onBlur={handleCepBlur}
+                onChange={(e) => setPayer(prev => ({ 
+                  ...prev, 
+                  zip_code: isForeignUser ? e.target.value : maskCEP(e.target.value) 
+                }))}
+                onBlur={() => {
+                  if (!isForeignUser) {
+                    handleCepBlur();
+                  }
+                }}
                 className="w-full px-3 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] font-semibold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all text-center"
               />
             </div>
@@ -834,39 +864,43 @@ export default function MobileCart() {
         </h3>
 
         <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => setCheckoutMethod('pix')}
-            className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
-              checkoutMethod === 'pix'
-                ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10 scale-[1.02]'
-                : 'bg-slate-50 border-slate-100 text-slate-500'
-            }`}
-          >
-            PIX
-          </button>
-          <button
-            type="button"
-            onClick={() => setCheckoutMethod('credit_card')}
-            className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
-              checkoutMethod === 'credit_card'
-                ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10 scale-[1.02]'
-                : 'bg-slate-50 border-slate-100 text-slate-500'
-            }`}
-          >
-            <CreditCard className="w-3.5 h-3.5" /> Crédito
-          </button>
-          <button
-            type="button"
-            onClick={() => setCheckoutMethod('debit_card')}
-            className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
-              checkoutMethod === 'debit_card'
-                ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10 scale-[1.02]'
-                : 'bg-slate-50 border-slate-100 text-slate-500'
-            }`}
-          >
-            <CreditCard className="w-3.5 h-3.5" /> Débito
-          </button>
+          {!isForeignUser ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setCheckoutMethod('pix')}
+                className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
+                  checkoutMethod === 'pix'
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10 scale-[1.02]'
+                    : 'bg-slate-50 border-slate-100 text-slate-500'
+                }`}
+              >
+                PIX
+              </button>
+              <button
+                type="button"
+                onClick={() => setCheckoutMethod('credit_card')}
+                className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
+                  checkoutMethod === 'credit_card'
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10 scale-[1.02]'
+                    : 'bg-slate-50 border-slate-100 text-slate-500'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" /> Crédito
+              </button>
+              <button
+                type="button"
+                onClick={() => setCheckoutMethod('debit_card')}
+                className={`px-2 py-3.5 rounded-2xl text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1 border transition-all ${
+                  checkoutMethod === 'debit_card'
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10 scale-[1.02]'
+                    : 'bg-slate-50 border-slate-100 text-slate-500'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" /> Débito
+              </button>
+            </>
+          ) : null}
           {paypalConfig?.enabled && (
             <button
               type="button"
@@ -875,12 +909,18 @@ export default function MobileCart() {
                 checkoutMethod === 'paypal'
                   ? 'bg-[#0070ba] border-[#0070ba] text-white shadow-md shadow-blue-500/10 scale-[1.02]'
                   : 'bg-slate-50 border-slate-100 text-slate-500'
-              }`}
+              } ${isForeignUser ? 'col-span-2' : ''}`}
             >
               PayPal
             </button>
           )}
         </div>
+
+        {isForeignUser && (
+          <div className="p-3.5 bg-blue-50 border border-blue-100 rounded-2xl text-[10px] font-bold text-slate-600 leading-relaxed">
+            Compras fora do Brasil são processadas exclusivamente via PayPal (em dólares/euros ou cartão internacional).
+          </div>
+        )}
 
         {/* Formulário do Cartão - Integrado do Mercado Pago (Crédito & Débito) */}
         <div className={(checkoutMethod === 'credit_card' || checkoutMethod === 'debit_card') ? 'block' : 'hidden'}>

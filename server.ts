@@ -2147,7 +2147,7 @@ async function initSettings() {
     seo_enable_organization_schema: 'true',
     seo_enable_breadcrumb_schema: 'true',
     seo_sitemap_enabled: 'true',
-    seo_robots_custom_rules: '',
+    seo_robots_custom_rules: 'Disallow: /*?*nocache=\nDisallow: /*?*add-to-cart=\nDisallow: /*?*remove_item=\nDisallow: /*?*redirect=\nDisallow: /*?*pagenum=',
   };
 
   for (const [key, value] of Object.entries(defaultSettings)) {
@@ -2690,6 +2690,7 @@ async function startServer() {
       password,
       phone,
       cpf,
+      country,
       terms_accepted,
       privacy_accepted,
       cookie_accepted,
@@ -2739,8 +2740,8 @@ async function startServer() {
         );
         const createdUserId = Number((userInsert as any).insertId || 0);
         await conn.execute(
-          'INSERT INTO customers (user_id, phone, cpf) VALUES (?, ?, ?)',
-          [createdUserId, phone ? String(phone).trim() : null, cpf ? String(cpf).trim() : null] as any,
+          'INSERT INTO customers (user_id, phone, cpf, country) VALUES (?, ?, ?, ?)',
+          [createdUserId, phone ? String(phone).trim() : null, cpf ? String(cpf).trim() : null, country ? String(country).trim() : 'Brasil'] as any,
         );
         return createdUserId;
       });
@@ -10462,14 +10463,14 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       });
     } catch (error) {
       console.error('Reports Stats Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar dados dos relat?rios' });
+      res.status(500).json({ error: 'Erro ao buscar dados dos relatÃƒÂ³rios' });
     }
   });
 
   // API Routes - CONTENT
-  app.get('/robots.txt', (req, res) => {
+  app.get('/robots.txt', async (req, res) => {
     try {
-      const s = loadSettingsMap([
+      const s = await loadSettingsMapAsync([
         'seo_robots_index',
         'seo_robots_follow',
         'seo_robots_custom_rules',
@@ -10508,7 +10509,10 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         return res.status(404).type('text/plain').send('Sitemap desabilitado');
       }
 
-      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const configuredUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const appUrl = configuredUrl
+        .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
+        .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
       
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -10539,8 +10543,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
       if (!sitemapEnabled) return res.status(404).type('text/plain').send('Sitemap desabilitado');
 
-      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
-      const staticPaths = ['/', '/loja', '/contato', '/orcamento', '/login', '/cadastro'];
+      const configuredUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const appUrl = configuredUrl
+        .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
+        .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
+      
+      // /login e /cadastro removidos porque possuem noindex,follow por regras de SEO
+      const staticPaths = ['/', '/loja', '/contato', '/orcamento'];
 
       const body = staticPaths.map(p => `
   <url>
@@ -10566,8 +10575,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
       if (!sitemapEnabled) return res.status(404).type('text/plain').send('Sitemap desabilitado');
 
-      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
-      const products = await dbAsync.all(`SELECT slug, updated_at, created_at FROM products WHERE status = 'active'`) as any[];
+      const configuredUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const appUrl = configuredUrl
+        .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
+        .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
+      
+      // Apenas produtos ativos e que NÃO estejam marcados com noindex
+      const products = await dbAsync.all(`SELECT slug, updated_at, created_at FROM products WHERE status = 'active' AND (noindex IS NULL OR noindex = 0)`) as any[];
 
       const formatLastMod = (dateVal: any): string => {
         if (!dateVal) return new Date().toISOString().slice(0, 10);
@@ -10606,7 +10620,11 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
       if (!sitemapEnabled) return res.status(404).type('text/plain').send('Sitemap desabilitado');
 
-      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const configuredUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const appUrl = configuredUrl
+        .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
+        .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
+      
       const categories = await dbAsync.all(`SELECT slug, created_at FROM product_categories WHERE status = 'active'`) as any[];
 
       const formatLastMod = (dateVal: any): string => {
@@ -10646,9 +10664,15 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const sitemapEnabled = String(s.seo_sitemap_enabled || 'true').toLowerCase() === 'true';
       if (!sitemapEnabled) return res.status(404).type('text/plain').send('Sitemap desabilitado');
 
-      const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const configuredUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+      const appUrl = configuredUrl
+        .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
+        .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
+      
       const siteName = s.site_name || 'Digital Bordados';
-      const products = await dbAsync.all(`SELECT id, name, slug, image, image_webp, image_alt, created_at, updated_at FROM products WHERE status = 'active'`) as any[];
+      
+      // Apenas produtos ativos e que NÃO estejam marcados com noindex
+      const products = await dbAsync.all(`SELECT id, name, slug, image, image_webp, image_alt, created_at, updated_at FROM products WHERE status = 'active' AND (noindex IS NULL OR noindex = 0)`) as any[];
       const galleryImages = await dbAsync.all(`SELECT product_id, url, url_webp, alt_text FROM product_images`) as any[];
 
       const formatLastMod = (dateVal: any): string => {
@@ -12357,7 +12381,11 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           'favicon_url'
         ]);
 
-        const appUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+        const configuredUrl = String(process.env.APP_URL || s.app_url || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+        const appUrl = configuredUrl
+          .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
+          .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
+          
         const siteName = s.site_name || 'Digital Bordados';
         const orgName = s.seo_organization_name || siteName;
         const orgLogo = s.seo_organization_logo || s.logo_url || '/logo.png';
@@ -12374,7 +12402,35 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         if (req.query.category) {
           canonicalUrl += `?category=${encodeURIComponent(String(req.query.category))}`;
         }
-        let ogImage = s.seo_og_image || s.logo_url || '/logo.png';
+        
+        // Determinação dinâmica do robots noindex no backend
+        let robots = 'index,follow';
+        const pathLower = req.path.toLowerCase();
+        
+        // Rotas com noindex
+        const noindexPaths = [
+          '/carrinho',
+          '/checkout',
+          '/cadastro',
+          '/login',
+          '/favoritos',
+          '/minha-conta',
+          '/admin',
+          '/esqueci-senha',
+          '/redefinir-senha',
+          '/obrigado-compra'
+        ];
+        const isNoindexPath = noindexPaths.some(p => pathLower.startsWith(p));
+        
+        // Parâmetros com noindex (nocache, add-to-cart, remove_item, redirect, pagenum)
+        const noindexParams = ['nocache', 'add-to-cart', 'remove_item', 'redirect', 'pagenum'];
+        const hasNoindexParam = noindexParams.some(param => req.query[param] !== undefined);
+        
+        if (isNoindexPath || hasNoindexParam) {
+          robots = 'noindex,follow';
+        }
+
+        let ogImage = s.seo_og_image || s.logo_url || '/uploads/seo-default-share.jpg';
         let absoluteOgImage = ogImage.startsWith('http') ? ogImage : `${appUrl}${ogImage.startsWith('/') ? '' : '/'}${ogImage}`;
         let ogType = 'website';
         
@@ -12612,6 +12668,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         const seoTags = `
   <title>${xmlEscape(title)}</title>
   <meta name="description" content="${xmlEscape(description)}" />
+  <meta name="robots" content="${robots}" />
   <link rel="canonical" href="${xmlEscape(canonicalUrl)}" />
   <link rel="icon" href="${xmlEscape(absoluteFavicon)}" />
   <meta property="og:title" content="${xmlEscape(title)}" />
@@ -12633,6 +12690,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         // Limpa as tags originais do head que serão reinjetadas de forma dinâmica para evitar duplicidades
         html = html.replace(/<title>.*?<\/title>/gi, '');
         html = html.replace(/<meta[^>]*name=["']description["'][^>]*>/gi, '');
+        html = html.replace(/<meta[^>]*name=["']robots["'][^>]*>/gi, '');
         html = html.replace(/<meta[^>]*property=["']og:title["'][^>]*>/gi, '');
         html = html.replace(/<meta[^>]*property=["']og:description["'][^>]*>/gi, '');
         html = html.replace(/<meta[^>]*property=["']og:image["'][^>]*>/gi, '');
