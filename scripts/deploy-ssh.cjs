@@ -14,6 +14,7 @@ const commands = [
   'rm -f diagnostico_produtos_zips.json diagnostico_produtos_zips.md relatorio_limpeza_arquivos.json relatorio_limpeza_arquivos.md relatorio_verificacao_arquivos.json relatorio_verificacao_arquivos.md 2>/dev/null || true',
   'mv uploads/arquivos/matriz-bordado-medicina1-205.jpg uploads/arquivos/matriz-bordado-medicina1-205.jpg.bak 2>/dev/null || true',
   'mv uploads/arquivos/matriz-bordado-medicina1-eyqjxj.jpg uploads/arquivos/matriz-bordado-medicina1-eyqjxj.jpg.bak 2>/dev/null || true',
+  'git stash',
   'git pull',
   'npm install',
   'npm run build',
