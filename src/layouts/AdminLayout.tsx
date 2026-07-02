@@ -16,7 +16,9 @@ import {
   ShieldCheck,
   FolderOpen,
   Star,
-  Globe
+  Globe,
+  HelpCircle,
+  BookOpen
 } from 'lucide-react';
 import { useAppData } from '../contexts/AppDataContext';
 
@@ -39,6 +41,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { icon: ShoppingCart, label: 'Pedidos', path: '/admin/pedidos' },
     { icon: Users, label: 'Clientes', path: '/admin/clientes' },
     { icon: Star, label: 'Avaliações', path: '/admin/avaliacoes' },
+    { icon: HelpCircle, label: 'FAQ', path: '/admin/faq' },
+    { icon: BookOpen, label: 'Blog', path: '/admin/blog' },
     { icon: BarChart3, label: 'Relatórios', path: '/admin/relatorios' },
     { icon: Activity, label: 'Estatísticas do Site', path: '/admin/estatisticas' },
     { icon: Globe, label: 'Painel SEO', path: '/admin/seo' },

@@ -1,0 +1,82 @@
+{
+  "common": {
+    "home": "Inicio",
+    "shop": "Tienda",
+    "about_us": "Nuestra Empresa",
+    "quote": "Presupuesto",
+    "contact": "Contacto",
+    "help": "Ayuda",
+    "privacy": "Privacidad",
+    "my_account": "Mi Cuenta",
+    "hello": "Hola",
+    "login": "Entrar",
+    "register": "Registrarse",
+    "logout": "Salir",
+    "search_placeholder": "Busque por una palabra clave (ej. policía, flores, animales, coche)...",
+    "search_results": "Ver todos los resultados para",
+    "no_results": "Ningún producto encontrado",
+    "no_results_sub": "Intente buscar términos diferentes o más genéricos.",
+    "cart": "Carrito",
+    "favorites": "Favoritos",
+    "loading": "Cargando...",
+    "error": "Ocurrió un error",
+    "currency_symbol": "$ ",
+    "all_rights_reserved": "Todos los derechos reservados",
+    "secure_environment": "Ambiente Seguro",
+    "ssl_protection": "Protección SSL de 256 bits",
+    "whatsapp_support": "Soporte por WhatsApp",
+    "email_support": "Soporte por Correo"
+  },
+  "menu": {
+    "dashboard": "Panel General",
+    "orders": "Mis Pedidos",
+    "downloads": "Mis Descargas",
+    "addresses": "Direcciones",
+    "profile": "Detalles de la Cuenta",
+    "admin_dashboard": "Panel de Admin"
+  },
+  "product": {
+    "buy_now": "Comprar Ahora",
+    "add_to_cart": "Añadir al Carrito",
+    "description": "Descripción",
+    "short_description": "Resumen",
+    "details": "Detalles Técnicos",
+    "colors": "Colores",
+    "stitch_count": "Puntos",
+    "format": "Formatos",
+    "downloads_info": "Descarga instantánea tras la aprobación del pago",
+    "featured": "Destacados",
+    "new": "Novedad",
+    "category": "Categoría",
+    "reviews": "Calificaciones",
+    "no_reviews": "Este producto aún no tiene calificaciones.",
+    "related_products": "Productos Relacionados"
+  },
+  "cart_page": {
+    "title": "Su Carrito de Compras",
+    "empty": "Su carrito está vacío.",
+    "go_to_shop": "Ir a la Tienda",
+    "subtotal": "Subtotal",
+    "total": "Total",
+    "checkout": "Finalizar Compra",
+    "remove": "Eliminar"
+  },
+  "checkout_page": {
+    "title": "Finalizar Compra",
+    "payment_method": "Método de Pago",
+    "credit_card_pix": "Tarjeta de Crédito o pago local",
+    "paypal": "PayPal",
+    "place_order": "Realizar Pedido",
+    "billing_details": "Datos de Facturación"
+  },
+  "footer": {
+    "intro_text": "¡Transforme sus ideas en bordados perfectos! Ofrecemos diseños de bordado computarizado de alta calidad listos para dar vida a sus proyectos con precisión y creatividad."
+  },
+  "help_page": {
+    "title": "¿Cómo podemos ayudar?",
+    "subtitle": "Encuentre respuestas rápidas o póngase en contacto con nuestro soporte.",
+    "faq_title": "Preguntas Frecuentes",
+    "need_more_help": "¿Aún necesitas ayuda?",
+    "need_more_help_desc": "Nuestro equipo de soporte está disponible de lunes a viernes, de 09:00 a 18:00, para resolver cualquier duda o problema técnico."
+  }
+}

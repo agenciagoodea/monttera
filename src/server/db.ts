@@ -188,6 +188,7 @@ export function initDb() {
       status VARCHAR(50) DEFAULT 'ativo',
       woo_user_id VARCHAR(50) NULL,
       email_verified_at DATETIME NULL,
+      language VARCHAR(10) DEFAULT 'pt',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -211,11 +212,21 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS product_categories (
       id INT AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
+      name_en VARCHAR(255) NULL,
+      name_es VARCHAR(255) NULL,
       slug VARCHAR(255) NOT NULL UNIQUE,
+      slug_en VARCHAR(255) NULL,
+      slug_es VARCHAR(255) NULL,
       parent_id INT NULL,
       image TEXT,
       description TEXT,
+      description_en TEXT NULL,
+      description_es TEXT NULL,
       icon VARCHAR(255) NULL,
+      seo_title_en VARCHAR(255) NULL,
+      seo_title_es VARCHAR(255) NULL,
+      seo_description_en VARCHAR(255) NULL,
+      seo_description_es VARCHAR(255) NULL,
       status VARCHAR(50) DEFAULT 'active',
       sort_order INT DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -227,7 +238,11 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS product_tags (
       id INT AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
+      name_en VARCHAR(255) NULL,
+      name_es VARCHAR(255) NULL,
       slug VARCHAR(255) NOT NULL UNIQUE,
+      slug_en VARCHAR(255) NULL,
+      slug_es VARCHAR(255) NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
@@ -236,13 +251,23 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS products (
       id INT AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
+      name_en VARCHAR(255) NULL,
+      name_es VARCHAR(255) NULL,
       slug VARCHAR(255) NOT NULL UNIQUE,
+      slug_en VARCHAR(255) NULL,
+      slug_es VARCHAR(255) NULL,
       description TEXT,
+      description_en LONGTEXT NULL,
+      description_es LONGTEXT NULL,
       short_description TEXT,
+      short_description_en TEXT NULL,
+      short_description_es TEXT NULL,
       price DECIMAL(12,2) NOT NULL,
       sale_price DECIMAL(12,2) NULL,
       image TEXT,
       image_alt TEXT NULL,
+      image_alt_en VARCHAR(255) NULL,
+      image_alt_es VARCHAR(255) NULL,
       production_sheet TEXT,
       category_id INT NULL,
       type VARCHAR(50) DEFAULT 'simple',
@@ -253,7 +278,11 @@ export function initDb() {
       is_featured TINYINT(1) DEFAULT 0,
       is_new TINYINT(1) DEFAULT 0,
       seo_title TEXT,
+      seo_title_en VARCHAR(255) NULL,
+      seo_title_es VARCHAR(255) NULL,
       seo_description TEXT,
+      seo_description_en VARCHAR(255) NULL,
+      seo_description_es VARCHAR(255) NULL,
       status VARCHAR(50) DEFAULT 'active',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -340,6 +369,7 @@ export function initDb() {
       payment_method VARCHAR(100),
       transaction_id VARCHAR(255),
       paid_at DATETIME NULL,
+      language VARCHAR(10) DEFAULT 'pt',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -391,12 +421,54 @@ export function initDb() {
       \`key\` VARCHAR(100) NOT NULL UNIQUE,
       name VARCHAR(200) NOT NULL,
       subject VARCHAR(300) NOT NULL,
+      subject_en VARCHAR(300) NULL,
+      subject_es VARCHAR(300) NULL,
       body LONGTEXT NOT NULL,
+      body_en LONGTEXT NULL,
+      body_es LONGTEXT NULL,
       variables TEXT COMMENT 'JSON array com as variÃ¡veis disponÃ­veis',
       active TINYINT(1) DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS faqs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      question_pt TEXT NOT NULL,
+      question_en TEXT NULL,
+      question_es TEXT NULL,
+      answer_pt TEXT NOT NULL,
+      answer_en TEXT NULL,
+      answer_es TEXT NULL,
+      display_order INT DEFAULT 0,
+      is_active TINYINT DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  query(`
+    CREATE TABLE IF NOT EXISTS blog_posts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      title_pt VARCHAR(255) NOT NULL,
+      title_en VARCHAR(255) NULL,
+      title_es VARCHAR(255) NULL,
+      slug_pt VARCHAR(255) NOT NULL,
+      slug_en VARCHAR(255) NULL,
+      slug_es VARCHAR(255) NULL,
+      content_pt LONGTEXT NOT NULL,
+      content_en LONGTEXT NULL,
+      content_es LONGTEXT NULL,
+      summary_pt TEXT NULL,
+      summary_en TEXT NULL,
+      summary_es TEXT NULL,
+      image_url VARCHAR(512) NULL,
+      status VARCHAR(50) DEFAULT 'draft',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_blog_slug_pt (slug_pt)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
   query(`

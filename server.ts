@@ -409,6 +409,10 @@ class CacheProvider {
   clear() {
     this.cache.clear();
   }
+
+  flushAll() {
+    this.cache.clear();
+  }
 }
 
 const apiCache = new CacheProvider();
@@ -2639,23 +2643,52 @@ async function startServer() {
     }
   });
 
+  const getRequestLocale = (req: any): 'pt' | 'en' | 'es' => {
+    const queryLoc = req.query.locale || req.query.lang;
+    if (queryLoc === 'en' || queryLoc === 'es') return queryLoc;
+    
+    const cookieLoc = req.cookies?.lang_pref;
+    if (cookieLoc === 'en' || cookieLoc === 'es') return cookieLoc;
+
+    const headerLoc = String(req.headers['accept-language'] || '').toLowerCase();
+    if (headerLoc.startsWith('es')) return 'es';
+    if (headerLoc.startsWith('en')) return 'en';
+
+    return 'pt';
+  };
+
   // API Routes - AUTH
-  // Busca inteligente de produtos (Posicionada no inÃƒÂ­cio para evitar conflitos)
+  // Busca inteligente de produtos (Posicionada no início para evitar conflitos)
   app.get('/api/products/search', async (req, res) => {
     try {
       const queryStr = req.query.q as string;
       if (!queryStr || queryStr.trim().length < 2) return res.json([]);
 
+      const locale = getRequestLocale(req);
       const searchTerm = `%${queryStr.trim()}%`;
       
-      // Busca avançada abrangendo categorias, subcategorias (filhas) e com limite expandido de 100 itens
-      const products = await dbAsync.all(`
-        SELECT DISTINCT p.id, p.name, p.slug, p.price, p.sale_price, p.image 
-        FROM products p
-        WHERE (
+      const slugCol = locale === 'pt' ? 'p.slug' : `COALESCE(p.slug_${locale}, p.slug) AS slug`;
+      const nameCol = locale === 'pt' ? 'p.name' : `COALESCE(p.name_${locale}, p.name) AS name`;
+      const catNameCol = locale === 'pt' ? 'c.name' : `COALESCE(c.name_${locale}, c.name)`;
+
+      let whereClause = `
+        (
           p.name LIKE ? 
           OR p.slug LIKE ? 
           OR p.description LIKE ?
+      `;
+      const params = [searchTerm, searchTerm, searchTerm];
+
+      if (locale !== 'pt') {
+        whereClause += `
+          OR p.name_${locale} LIKE ?
+          OR p.slug_${locale} LIKE ?
+          OR p.description_${locale} LIKE ?
+        `;
+        params.push(searchTerm, searchTerm, searchTerm);
+      }
+
+      whereClause += `
           OR EXISTS (
             SELECT 1
             FROM product_category_relations pcr
@@ -2667,13 +2700,36 @@ async function startServer() {
                 OR c.slug LIKE ?
                 OR parent.name LIKE ?
                 OR parent.slug LIKE ?
+      `;
+      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+
+      if (locale !== 'pt') {
+        whereClause += `
+                OR c.name_${locale} LIKE ?
+                OR c.slug_${locale} LIKE ?
+                OR parent.name_${locale} LIKE ?
+                OR parent.slug_${locale} LIKE ?
+        `;
+        params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+      }
+
+      whereClause += `
               )
           )
         )
+      `;
+
+      const products = await dbAsync.all(`
+        SELECT DISTINCT p.id, ${nameCol}, ${slugCol}, p.price, p.sale_price, p.image,
+               (${catNameCol}) as category_name
+        FROM products p
+        LEFT JOIN product_category_relations pcr ON pcr.product_id = p.id
+        LEFT JOIN product_categories c ON c.id = pcr.category_id
+        WHERE ${whereClause}
         AND p.status IN ('active', 'ativo')
         ORDER BY p.id DESC
         LIMIT 100
-      `, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      `, ...params);
 
       return res.json(products);
     } catch (error: any) {
@@ -6016,6 +6072,116 @@ async function startServer() {
   });
 
   // API Routes - ADMIN CATEGORIES
+  // API Routes - ADMIN FAQs
+  app.get('/api/admin/faqs', authenticate, isAdmin, async (req, res) => {
+    try {
+      const faqs = await dbAsync.all('SELECT * FROM faqs ORDER BY sort_order ASC, id ASC');
+      res.json(faqs);
+    } catch (error) {
+      console.error('Admin Fetch FAQs Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar FAQs' });
+    }
+  });
+
+  app.post('/api/admin/faqs', authenticate, isAdmin, async (req, res) => {
+    try {
+      const { question, question_en, question_es, answer, answer_en, answer_es, category, category_en, category_es, sort_order } = req.body;
+      const result = await dbAsync.run(`
+        INSERT INTO faqs (question, question_en, question_es, answer, answer_en, answer_es, category, category_en, category_es, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, question, question_en || null, question_es || null, answer, answer_en || null, answer_es || null, category, category_en || null, category_es || null, parseInt(sort_order || '0'));
+      apiCache.flushAll();
+      res.json({ id: result.lastInsertRowid });
+    } catch (error) {
+      console.error('Admin Create FAQ Error:', error);
+      res.status(500).json({ error: 'Erro ao criar FAQ' });
+    }
+  });
+
+  app.put('/api/admin/faqs/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { question, question_en, question_es, answer, answer_en, answer_es, category, category_en, category_es, sort_order } = req.body;
+      await dbAsync.run(`
+        UPDATE faqs
+        SET question = ?, question_en = ?, question_es = ?, answer = ?, answer_en = ?, answer_es = ?, category = ?, category_en = ?, category_es = ?, sort_order = ?
+        WHERE id = ?
+      `, question, question_en || null, question_es || null, answer, answer_en || null, answer_es || null, category, category_en || null, category_es || null, parseInt(sort_order || '0'), id);
+      apiCache.flushAll();
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Admin Update FAQ Error:', error);
+      res.status(500).json({ error: 'Erro ao atualizar FAQ' });
+    }
+  });
+
+  app.delete('/api/admin/faqs/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      await dbAsync.run('DELETE FROM faqs WHERE id = ?', id);
+      apiCache.flushAll();
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Admin Delete FAQ Error:', error);
+      res.status(500).json({ error: 'Erro ao excluir FAQ' });
+    }
+  });
+
+  // API Routes - ADMIN BLOG POSTS
+  app.get('/api/admin/blog', authenticate, isAdmin, async (req, res) => {
+    try {
+      const posts = await dbAsync.all('SELECT * FROM blog_posts ORDER BY published_at DESC, id DESC');
+      res.json(posts);
+    } catch (error) {
+      console.error('Admin Fetch Blog Posts Error:', error);
+      res.status(500).json({ error: 'Erro ao buscar artigos do blog' });
+    }
+  });
+
+  app.post('/api/admin/blog', authenticate, isAdmin, async (req, res) => {
+    try {
+      const { title, title_en, title_es, slug, slug_en, slug_es, excerpt, excerpt_en, excerpt_es, content, content_en, content_es, image, author, status, published_at } = req.body;
+      const result = await dbAsync.run(`
+        INSERT INTO blog_posts (title, title_en, title_es, slug, slug_en, slug_es, excerpt, excerpt_en, excerpt_es, content, content_en, content_es, image, author, status, published_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, title, title_en || null, title_es || null, slug, slug_en || null, slug_es || null, excerpt, excerpt_en || null, excerpt_es || null, content, content_en || null, content_es || null, image, author, status, published_at || null);
+      apiCache.flushAll();
+      res.json({ id: result.lastInsertRowid });
+    } catch (error) {
+      console.error('Admin Create Blog Post Error:', error);
+      res.status(500).json({ error: 'Erro ao criar artigo de blog' });
+    }
+  });
+
+  app.put('/api/admin/blog/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { title, title_en, title_es, slug, slug_en, slug_es, excerpt, excerpt_en, excerpt_es, content, content_en, content_es, image, author, status, published_at } = req.body;
+      await dbAsync.run(`
+        UPDATE blog_posts
+        SET title = ?, title_en = ?, title_es = ?, slug = ?, slug_en = ?, slug_es = ?, excerpt = ?, excerpt_en = ?, excerpt_es = ?, content = ?, content_en = ?, content_es = ?, image = ?, author = ?, status = ?, published_at = ?
+        WHERE id = ?
+      `, title, title_en || null, title_es || null, slug, slug_en || null, slug_es || null, excerpt, excerpt_en || null, excerpt_es || null, content, content_en || null, content_es || null, image, author, status, published_at || null, id);
+      apiCache.flushAll();
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Admin Update Blog Post Error:', error);
+      res.status(500).json({ error: 'Erro ao atualizar artigo de blog' });
+    }
+  });
+
+  app.delete('/api/admin/blog/:id', authenticate, isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      await dbAsync.run('DELETE FROM blog_posts WHERE id = ?', id);
+      apiCache.flushAll();
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Admin Delete Blog Post Error:', error);
+      res.status(500).json({ error: 'Erro ao excluir artigo de blog' });
+    }
+  });
+
   app.get('/api/admin/categories', authenticate, isAdmin, async (req, res) => {
     const categories = await dbAsync.all(`
       SELECT 
@@ -10548,18 +10714,32 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
         .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
       
-      // /login e /cadastro removidos porque possuem noindex,follow por regras de SEO
-      const staticPaths = ['/', '/loja', '/contato', '/orcamento'];
+      const staticRoutes = [
+        { pt: '', en: '/en', es: '/es', priority: '1.0' },
+        { pt: '/loja', en: '/en/shop', es: '/es/tienda', priority: '0.8' },
+        { pt: '/contato', en: '/en/contact', es: '/es/contacto', priority: '0.8' },
+        { pt: '/orcamento', en: '/en/quote', es: '/es/presupuesto', priority: '0.8' }
+      ];
 
-      const body = staticPaths.map(p => `
+      const body = staticRoutes.flatMap(route => {
+        return ['pt', 'en', 'es'].map(lang => {
+          const locPath = lang === 'pt' ? route.pt : (lang === 'en' ? route.en : route.es);
+          return `
   <url>
-    <loc>${appUrl}${p}</loc>
-    <priority>${p === '/' ? '1.0' : '0.8'}</priority>
+    <loc>${appUrl}${locPath}</loc>
+    <xhtml:link rel="alternate" hreflang="pt-br" href="${appUrl}${route.pt}" />
+    <xhtml:link rel="alternate" hreflang="en" href="${appUrl}${route.en}" />
+    <xhtml:link rel="alternate" hreflang="es" href="${appUrl}${route.es}" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="${appUrl}${route.pt}" />
+    <priority>${route.priority}</priority>
     <changefreq>daily</changefreq>
-  </url>`).join('');
+  </url>`;
+        });
+      }).join('');
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">${body}
 </urlset>`;
       res.type('application/xml; charset=utf-8');
       return res.send(xml);
@@ -10580,8 +10760,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
         .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
       
-      // Apenas produtos ativos e que NÃO estejam marcados com noindex
-      const products = await dbAsync.all(`SELECT slug, updated_at, created_at FROM products WHERE status = 'active' AND (noindex IS NULL OR noindex = 0)`) as any[];
+      const products = await dbAsync.all(`SELECT slug, slug_en, slug_es, updated_at, created_at FROM products WHERE status = 'active' AND (noindex IS NULL OR noindex = 0)`) as any[];
 
       const formatLastMod = (dateVal: any): string => {
         if (!dateVal) return new Date().toISOString().slice(0, 10);
@@ -10595,16 +10774,34 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
-      const body = products.map(p => `
+      const body = products.flatMap(p => {
+        const slugPt = p.slug;
+        const slugEn = p.slug_en || p.slug;
+        const slugEs = p.slug_es || p.slug;
+        const dateStr = formatLastMod(p.updated_at || p.created_at);
+
+        return ['pt', 'en', 'es'].map(lang => {
+          const locPath = lang === 'pt' 
+            ? `/produto/${slugPt}` 
+            : (lang === 'en' ? `/en/product/${slugEn}` : `/es/producto/${slugEs}`);
+          
+          return `
   <url>
-    <loc>${appUrl}/produto/${xmlEscape(p.slug)}</loc>
-    <lastmod>${formatLastMod(p.updated_at || p.created_at)}</lastmod>
+    <loc>${appUrl}${locPath}</loc>
+    <xhtml:link rel="alternate" hreflang="pt-br" href="${appUrl}/produto/${xmlEscape(slugPt)}" />
+    <xhtml:link rel="alternate" hreflang="en" href="${appUrl}/en/product/${xmlEscape(slugEn)}" />
+    <xhtml:link rel="alternate" hreflang="es" href="${appUrl}/es/producto/${xmlEscape(slugEs)}" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="${appUrl}/produto/${xmlEscape(slugPt)}" />
+    <lastmod>${dateStr}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
-  </url>`).join('');
+  </url>`;
+        });
+      }).join('');
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">${body}
 </urlset>`;
       res.type('application/xml; charset=utf-8');
       return res.send(xml);
@@ -10625,7 +10822,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
         .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
       
-      const categories = await dbAsync.all(`SELECT slug, created_at FROM product_categories WHERE status = 'active'`) as any[];
+      const categories = await dbAsync.all(`SELECT slug, slug_en, slug_es, created_at FROM product_categories WHERE status = 'active'`) as any[];
 
       const formatLastMod = (dateVal: any): string => {
         if (!dateVal) return new Date().toISOString().slice(0, 10);
@@ -10639,16 +10836,34 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
-      const body = categories.map(c => `
+      const body = categories.flatMap(c => {
+        const slugPt = c.slug;
+        const slugEn = c.slug_en || c.slug;
+        const slugEs = c.slug_es || c.slug;
+        const dateStr = formatLastMod(c.created_at);
+
+        return ['pt', 'en', 'es'].map(lang => {
+          const locPath = lang === 'pt' 
+            ? `/?category=${slugPt}` 
+            : (lang === 'en' ? `/en/?category=${slugEn}` : `/es/?category=${slugEs}`);
+          
+          return `
   <url>
-    <loc>${appUrl}/?category=${xmlEscape(c.slug)}</loc>
-    <lastmod>${formatLastMod(c.created_at)}</lastmod>
+    <loc>${appUrl}${locPath}</loc>
+    <xhtml:link rel="alternate" hreflang="pt-br" href="${appUrl}/?category=${xmlEscape(slugPt)}" />
+    <xhtml:link rel="alternate" hreflang="en" href="${appUrl}/en/?category=${xmlEscape(slugEn)}" />
+    <xhtml:link rel="alternate" hreflang="es" href="${appUrl}/es/?category=${xmlEscape(slugEs)}" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="${appUrl}/?category=${xmlEscape(slugPt)}" />
+    <lastmod>${dateStr}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
-  </url>`).join('');
+  </url>`;
+        });
+      }).join('');
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${body}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">${body}
 </urlset>`;
       res.type('application/xml; charset=utf-8');
       return res.send(xml);
@@ -10843,22 +11058,46 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
   app.get('/api/settings', async (req, res) => {
     try {
-      const cached = apiCache.get('public_settings');
+      const locale = getRequestLocale(req);
+      const cacheKey = `public_settings_${locale}`;
+      const cached = apiCache.get(cacheKey);
       if (cached) return res.json(cached);
 
-      const rows = await dbAsync.all('SELECT `key`, value FROM settings WHERE `key` IN ("site_name", "site_description", "logo_url", "primary_color", "secondary_color", "phone", "email_contact", "address", "contact_hours", "contact_whatsapp", "support_whatsapp", "support_email", "new_badge_days", "redirect_to_checkout_after_add_to_cart", "brand_logos", "home_sliders", "facebook_url", "instagram_url", "youtube_url", "lgpd_enabled", "lgpd_require_consent_register", "lgpd_require_checkout_consent", "lgpd_require_marketing_optin", "lgpd_require_cookie_consent", "lgpd_require_policy_acceptance", "lgpd_require_terms_acceptance", "lgpd_dpo_name", "lgpd_dpo_email", "lgpd_dpo_phone", "lgpd_privacy_url", "lgpd_terms_url", "lgpd_cookie_policy_url", "lgpd_policy_version_privacy", "lgpd_policy_version_terms", "lgpd_policy_version_cookies", "top_bar_message", "top_bar_enabled", "home_company_enabled", "home_company_title", "home_company_subtitle", "home_company_text", "home_company_mission", "home_company_vision", "home_company_values", "home_company_image_main", "home_company_image_secondary", "home_company_cta_text", "home_company_cta_link", "home_company_bg_color", "home_company_text_color", "home_company_icons", "seo_meta_title", "seo_meta_description", "seo_keywords", "seo_robots_index", "seo_robots_follow", "seo_og_image", "favicon_url", "seo_twitter_card", "seo_facebook_url", "seo_instagram_url", "seo_twitter_url", "seo_organization_name", "seo_organization_logo", "seo_enable_product_schema", "seo_enable_organization_schema", "seo_enable_breadcrumb_schema", "seo_sitemap_enabled", "seo_robots_custom_rules", "social_proof_enabled", "social_proof_delay")') as any[];
-      const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
-      apiCache.set('public_settings', settings, 600); // 10 minutes cache
+      const rows = await dbAsync.all('SELECT `key`, value FROM settings') as any[];
+      const rawSettings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {} as Record<string, string>);
+      
+      const settings: Record<string, string> = {};
+      const keysToTranslate = [
+        'site_name', 'site_description', 'top_bar_message', 'home_company_title', 'home_company_subtitle',
+        'home_company_text', 'home_company_mission', 'home_company_vision', 'home_company_values',
+        'home_company_cta_text', 'seo_meta_title', 'seo_meta_description'
+      ];
+
+      for (const k of Object.keys(rawSettings)) {
+        if (!k.endsWith('_en') && !k.endsWith('_es')) {
+          if (locale !== 'pt' && keysToTranslate.includes(k)) {
+            settings[k] = rawSettings[`${k}_${locale}`] || rawSettings[k];
+          } else {
+            settings[k] = rawSettings[k];
+          }
+        } else {
+          settings[k] = rawSettings[k];
+        }
+      }
+
+      apiCache.set(cacheKey, settings, 600); // 10 minutes cache
       res.json(settings);
     } catch (error) {
       console.error('Fetch Public Settings Error:', error);
-      res.status(500).json({ error: 'Erro ao buscar configuraÃƒÆ’Ã‚Â§ÃƒÆ’Ã‚Âµes' });
+      res.status(500).json({ error: 'Erro ao buscar configurações' });
     }
   });
 
   app.get('/api/categories', async (req, res) => {
     try {
-      const cached = apiCache.get('public_categories');
+      const locale = getRequestLocale(req);
+      const cacheKey = `public_categories_${locale}`;
+      const cached = apiCache.get(cacheKey);
       if (cached) return res.json(cached);
 
       const categories = await dbAsync.all(`
@@ -10874,11 +11113,148 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         WHERE c.status = 'active'
         ORDER BY c.sort_order ASC, c.name ASC
       `);
-      apiCache.set('public_categories', categories, 600); // 10 minutes cache
-      res.json(categories);
+
+      const suffix = locale === 'pt' ? '' : `_${locale}`;
+      const translatedCategories = categories.map((cat: any) => ({
+        ...cat,
+        name: cat[`name${suffix}`] || cat.name,
+        slug: cat[`slug${suffix}`] || cat.slug,
+        description: cat[`description${suffix}`] || cat.description,
+      }));
+
+      apiCache.set(cacheKey, translatedCategories, 600); // 10 minutes cache
+      res.json(translatedCategories);
     } catch (error) {
       console.error('Error fetching categories:', error);
       res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  // API Routes - TAGS i18n
+  app.get('/api/tags', async (req, res) => {
+    try {
+      const locale = getRequestLocale(req);
+      const cacheKey = `public_tags_${locale}`;
+      const cached = apiCache.get(cacheKey);
+      if (cached) return res.json(cached);
+
+      const tags = await dbAsync.all(`
+        SELECT DISTINCT t.* 
+        FROM product_tags t
+        ORDER BY t.name ASC
+      `) as any[];
+
+      const suffix = locale === 'pt' ? '' : `_${locale}`;
+      const translatedTags = tags.map((tag) => ({
+        id: tag.id,
+        name: tag[`name${suffix}`] || tag.name,
+        slug: tag[`slug${suffix}`] || tag.slug
+      }));
+
+      apiCache.set(cacheKey, translatedTags, 600);
+      res.json(translatedTags);
+    } catch (error) {
+      console.error('Error fetching tags:', error);
+      res.status(500).json({ error: 'Erro ao buscar tags' });
+    }
+  });
+
+  // API Routes - FAQ i18n
+  app.get('/api/faqs', async (req, res) => {
+    try {
+      const locale = getRequestLocale(req);
+      const cacheKey = `public_faqs_${locale}`;
+      const cached = apiCache.get(cacheKey);
+      if (cached) return res.json(cached);
+
+      const faqs = await dbAsync.all(`
+        SELECT * FROM faqs ORDER BY sort_order ASC, id ASC
+      `) as any[];
+
+      const suffix = locale === 'pt' ? '' : `_${locale}`;
+      const translatedFaqs = faqs.map((faq) => ({
+        id: faq.id,
+        question: faq[`question${suffix}`] || faq.question,
+        answer: faq[`answer${suffix}`] || faq.answer,
+        category: faq[`category${suffix}`] || faq.category,
+        sort_order: faq.sort_order
+      }));
+
+      apiCache.set(cacheKey, translatedFaqs, 600);
+      res.json(translatedFaqs);
+    } catch (error) {
+      console.error('Error fetching faqs:', error);
+      res.status(500).json({ error: 'Erro ao buscar perguntas frequentes' });
+    }
+  });
+
+  // API Routes - BLOG i18n
+  app.get('/api/blog', async (req, res) => {
+    try {
+      const locale = getRequestLocale(req);
+      const cacheKey = `public_blog_${locale}`;
+      const cached = apiCache.get(cacheKey);
+      if (cached) return res.json(cached);
+
+      const posts = await dbAsync.all(`
+        SELECT * FROM blog_posts 
+        WHERE status = 'published' 
+        ORDER BY published_at DESC, id DESC
+      `) as any[];
+
+      const suffix = locale === 'pt' ? '' : `_${locale}`;
+      const translatedPosts = posts.map((post) => ({
+        id: post.id,
+        title: post[`title${suffix}`] || post.title,
+        slug: post[`slug${suffix}`] || post.slug,
+        excerpt: post[`excerpt${suffix}`] || post.excerpt,
+        content: post[`content${suffix}`] || post.content,
+        image: post.image,
+        author: post.author,
+        status: post.status,
+        published_at: post.published_at,
+        created_at: post.created_at
+      }));
+
+      apiCache.set(cacheKey, translatedPosts, 600);
+      res.json(translatedPosts);
+    } catch (error) {
+      console.error('Error fetching blog posts:', error);
+      res.status(500).json({ error: 'Erro ao buscar postagens do blog' });
+    }
+  });
+
+  // API Routes - BLOG Detail by slug
+  app.get('/api/blog/:slug', async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const locale = getRequestLocale(req);
+
+      const post = await dbAsync.get(`
+        SELECT * FROM blog_posts 
+        WHERE (slug = ? OR slug_en = ? OR slug_es = ?) AND status = 'published'
+      `, slug, slug, slug) as any;
+
+      if (!post) return res.status(404).json({ error: 'Postagem nao encontrada' });
+
+      const suffix = locale === 'pt' ? '' : `_${locale}`;
+      const translatedPost = {
+        id: post.id,
+        title: post[`title${suffix}`] || post.title,
+        slug: post[`slug${suffix}`] || post.slug,
+        excerpt: post[`excerpt${suffix}`] || post.excerpt,
+        content: post[`content${suffix}`] || post.content,
+        image: post.image,
+        author: post.author,
+        status: post.status,
+        published_at: post.published_at,
+        created_at: post.created_at
+      };
+
+      res.json(translatedPost);
+    } catch (error) {
+      console.error('Error fetching blog post detail:', error);
+      res.status(500).json({ error: 'Erro ao buscar detalhes da postagem' });
     }
   });
 
@@ -11021,6 +11397,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const currentPage = Math.max(1, parseInt(page as string));
       const itemsPerPage = Math.max(1, parseInt(limit as string));
       const offset = (currentPage - 1) * itemsPerPage;
+      const locale = getRequestLocale(req);
 
       let whereClause = `WHERE p.status = 'active'`;
       const params: any[] = [];
@@ -11033,21 +11410,35 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             JOIN product_categories cf ON cf.id = pcrf.category_id
             WHERE pcrf.product_id = p.id
               AND (
-                cf.slug = ?
-                OR cf.parent_id IN (SELECT id FROM product_categories WHERE slug = ?)
+                cf.slug = ? OR cf.slug_en = ? OR cf.slug_es = ?
+                OR cf.parent_id IN (SELECT id FROM product_categories WHERE slug = ? OR slug_en = ? OR slug_es = ?)
               )
           )
         `;
-        params.push(category, category);
+        params.push(category, category, category, category, category, category);
       }
 
       if (q) {
-        whereClause += ` AND (p.name LIKE ? OR p.description LIKE ? OR EXISTS (
-          SELECT 1 FROM product_tag_relations ptr 
-          JOIN product_tags t ON ptr.tag_id = t.id 
-          WHERE ptr.product_id = p.id AND t.name LIKE ?
-        ))`;
-        params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+        const term = `%${q}%`;
+        if (locale === 'pt') {
+          whereClause += ` AND (p.name LIKE ? OR p.description LIKE ? OR EXISTS (
+            SELECT 1 FROM product_tag_relations ptr 
+            JOIN product_tags t ON ptr.tag_id = t.id 
+            WHERE ptr.product_id = p.id AND t.name LIKE ?
+          ))`;
+          params.push(term, term, term);
+        } else {
+          whereClause += ` AND (
+            p.name LIKE ? OR p.description LIKE ? 
+            OR p.name_${locale} LIKE ? OR p.description_${locale} LIKE ?
+            OR EXISTS (
+              SELECT 1 FROM product_tag_relations ptr 
+              JOIN product_tags t ON ptr.tag_id = t.id 
+              WHERE ptr.product_id = p.id AND (t.name LIKE ? OR t.name_${locale} LIKE ?)
+            )
+          )`;
+          params.push(term, term, term, term, term, term);
+        }
       }
 
       const totalCountRow = await dbAsync.get(`
@@ -11060,7 +11451,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       const totalPages = Math.ceil(totalItems / itemsPerPage);
 
       const query = `
-        SELECT DISTINCT p.*, c.name as category_name 
+        SELECT DISTINCT p.*, c.name as category_name, c.name_en as category_name_en, c.name_es as category_name_es
         FROM products p 
         LEFT JOIN product_categories c ON p.category_id = c.id
         ${whereClause}
@@ -11069,8 +11460,18 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
       `;
 
       const newBadgeDays = await resolveNewBadgeDays();
-      const products = (await dbAsync.all(query, ...params, itemsPerPage, offset) as any[]).map((product) => ({
+      const rawProducts = await dbAsync.all(query, ...params, itemsPerPage, offset) as any[];
+      const suffix = locale === 'pt' ? '' : `_${locale}`;
+
+      const products = rawProducts.map((product) => ({
         ...product,
+        name: product[`name${suffix}`] || product.name,
+        slug: product[`slug${suffix}`] || product.slug,
+        description: product[`description${suffix}`] || product.description,
+        short_description: product[`short_description${suffix}`] || product.short_description,
+        seo_title: product[`seo_title${suffix}`] || product.seo_title,
+        seo_description: product[`seo_description${suffix}`] || product.seo_description,
+        category_name: product[`category_name${suffix}`] || product.category_name,
         is_new: resolveProductIsNew(product, newBadgeDays),
       }));
       
@@ -11086,6 +11487,53 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
     } catch (error) {
       console.error('Error fetching products:', error);
       res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  // API Routes - IA TRANSLATION VIA GEMINI
+  app.post('/api/admin/translate', authenticate, isAdmin, async (req, res) => {
+    try {
+      const { text, target } = req.body;
+      if (!text || !target) {
+        return res.status(400).json({ error: 'text e target (en ou es) sao obrigatorios' });
+      }
+
+      if (target !== 'en' && target !== 'es') {
+        return res.status(400).json({ error: 'target deve ser "en" ou "es"' });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'Chave do Gemini (GEMINI_API_KEY) nao encontrada no arquivo .env' });
+      }
+
+      console.log(`[Gemini Translate] Traduzindo para ${target}: "${text.slice(0, 50)}..."`);
+
+      const response = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          contents: [{
+            parts: [{
+              text: `Você é um tradutor especialista em e-commerce de matrizes de bordados computadorizados.
+Traduza o seguinte texto de entrada para o idioma correspondente ao código "${target}" (en = Inglês, es = Espanhol).
+Mantenha formatação HTML se houver.
+Não adicione explicações ou notas de rodapé, retorne estritamente o texto traduzido sem aspas adicionais.
+Texto de entrada:
+${text}`
+            }]
+          }]
+        },
+        {
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+
+      const translatedText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+      
+      return res.json({ translatedText });
+    } catch (error: any) {
+      console.error('GEMINI TRANSLATION ERROR:', error.response?.data || error.message);
+      return res.status(500).json({ error: 'Erro ao traduzir texto com o Gemini' });
     }
   });
 
@@ -11131,27 +11579,37 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
   app.get('/api/products/:slug', async (req, res) => {
     try {
+      const locale = getRequestLocale(req);
       const productRow = await dbAsync.get(`
         SELECT p.*,
                pc.id as category_id,
                pc.name as category_name,
+               pc.name_en as category_name_en,
+               pc.name_es as category_name_es,
                pc.slug as category_slug,
+               pc.slug_en as category_slug_en,
+               pc.slug_es as category_slug_es,
                pc.parent_id as category_parent_id,
                parent_cat.name as parent_category_name,
-               parent_cat.slug as parent_category_slug
+               parent_cat.name_en as parent_category_name_en,
+               parent_cat.name_es as parent_category_name_es,
+               parent_cat.slug as parent_category_slug,
+               parent_cat.slug_en as parent_category_slug_en,
+               parent_cat.slug_es as parent_category_slug_es
         FROM products p
         LEFT JOIN product_categories pc ON p.category_id = pc.id
         LEFT JOIN product_categories parent_cat ON pc.parent_id = parent_cat.id
-        WHERE p.slug = ?
-      `, req.params.slug) as any;
+        WHERE p.slug = ? OR p.slug_en = ? OR p.slug_es = ?
+      `, req.params.slug, req.params.slug, req.params.slug) as any;
 
       if (!productRow) return res.status(404).json({ error: 'Produto nao encontrado' });
 
       // Se a categoria principal for nula, buscar a primeira categoria vinculada
       if (!productRow.category_id) {
         const fallbackCat = await dbAsync.get(`
-          SELECT pc.id, pc.name, pc.slug, pc.parent_id,
-                 parent_cat.name as parent_name, parent_cat.slug as parent_slug
+          SELECT pc.id, pc.name, pc.name_en, pc.name_es, pc.slug, pc.slug_en, pc.slug_es, pc.parent_id,
+                 parent_cat.name as parent_name, parent_cat.name_en as parent_name_en, parent_cat.name_es as parent_name_es,
+                 parent_cat.slug as parent_slug, parent_cat.slug_en as parent_slug_en, parent_cat.slug_es as parent_slug_es
           FROM product_category_relations pcr
           JOIN product_categories pc ON pcr.category_id = pc.id
           LEFT JOIN product_categories parent_cat ON pc.parent_id = parent_cat.id
@@ -11162,16 +11620,36 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         if (fallbackCat) {
           productRow.category_id = fallbackCat.id;
           productRow.category_name = fallbackCat.name;
+          productRow.category_name_en = fallbackCat.name_en;
+          productRow.category_name_es = fallbackCat.name_es;
           productRow.category_slug = fallbackCat.slug;
+          productRow.category_slug_en = fallbackCat.slug_en;
+          productRow.category_slug_es = fallbackCat.slug_es;
           productRow.category_parent_id = fallbackCat.parent_id;
           productRow.parent_category_name = fallbackCat.parent_name;
+          productRow.parent_category_name_en = fallbackCat.parent_name_en;
+          productRow.parent_category_name_es = fallbackCat.parent_name_es;
           productRow.parent_category_slug = fallbackCat.parent_slug;
+          productRow.parent_category_slug_en = fallbackCat.parent_slug_en;
+          productRow.parent_category_slug_es = fallbackCat.parent_slug_es;
         }
       }
 
       const newBadgeDays = await resolveNewBadgeDays();
+      const suffix = locale === 'pt' ? '' : `_${locale}`;
+      
       const product = {
         ...productRow,
+        name: productRow[`name${suffix}`] || productRow.name,
+        slug: productRow[`slug${suffix}`] || productRow.slug,
+        description: productRow[`description${suffix}`] || productRow.description,
+        short_description: productRow[`short_description${suffix}`] || productRow.short_description,
+        seo_title: productRow[`seo_title${suffix}`] || productRow.seo_title,
+        seo_description: productRow[`seo_description${suffix}`] || productRow.seo_description,
+        category_name: productRow[`category_name${suffix}`] || productRow.category_name,
+        category_slug: productRow[`category_slug${suffix}`] || productRow.category_slug,
+        parent_category_name: productRow[`parent_category_name${suffix}`] || productRow.parent_category_name,
+        parent_category_slug: productRow[`parent_category_slug${suffix}`] || productRow.parent_category_slug,
         is_new: resolveProductIsNew(productRow, newBadgeDays),
       };
 
@@ -11252,6 +11730,11 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       const relatedProducts = relatedRows.map((relatedProduct) => ({
         ...relatedProduct,
+        name: relatedProduct[`name${suffix}`] || relatedProduct.name,
+        slug: relatedProduct[`slug${suffix}`] || relatedProduct.slug,
+        description: relatedProduct[`description${suffix}`] || relatedProduct.description,
+        short_description: relatedProduct[`short_description${suffix}`] || relatedProduct.short_description,
+        category_name: relatedProduct[`category_name${suffix}`] || relatedProduct.category_name,
         is_new: resolveProductIsNew(relatedProduct, newBadgeDays),
       }));
 
@@ -11298,8 +11781,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       // Carregar todas as categorias vinculadas ao produto
       const categoriesRows = await dbAsync.all(`
-        SELECT DISTINCT pc.id, pc.name, pc.slug, pc.parent_id,
-               parent_cat.name as parent_name, parent_cat.slug as parent_slug
+        SELECT DISTINCT pc.id, pc.name, pc.name_en, pc.name_es, pc.slug, pc.slug_en, pc.slug_es, pc.parent_id,
+               parent_cat.name as parent_name, parent_cat.name_en as parent_name_en, parent_cat.name_es as parent_name_es,
+               parent_cat.slug as parent_slug, parent_cat.slug_en as parent_slug_en, parent_cat.slug_es as parent_slug_es
         FROM product_category_relations pcr
         JOIN product_categories pc ON pcr.category_id = pc.id
         LEFT JOIN product_categories parent_cat ON pc.parent_id = parent_cat.id
@@ -11308,11 +11792,11 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       const categories = categoriesRows.map((row) => ({
         id: row.id,
-        name: String(row?.name || '').trim(),
-        slug: String(row?.slug || '').trim(),
+        name: String(row[`name${suffix}`] || row?.name || '').trim(),
+        slug: String(row[`slug${suffix}`] || row?.slug || '').trim(),
         parent_id: row?.parent_id ?? null,
-        parent_name: row?.parent_name ? String(row.parent_name).trim() : null,
-        parent_slug: row?.parent_slug ? String(row.parent_slug).trim() : null,
+        parent_name: row[`parent_name${suffix}`] || (row?.parent_name ? String(row.parent_name).trim() : null),
+        parent_slug: row[`parent_slug${suffix}`] || (row?.parent_slug ? String(row.parent_slug).trim() : null),
       }));
 
       if (process.env.NODE_ENV !== 'production') {
@@ -11333,8 +11817,8 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
   app.get('/api/products/:slug/reviews', async (req, res) => {
     try {
       const { slug } = req.params;
-      const product = await dbAsync.get('SELECT id FROM products WHERE slug = ?', slug) as any;
-      if (!product) return res.status(404).json({ error: 'Produto nÃƒÂ£o encontrado' });
+      const product = await dbAsync.get('SELECT id FROM products WHERE slug = ? OR slug_en = ? OR slug_es = ?', slug, slug, slug) as any;
+      if (!product) return res.status(404).json({ error: 'Produto não encontrado' });
 
       const reviews = await dbAsync.all(`
         SELECT r.*, u.name as user_name 
@@ -12357,6 +12841,94 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       try {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+        // --- DETECÇÃO DE IDIOMA E GEOLOCALIZAÇÃO ---
+        let currentLang: 'pt' | 'en' | 'es' = 'pt';
+        if (req.path.startsWith('/en/') || req.path === '/en') currentLang = 'en';
+        else if (req.path.startsWith('/es/') || req.path === '/es') currentLang = 'es';
+
+        // Primeira visita (sem cookie lang_pref)
+        if (!req.cookies.lang_pref) {
+          let detectedLang: 'pt' | 'en' | 'es' = 'pt';
+          const acceptLang = String(req.headers['accept-language'] || '').toLowerCase();
+          const clientIp = getClientIp(req) || req.ip || '';
+          
+          console.log(`[i18n] Primeira visita. IP: ${clientIp}, Accept-Language: ${acceptLang}`);
+
+          // Geolocalização por IP com timeout curto (500ms)
+          let countryCode = '';
+          if (clientIp && clientIp !== '127.0.0.1' && clientIp !== '::1') {
+            try {
+              const geoRes = await Promise.race([
+                axios.get(`https://freeipapi.com/api/json/${clientIp}`),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('GeoIP Timeout')), 500))
+              ]) as any;
+              countryCode = String(geoRes.data?.countryCode || '').toUpperCase();
+              console.log(`[i18n] IP Country: ${countryCode}`);
+            } catch (e: any) {
+              console.warn('[i18n] Falha/Timeout no GeoIP:', e.message);
+            }
+          }
+
+          // Prioridades do País
+          if (countryCode === 'BR' || countryCode === 'PT') {
+            detectedLang = 'pt';
+          } else if (countryCode === 'US' || countryCode === 'CA') {
+            detectedLang = 'en';
+          } else if (['MX', 'AR', 'CL', 'CO', 'PE', 'UY', 'PY', 'BO', 'EC'].includes(countryCode)) {
+            detectedLang = 'es';
+          } else {
+            // Fallback: idioma do navegador
+            if (acceptLang.startsWith('es')) {
+              detectedLang = 'es';
+            } else if (acceptLang.startsWith('en')) {
+              detectedLang = 'en';
+            } else {
+              detectedLang = 'pt';
+            }
+          }
+
+          // Salvar preferência em cookie
+          res.cookie('lang_pref', detectedLang, { maxAge: 365 * 24 * 60 * 60 * 1000, path: '/' });
+
+          // Se detectou en ou es, e o usuário está na URL padrão pt, redirecionar
+          if (detectedLang !== currentLang && currentLang === 'pt') {
+            const redirectPrefix = detectedLang === 'en' ? '/en' : '/es';
+            const targetPath = req.path;
+
+            const routeMap: Record<string, Record<string, string>> = {
+              '/': { en: '/en/', es: '/es/' },
+              '/loja': { en: '/en/shop', es: '/es/tienda' },
+              '/nossa-empresa': { en: '/en/about-us', es: '/es/nuestra-empresa' },
+              '/orcamento': { en: '/en/quote', es: '/es/presupuesto' },
+              '/contato': { en: '/en/contact', es: '/es/contacto' },
+              '/favoritos': { en: '/en/favorites', es: '/es/favoritos' },
+              '/carrinho': { en: '/en/cart', es: '/es/carrito' },
+              '/login': { en: '/en/login', es: '/es/login' },
+              '/cadastro': { en: '/en/register', es: '/es/cadastro' },
+              '/ajuda': { en: '/en/help', es: '/es/ayuda' },
+              '/politica': { en: '/en/policy', es: '/es/politica' },
+            };
+
+            const pMatch = req.path.match(/^\/produto\/([^/]+)$/);
+            if (pMatch) {
+              const pSlug = pMatch[1];
+              const p = await dbAsync.get('SELECT slug_en, slug_es FROM products WHERE slug = ?', pSlug) as any;
+              if (p) {
+                const targetSlug = detectedLang === 'en' ? (p.slug_en || pSlug) : (p.slug_es || pSlug);
+                const routeWord = detectedLang === 'en' ? 'product' : 'producto';
+                return res.redirect(302, `${redirectPrefix}/${routeWord}/${targetSlug}${req.url.substring(req.path.length)}`);
+              }
+            }
+
+            const mapped = routeMap[targetPath];
+            if (mapped) {
+              return res.redirect(302, `${mapped[detectedLang]}${req.url.substring(req.path.length)}`);
+            }
+
+            return res.redirect(302, `${redirectPrefix}${targetPath}${req.url.substring(req.path.length)}`);
+          }
+        }
         
         let html = '';
         try {
@@ -12367,14 +12939,22 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
         const s = await loadSettingsMapAsync([
           'site_name',
+          'site_name_en',
+          'site_name_es',
           'site_description',
+          'site_description_en',
+          'site_description_es',
           'logo_url',
           'facebook_url',
           'instagram_url',
           'youtube_url',
           'app_url',
           'seo_meta_title',
+          'seo_meta_title_en',
+          'seo_meta_title_es',
           'seo_meta_description',
+          'seo_meta_description_en',
+          'seo_meta_description_es',
           'seo_og_image',
           'seo_organization_name',
           'seo_organization_logo',
@@ -12386,13 +12966,14 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
           .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
           
-        const siteName = s.site_name || 'Digital Bordados';
+        const suffix = currentLang === 'pt' ? '' : `_${currentLang}`;
+        const siteName = s[`site_name${suffix}`] || s.site_name || 'Digital Bordados';
         const orgName = s.seo_organization_name || siteName;
         const orgLogo = s.seo_organization_logo || s.logo_url || '/logo.png';
         const absoluteOrgLogo = orgLogo.startsWith('http') ? orgLogo : `${appUrl}${orgLogo.startsWith('/') ? '' : '/'}${orgLogo}`;
 
-        let title = s.seo_meta_title || siteName;
-        let description = s.seo_meta_description || s.site_description || 'Matrizes de Bordados Computadorizados';
+        let title = s[`seo_meta_title${suffix}`] || s.seo_meta_title || siteName;
+        let description = s[`seo_meta_description${suffix}`] || s.seo_meta_description || s.site_description || 'Matrizes de Bordados Computadorizados';
         
         let reqPath = req.path;
         if (reqPath === '/index.html') {
@@ -12409,16 +12990,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         
         // Rotas com noindex
         const noindexPaths = [
-          '/carrinho',
-          '/checkout',
-          '/cadastro',
-          '/login',
-          '/favoritos',
-          '/minha-conta',
-          '/admin',
-          '/esqueci-senha',
-          '/redefinir-senha',
-          '/obrigado-compra'
+          '/carrinho', '/checkout', '/cadastro', '/login', '/favoritos', '/minha-conta', '/admin', '/esqueci-senha', '/redefinir-senha', '/obrigado-compra',
+          '/en/cart', '/en/checkout', '/en/register', '/en/login', '/en/favorites', '/en/my-account', '/en/forgot-password', '/en/reset-password', '/en/thank-you',
+          '/es/carrito', '/es/checkout', '/es/cadastro', '/es/login', '/es/favoritos', '/es/mi-cuenta', '/es/esqueci-senha', '/es/redefinir-senha', '/es/obrigado-compra'
         ];
         const isNoindexPath = noindexPaths.some(p => pathLower.startsWith(p));
         
@@ -12473,32 +13047,42 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
           "sameAs": sameAsLinks
         });
 
+        let matchedProduct: any = null;
+
         // Detecção de Rota de Produto
-        const productMatch = req.path.match(/^\/produto\/([^/]+)$/);
+        const productMatch = req.path.match(/^\/(?:en\/product|es\/producto|produto)\/([^/]+)$/);
         
         if (productMatch) {
           const productSlug = productMatch[1];
           const product = await dbAsync.get(`
-            SELECT p.*, c.name as category_name 
+            SELECT p.*, c.name as category_name, c.name_en as category_name_en, c.name_es as category_name_es
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
-            WHERE p.slug = ? AND p.status = 'active'
-          `, productSlug) as any;
+            WHERE (p.slug = ? OR p.slug_en = ? OR p.slug_es = ?) AND p.status = 'active'
+          `, productSlug, productSlug, productSlug) as any;
 
           if (product) {
+            matchedProduct = product;
             const siteDisplayName = String(s.site_name || 'Digital Bordados').trim();
+            const pName = currentLang === 'pt' ? product.name : currentLang === 'en' ? (product.name_en || product.name) : (product.name_es || product.name);
+            const pDesc = currentLang === 'pt' ? product.description : currentLang === 'en' ? (product.description_en || product.description) : (product.description_es || product.description);
+            const pShortDesc = currentLang === 'pt' ? product.short_description : currentLang === 'en' ? (product.short_description_en || product.short_description) : (product.short_description_es || product.short_description);
+            const pSeoDesc = currentLang === 'pt' ? product.seo_description : currentLang === 'en' ? (product.seo_description_en || product.seo_description) : (product.seo_description_es || product.seo_description);
+            const pSeoTitle = currentLang === 'pt' ? product.seo_title : currentLang === 'en' ? (product.seo_title_en || product.seo_title) : (product.seo_title_es || product.seo_title);
+            const pCatName = currentLang === 'pt' ? product.category_name : currentLang === 'en' ? (product.category_name_en || product.category_name) : (product.category_name_es || product.category_name);
+            
             const resolveProductTemplate = (value: unknown) => {
               const template = String(value ?? '');
               const map: Record<string, string> = {
                 'site_nome': siteDisplayName,
                 'site_name': siteDisplayName,
-                'nome_produto': String(product.name || '').trim(),
+                'nome_produto': String(pName || '').trim(),
                 'slug_produto': String(product.slug || '').trim(),
                 'preco': String(product.price ?? '').trim(),
                 'preco_promocional': String(product.sale_price ?? product.price ?? '').trim(),
                 'pontos': String(product.stitch_count ?? '').trim(),
                 'cores': String(product.colors || '').trim(),
-                'categoria_principal': String(product.category_name || '').trim(),
+                'categoria_principal': String(pCatName || '').trim(),
               };
               return template.replace(/{{\s*([a-z_]+)\s*}}/gi, (match, key) => {
                 const cleanKey = key.toLowerCase();
@@ -12516,28 +13100,43 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
                 .trim();
             };
 
-            title = String(resolveProductTemplate(product.seo_title || `${product.name} | ${siteName}`)).trim();
+            title = String(resolveProductTemplate(pSeoTitle || `${pName} | ${siteName}`)).trim();
             
             // Gerar descrição dinamicamente se estiver muito curta ou vazia
-            const rawDesc = cleanHtmlDescription(product.description);
-            const shortDesc = cleanHtmlDescription(product.short_description);
-            const seoDesc = cleanHtmlDescription(product.seo_description);
+            const rawDesc = cleanHtmlDescription(pDesc);
+            const shortDesc = cleanHtmlDescription(pShortDesc);
+            const seoDesc = cleanHtmlDescription(pSeoDesc);
 
-            const resolvedDesc = String(resolveProductTemplate(seoDesc || shortDesc || rawDesc || `Compre ${product.name} na ${siteName}.`))
+            const resolvedDesc = String(resolveProductTemplate(seoDesc || shortDesc || rawDesc || `Compre ${pName} na ${siteName}.`))
               .replace(/\s+/g, ' ')
               .trim();
 
             if (resolvedDesc.length < 10) {
-              description = `Compre a matriz de bordado ${product.name} na Digital Bordados. Arquivo digital de alta qualidade pronto para download imediato em PES, JEF, DST, XXX, EXP.`;
+              if (currentLang === 'en') {
+                description = `Buy the embroidery design ${pName} at Digital Bordados. High-quality digital file ready for instant download in PES, JEF, DST, XXX, EXP formats.`;
+              } else if (currentLang === 'es') {
+                description = `Compre la matriz de bordado ${pName} en Digital Bordados. Archivo digital de alta calidad listo para descarga inmediata en formatos PES, JEF, DST, XXX, EXP.`;
+              } else {
+                description = `Compre a matriz de bordado ${pName} na Digital Bordados. Arquivo digital de alta qualidade pronto para download imediato em PES, JEF, DST, XXX, EXP.`;
+              }
             } else {
               description = resolvedDesc.slice(0, 160);
             }
 
-            canonicalUrl = `${appUrl}/produto/${product.slug}`;
+            const activeSlug = currentLang === 'pt' ? product.slug : currentLang === 'en' ? (product.slug_en || product.slug) : (product.slug_es || product.slug);
+            const redirectPrefix = currentLang === 'pt' ? '' : `/${currentLang}`;
+            const routeWord = currentLang === 'en' ? 'product' : currentLang === 'es' ? 'producto' : 'produto';
+            canonicalUrl = `${appUrl}${redirectPrefix}/${routeWord}/${activeSlug}`;
+
             if (product.image) {
               absoluteOgImage = product.image.startsWith('http') ? product.image : `${appUrl}${product.image.startsWith('/') ? '' : '/'}${product.image}`;
             }
             ogType = 'product';
+
+            // Traduzir termos do breadcrumb
+            const homeText = currentLang === 'pt' ? 'Início' : currentLang === 'en' ? 'Home' : 'Inicio';
+            const shopText = currentLang === 'pt' ? 'Loja' : currentLang === 'en' ? 'Shop' : 'Tienda';
+            const shopUrl = currentLang === 'pt' ? `${appUrl}/loja` : currentLang === 'en' ? `${appUrl}/en/shop` : `${appUrl}/es/tienda`;
 
             // Adicionar Breadcrumb do Produto
             jsonLdGraph.push({
@@ -12547,36 +13146,41 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
                 {
                   "@type": "ListItem",
                   "position": 1,
-                  "name": "Início",
-                  "item": `${appUrl}/`
+                  "name": homeText,
+                  "item": currentLang === 'pt' ? `${appUrl}/` : `${appUrl}/${currentLang}/`
                 },
                 {
                   "@type": "ListItem",
                   "position": 2,
-                  "name": "Loja",
-                  "item": `${appUrl}/loja`
+                  "name": shopText,
+                  "item": shopUrl
                 },
                 {
                   "@type": "ListItem",
                   "position": 3,
-                  "name": product.category_name || "Matrizes",
-                  "item": product.category_name ? `${appUrl}/?category=${encodeURIComponent(product.category_name.toLowerCase())}` : `${appUrl}/loja`
+                  "name": pCatName || (currentLang === 'pt' ? "Matrizes" : currentLang === 'en' ? "Designs" : "Diseños"),
+                  "item": pCatName ? `${appUrl}${redirectPrefix}?category=${encodeURIComponent(pCatName.toLowerCase())}` : shopUrl
                 },
                 {
                   "@type": "ListItem",
                   "position": 4,
-                  "name": product.name,
+                  "name": pName,
                   "item": canonicalUrl
                 }
               ]
             });
 
+            // Conversão de moeda para o schema
+            const priceCurrency = currentLang === 'pt' ? 'BRL' : 'USD';
+            const rate = 5.20;
+            const itemPrice = currentLang === 'pt' ? Number(product.price || 0) : (Number(product.price || 0) / rate);
+
             // Adicionar Product no grafo
             const offers: any = {
               "@type": "Offer",
               "url": canonicalUrl,
-              "priceCurrency": "BRL",
-              "price": Number(product.price || 0).toFixed(2),
+              "priceCurrency": priceCurrency,
+              "price": itemPrice.toFixed(2),
               "priceValidUntil": "2029-12-31",
               "availability": "https://schema.org/InStock",
               "itemCondition": "https://schema.org/NewCondition"
@@ -12605,7 +13209,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             jsonLdGraph.push({
               "@type": "Product",
               "@id": `${canonicalUrl}/#product`,
-              "name": product.name,
+              "name": pName,
               "image": images,
               "description": description,
               "sku": `${product.slug}-${product.id}`,
@@ -12625,7 +13229,7 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
               "@id": `${canonicalUrl}/#primaryimage`,
               "url": absoluteOgImage,
               "contentUrl": absoluteOgImage,
-              "caption": product.image_alt || product.name
+              "caption": product.image_alt || pName
             });
           }
         } else {
@@ -12665,11 +13269,60 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&apos;');
 
+        let hreflangTags = '';
+        if (productMatch && matchedProduct) {
+          const ptUrl = `${appUrl}/produto/${matchedProduct.slug}`;
+          const enUrl = `${appUrl}/en/product/${matchedProduct.slug_en || matchedProduct.slug}`;
+          const esUrl = `${appUrl}/es/producto/${matchedProduct.slug_es || matchedProduct.slug}`;
+          hreflangTags = `
+  <link rel="alternate" hreflang="pt-BR" href="${ptUrl}" />
+  <link rel="alternate" hreflang="en" href="${enUrl}" />
+  <link rel="alternate" hreflang="es" href="${esUrl}" />
+  <link rel="alternate" hreflang="x-default" href="${ptUrl}" />`;
+        } else {
+          const routeMap: Record<string, Record<string, string>> = {
+            '/': { pt: '/', en: '/en/', es: '/es/' },
+            '/loja': { pt: '/loja', en: '/en/shop', es: '/es/tienda' },
+            '/en/shop': { pt: '/loja', en: '/en/shop', es: '/es/tienda' },
+            '/es/tienda': { pt: '/loja', en: '/en/shop', es: '/es/tienda' },
+            '/nossa-empresa': { pt: '/nossa-empresa', en: '/en/about-us', es: '/es/nuestra-empresa' },
+            '/en/about-us': { pt: '/nossa-empresa', en: '/en/about-us', es: '/es/nuestra-empresa' },
+            '/es/nuestra-empresa': { pt: '/nossa-empresa', en: '/en/about-us', es: '/es/nuestra-empresa' },
+            '/orcamento': { pt: '/orcamento', en: '/en/quote', es: '/es/presupuesto' },
+            '/en/quote': { pt: '/orcamento', en: '/en/quote', es: '/es/presupuesto' },
+            '/es/presupuesto': { pt: '/orcamento', en: '/en/quote', es: '/es/presupuesto' },
+            '/contato': { pt: '/contato', en: '/en/contact', es: '/es/contacto' },
+            '/en/contact': { pt: '/contato', en: '/en/contact', es: '/es/contacto' },
+            '/es/contacto': { pt: '/contato', en: '/en/contact', es: '/es/contacto' },
+          };
+
+          const normalizedPath = req.path.endsWith('/') && req.path.length > 1 ? req.path.slice(0, -1) : req.path;
+          const mapped = routeMap[normalizedPath];
+          if (mapped) {
+            hreflangTags = `
+  <link rel="alternate" hreflang="pt-BR" href="${appUrl}${mapped.pt}" />
+  <link rel="alternate" hreflang="en" href="${appUrl}${mapped.en}" />
+  <link rel="alternate" hreflang="es" href="${appUrl}${mapped.es}" />
+  <link rel="alternate" hreflang="x-default" href="${appUrl}${mapped.pt}" />`;
+          } else {
+            let cleanPath = req.path;
+            if (cleanPath.startsWith('/en/')) cleanPath = cleanPath.slice(3);
+            else if (cleanPath.startsWith('/es/')) cleanPath = cleanPath.slice(3);
+            else if (cleanPath === '/en' || cleanPath === '/es') cleanPath = '/';
+
+            hreflangTags = `
+  <link rel="alternate" hreflang="pt-BR" href="${appUrl}${cleanPath}" />
+  <link rel="alternate" hreflang="en" href="${appUrl}/en${cleanPath}" />
+  <link rel="alternate" hreflang="es" href="${appUrl}/es${cleanPath}" />
+  <link rel="alternate" hreflang="x-default" href="${appUrl}${cleanPath}" />`;
+          }
+        }
+
         const seoTags = `
   <title>${xmlEscape(title)}</title>
   <meta name="description" content="${xmlEscape(description)}" />
   <meta name="robots" content="${robots}" />
-  <link rel="canonical" href="${xmlEscape(canonicalUrl)}" />
+  <link rel="canonical" href="${xmlEscape(canonicalUrl)}" />${hreflangTags}
   <link rel="icon" href="${xmlEscape(absoluteFavicon)}" />
   <meta property="og:title" content="${xmlEscape(title)}" />
   <meta property="og:description" content="${xmlEscape(description)}" />
@@ -12702,6 +13355,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         html = html.replace(/<meta[^>]*name=["']twitter:image["'][^>]*>/gi, '');
         html = html.replace(/<link[^>]*rel=["']canonical["'][^>]*>/gi, '');
         html = html.replace(/<link[^>]*rel=["'](?:shortcut )?icon["'][^>]*>/gi, '');
+
+        // Ajusta a tag html lang
+        html = html.replace(/<html\s+lang=["']pt-BR["']/gi, `<html lang="${currentLang === 'pt' ? 'pt-BR' : currentLang}"`);
 
         // Insere as novas tags SEO + JSON-LD no head
         html = html.replace('</head>', `${seoTags}\n</head>`);

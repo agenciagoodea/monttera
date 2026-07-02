@@ -69,11 +69,24 @@ export default function AdminProductForm() {
   const canonicalInputRef = useRef<HTMLInputElement | null>(null);
   const mainImageAltInputRef = useRef<HTMLInputElement | null>(null);
   const [activeGalleryAltIndex, setActiveGalleryAltIndex] = useState<number | null>(null);
+
+  // i18n
+  const [activeLangTab, setActiveLangTab] = useState<'pt' | 'en' | 'es'>('pt');
+  const [translatingField, setTranslatingField] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     name: '',
+    name_en: '',
+    name_es: '',
     slug: '',
+    slug_en: '',
+    slug_es: '',
     short_description: '',
+    short_description_en: '',
+    short_description_es: '',
     description: '',
+    description_en: '',
+    description_es: '',
     price: '',
     sale_price: '',
     category_id: '',
@@ -82,7 +95,11 @@ export default function AdminProductForm() {
     is_featured: false,
     is_new: true,
     seo_title: '',
+    seo_title_en: '',
+    seo_title_es: '',
     seo_description: '',
+    seo_description_en: '',
+    seo_description_es: '',
     seo_keywords: '',
     canonical_url: '',
     noindex: false,
@@ -120,9 +137,17 @@ export default function AdminProductForm() {
     const prod = await prodRes.json();
     setFormData(() => ({
       name: prod.name,
+      name_en: prod.name_en || '',
+      name_es: prod.name_es || '',
       slug: prod.slug || '',
+      slug_en: prod.slug_en || '',
+      slug_es: prod.slug_es || '',
       short_description: prod.short_description || '',
+      short_description_en: prod.short_description_en || '',
+      short_description_es: prod.short_description_es || '',
       description: prod.description || '',
+      description_en: prod.description_en || '',
+      description_es: prod.description_es || '',
       price: prod.price.toString(),
       sale_price: prod.sale_price?.toString() || '',
       category_id: prod.category_id?.toString() || '',
@@ -131,7 +156,11 @@ export default function AdminProductForm() {
       is_featured: !!prod.is_featured,
       is_new: !!prod.is_new,
       seo_title: prod.seo_title || '',
+      seo_title_en: prod.seo_title_en || '',
+      seo_title_es: prod.seo_title_es || '',
       seo_description: prod.seo_description || '',
+      seo_description_en: prod.seo_description_en || '',
+      seo_description_es: prod.seo_description_es || '',
       seo_keywords: prod.seo_keywords || '',
       canonical_url: prod.canonical_url || '',
       noindex: !!prod.noindex,
@@ -184,6 +213,57 @@ export default function AdminProductForm() {
     setMainImageAlt(String(prod.image_alt || '').trim());
     setExistingGalleryUrls(normalizedGallery);
     setExistingGalleryAlts(loadedExistingGalleryAlts);
+  };
+
+  const handleAutoTranslate = async (field: 'name' | 'description' | 'short_description' | 'seo_title' | 'seo_description') => {
+    const sourceText = formData[field];
+    if (!sourceText || sourceText.replace(/<[^>]*>/g, '').trim().length === 0) {
+      alert('Escreva primeiro o conteúdo em português para poder traduzir.');
+      return;
+    }
+
+    setTranslatingField(field);
+    try {
+      const res = await fetch('/api/admin/translate', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: sourceText,
+          target: activeLangTab
+        })
+      });
+
+      if (res.ok) {
+        const { translatedText } = await res.json();
+        setFormData(prev => ({
+          ...prev,
+          [`${field}_${activeLangTab}`]: translatedText
+        }));
+        
+        // Se traduziu o nome, podemos sugerir o slug traduzido
+        if (field === 'name') {
+          const targetSlug = translatedText
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)+/g, '');
+          setFormData(prev => ({
+            ...prev,
+            [`slug_${activeLangTab}`]: targetSlug
+          }));
+        }
+        alert('Tradução gerada com sucesso via Gemini!');
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Erro ao traduzir.');
+      }
+    } catch (e) {
+      alert('Erro de conexão ao tentar traduzir.');
+    } finally {
+      setTranslatingField(null);
+    }
   };
 
   useEffect(() => {
@@ -682,9 +762,9 @@ export default function AdminProductForm() {
     // Enviar apenas campos de texto/número — excluir booleanos que seriam convertidos
     // em 'true'/'false' e poderiam confundir o servidor (is_featured e is_new não estão no UPDATE)
     const textFields: Array<keyof typeof formData> = [
-      'name', 'slug', 'short_description', 'description',
+      'name', 'name_en', 'name_es', 'slug', 'slug_en', 'slug_es', 'short_description', 'short_description_en', 'short_description_es', 'description', 'description_en', 'description_es',
       'price', 'sale_price', 'stitch_count', 'colors',
-      'seo_title', 'seo_description', 'seo_keywords', 'canonical_url'
+      'seo_title', 'seo_title_en', 'seo_title_es', 'seo_description', 'seo_description_en', 'seo_description_es', 'seo_keywords', 'canonical_url'
     ];
     textFields.forEach(key => {
       data.append(key as string, String(formData[key] ?? ''));
@@ -940,61 +1020,186 @@ export default function AdminProductForm() {
         <div className="w-full lg:w-2/3 space-y-8">
           {/* Basic Info */}
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 md:p-10 space-y-8">
-            <div className="flex items-center gap-3 border-b border-slate-50 pb-5">
-              <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
-                <Settings className="w-4 h-4" />
+            <div className="flex items-center justify-between border-b border-slate-50 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                  <Settings className="w-4 h-4" />
+                </div>
+                <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Informações Básicas</h3>
               </div>
-              <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Informações Básicas</h3>
+
+              {/* Language Tabs */}
+              <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setActiveLangTab('pt')}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    activeLangTab === 'pt' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  🇧🇷 PT
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveLangTab('en')}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    activeLangTab === 'en' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  🇺🇸 EN
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveLangTab('es')}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    activeLangTab === 'es' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  🇪🇸 ES
+                </button>
+              </div>
             </div>
 
             <div className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome do Produto</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={e => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
-                  placeholder="Ex: Matriz de Bordado Borboleta 3D"
-                />
-              </div>
+              {/* --- PORTUGUESE FIELDS --- */}
+              {activeLangTab === 'pt' && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome do Produto</label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.name}
+                      onChange={e => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                      className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                      placeholder="Ex: Matriz de Bordado Borboleta 3D"
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Slug amigável</label>
-                <input
-                  type="text"
-                  value={formData.slug}
-                  onChange={e => setFormData((prev) => ({ ...prev, slug: e.target.value }))}
-                  className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
-                  placeholder="ex: matriz-borboleta-3d"
-                />
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Slug amigável</label>
+                    <input
+                      type="text"
+                      value={formData.slug}
+                      onChange={e => setFormData((prev) => ({ ...prev, slug: e.target.value }))}
+                      className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                      placeholder="ex: matriz-borboleta-3d"
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <HtmlRichEditor
-                  label="Breve Descrição"
-                  value={formData.short_description}
-                  onChange={(value) => setFormData((prev) => ({ ...prev, short_description: value }))}
-                  rows={6}
-                  placeholder="Resumo para listagens"
-                />
-              </div>
+                  <div className="space-y-2">
+                    <HtmlRichEditor
+                      label="Breve Descrição"
+                      value={formData.short_description}
+                      onChange={(value) => setFormData((prev) => ({ ...prev, short_description: value }))}
+                      rows={6}
+                      placeholder="Resumo para listagens"
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <HtmlRichEditor
-                  label="Descrição Completa"
-                  value={formData.description}
-                  onChange={(value) => setFormData((prev) => ({ ...prev, description: value }))}
-                  rows={12}
-                  placeholder="Instruções e detalhes do bordado..."
-                />
-                {(!formData.description || formData.description.replace(/<[^>]*>/g, '').trim().length < 30) && (
-                  <p className="text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1.5 rounded-lg flex items-center gap-1 mt-1 border border-amber-100">
-                    ⚠️ Sem descrição otimizada: Uma descrição completa e rica em detalhes é obrigatória para o Google Shopping e melhora o ranqueamento.
-                  </p>
-                )}
-              </div>
+                  <div className="space-y-2">
+                    <HtmlRichEditor
+                      label="Descrição Completa"
+                      value={formData.description}
+                      onChange={(value) => setFormData((prev) => ({ ...prev, description: value }))}
+                      rows={12}
+                      placeholder="Instruções e detalhes do bordado..."
+                    />
+                    {(!formData.description || formData.description.replace(/<[^>]*>/g, '').trim().length < 30) && (
+                      <p className="text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1.5 rounded-lg flex items-center gap-1 mt-1 border border-amber-100">
+                        ⚠️ Sem descrição otimizada: Uma descrição completa e rica em detalhes é obrigatória para o Google Shopping e melhora o ranqueamento.
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* --- EN / ES LOCALIZED FIELDS --- */}
+              {activeLangTab !== 'pt' && (
+                <>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                        Nome do Produto ({activeLangTab.toUpperCase()})
+                      </label>
+                      <button
+                        type="button"
+                        disabled={translatingField !== null}
+                        onClick={() => handleAutoTranslate('name')}
+                        className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      >
+                        {translatingField === 'name' ? 'Traduzindo...' : '🤖 Traduzir com Gemini'}
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={activeLangTab === 'en' ? formData.name_en : formData.name_es}
+                      onChange={e => setFormData((prev) => ({ ...prev, [activeLangTab === 'en' ? 'name_en' : 'name_es']: e.target.value }))}
+                      className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                      placeholder={`Ex: Embroidery Design Butterfly 3D (${activeLangTab.toUpperCase()})`}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                      Slug amigável ({activeLangTab.toUpperCase()})
+                    </label>
+                    <input
+                      type="text"
+                      value={activeLangTab === 'en' ? formData.slug_en : formData.slug_es}
+                      onChange={e => setFormData((prev) => ({ ...prev, [activeLangTab === 'en' ? 'slug_en' : 'slug_es']: e.target.value }))}
+                      className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                      placeholder={`ex: embroidery-butterfly-3d`}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                        Breve Descrição ({activeLangTab.toUpperCase()})
+                      </span>
+                      <button
+                        type="button"
+                        disabled={translatingField !== null}
+                        onClick={() => handleAutoTranslate('short_description')}
+                        className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      >
+                        {translatingField === 'short_description' ? 'Traduzindo...' : '🤖 Traduzir com Gemini'}
+                      </button>
+                    </div>
+                    <HtmlRichEditor
+                      label=""
+                      value={activeLangTab === 'en' ? formData.short_description_en : formData.short_description_es}
+                      onChange={(value) => setFormData((prev) => ({ ...prev, [activeLangTab === 'en' ? 'short_description_en' : 'short_description_es']: value }))}
+                      rows={6}
+                      placeholder={`Resumo em ${activeLangTab.toUpperCase()}`}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                        Descrição Completa ({activeLangTab.toUpperCase()})
+                      </span>
+                      <button
+                        type="button"
+                        disabled={translatingField !== null}
+                        onClick={() => handleAutoTranslate('description')}
+                        className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      >
+                        {translatingField === 'description' ? 'Traduzindo...' : '🤖 Traduzir com Gemini'}
+                      </button>
+                    </div>
+                    <HtmlRichEditor
+                      label=""
+                      value={activeLangTab === 'en' ? formData.description_en : formData.description_es}
+                      onChange={(value) => setFormData((prev) => ({ ...prev, [activeLangTab === 'en' ? 'description_en' : 'description_es']: value }))}
+                      rows={12}
+                      placeholder={`Instruções em ${activeLangTab.toUpperCase()}...`}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -1009,30 +1214,79 @@ export default function AdminProductForm() {
               </div>
 
               <div className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Título SEO</label>
-                  <input
-                    ref={seoTitleInputRef}
-                    type="text"
-                    value={formData.seo_title}
-                    onChange={e => setFormData((prev) => ({ ...prev, seo_title: e.target.value }))}
-                    onFocus={() => setActiveSeoField('seo_title')}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
-                    placeholder="Meta title para o Google"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Meta Descrição SEO</label>
-                  <textarea
-                    ref={seoDescriptionInputRef}
-                    rows={3}
-                    value={formData.seo_description}
-                    onChange={e => setFormData((prev) => ({ ...prev, seo_description: e.target.value }))}
-                    onFocus={() => setActiveSeoField('seo_description')}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold resize-none"
-                    placeholder="Resumo para resultados de busca"
-                  />
-                </div>
+                {activeLangTab === 'pt' && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Título SEO</label>
+                      <input
+                        ref={seoTitleInputRef}
+                        type="text"
+                        value={formData.seo_title}
+                        onChange={e => setFormData((prev) => ({ ...prev, seo_title: e.target.value }))}
+                        onFocus={() => setActiveSeoField('seo_title')}
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder="Meta title para o Google"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Meta Descrição SEO</label>
+                      <textarea
+                        ref={seoDescriptionInputRef}
+                        rows={3}
+                        value={formData.seo_description}
+                        onChange={e => setFormData((prev) => ({ ...prev, seo_description: e.target.value }))}
+                        onFocus={() => setActiveSeoField('seo_description')}
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold resize-none focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder="Resumo para resultados de busca"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {activeLangTab !== 'pt' && (
+                  <>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Título SEO ({activeLangTab.toUpperCase()})</label>
+                        <button
+                          type="button"
+                          disabled={translatingField !== null}
+                          onClick={() => handleAutoTranslate('seo_title')}
+                          className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          {translatingField === 'seo_title' ? 'Traduzindo...' : '🤖 Traduzir com Gemini'}
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={activeLangTab === 'en' ? formData.seo_title_en : formData.seo_title_es}
+                        onChange={e => setFormData((prev) => ({ ...prev, [activeLangTab === 'en' ? 'seo_title_en' : 'seo_title_es']: e.target.value }))}
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder={`Meta title para o Google em ${activeLangTab.toUpperCase()}`}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Meta Descrição SEO ({activeLangTab.toUpperCase()})</label>
+                        <button
+                          type="button"
+                          disabled={translatingField !== null}
+                          onClick={() => handleAutoTranslate('seo_description')}
+                          className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          {translatingField === 'seo_description' ? 'Traduzindo...' : '🤖 Traduzir com Gemini'}
+                        </button>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={activeLangTab === 'en' ? formData.seo_description_en : formData.seo_description_es}
+                        onChange={e => setFormData((prev) => ({ ...prev, [activeLangTab === 'en' ? 'seo_description_en' : 'seo_description_es']: e.target.value }))}
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold resize-none focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder={`Resumo para resultados de busca em ${activeLangTab.toUpperCase()}`}
+                      />
+                    </div>
+                  </>
+                )}
                 <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">Chaves dinâmicas SEO</p>

@@ -15,10 +15,16 @@ import LucideIcon from '../../components/LucideIcon';
 interface Category {
   id: number;
   name: string;
+  name_en?: string | null;
+  name_es?: string | null;
   slug: string;
+  slug_en?: string | null;
+  slug_es?: string | null;
   parent_id: number | null;
   parent_name: string | null;
   description?: string | null;
+  description_en?: string | null;
+  description_es?: string | null;
   icon?: string | null;
   product_count?: number;
   status: string;
@@ -35,15 +41,75 @@ export default function AdminCategoryList() {
   const [bulkAction, setBulkAction] = useState<'none' | 'delete'>('none');
   const [processingBulk, setProcessingBulk] = useState(false);
 
+  // i18n
+  const [activeLangTab, setActiveLangTab] = useState<'pt' | 'en' | 'es'>('pt');
+  const [translatingField, setTranslatingField] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     name: '',
+    name_en: '',
+    name_es: '',
     slug: '',
+    slug_en: '',
+    slug_es: '',
     parent_id: '',
     sort_order: '0',
     status: 'active',
     description: '',
+    description_en: '',
+    description_es: '',
     icon: '',
   });
+
+  const handleAutoTranslate = async (field: 'name' | 'description') => {
+    const sourceText = formData[field];
+    if (!sourceText || sourceText.trim().length === 0) {
+      alert('Escreva primeiro o conteúdo em português para poder traduzir.');
+      return;
+    }
+
+    setTranslatingField(field);
+    try {
+      const res = await fetch('/api/admin/translate', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: sourceText,
+          target: activeLangTab
+        })
+      });
+
+      if (res.ok) {
+        const { translatedText } = await res.json();
+        setFormData(prev => ({
+          ...prev,
+          [`${field}_${activeLangTab}`]: translatedText
+        }));
+        
+        if (field === 'name') {
+          const targetSlug = translatedText
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)+/g, '');
+          setFormData(prev => ({
+            ...prev,
+            [`slug_${activeLangTab}`]: targetSlug
+          }));
+        }
+        alert('Tradução gerada com sucesso via Gemini!');
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Erro ao traduzir.');
+      }
+    } catch (e) {
+      alert('Erro de conexão ao tentar traduzir.');
+    } finally {
+      setTranslatingField(null);
+    }
+  };
 
   const fetchCategories = async () => {
     try {
@@ -116,11 +182,17 @@ export default function AdminCategoryList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: category.name,
+          name_en: category.name_en || '',
+          name_es: category.name_es || '',
           slug: category.slug,
+          slug_en: category.slug_en || '',
+          slug_es: category.slug_es || '',
           parent_id: category.parent_id || '',
           sort_order: category.sort_order,
           status: nextStatus,
           description: category.description || '',
+          description_en: category.description_en || '',
+          description_es: category.description_es || '',
           icon: category.icon || '',
         }),
       });
@@ -153,7 +225,21 @@ export default function AdminCategoryList() {
       if (res.ok) {
         setShowModal(false);
         setEditingCategory(null);
-        setFormData({ name: '', slug: '', parent_id: '', sort_order: '0', status: 'active', description: '', icon: '' });
+        setFormData({
+          name: '',
+          name_en: '',
+          name_es: '',
+          slug: '',
+          slug_en: '',
+          slug_es: '',
+          parent_id: '',
+          sort_order: '0',
+          status: 'active',
+          description: '',
+          description_en: '',
+          description_es: '',
+          icon: ''
+        });
         fetchCategories();
       }
     } catch (error) {
@@ -165,13 +251,20 @@ export default function AdminCategoryList() {
     setEditingCategory(cat);
     setFormData({
       name: cat.name,
+      name_en: cat.name_en || '',
+      name_es: cat.name_es || '',
       slug: cat.slug,
+      slug_en: cat.slug_en || '',
+      slug_es: cat.slug_es || '',
       parent_id: cat.parent_id?.toString() || '',
       sort_order: cat.sort_order.toString(),
       status: cat.status,
       description: cat.description || '',
+      description_en: cat.description_en || '',
+      description_es: cat.description_es || '',
       icon: cat.icon || '',
     });
+    setActiveLangTab('pt'); // Resetar aba de idioma para o padrão
     setShowModal(true);
   };
 
@@ -426,29 +519,107 @@ export default function AdminCategoryList() {
             </div>
 
             <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-              <div className="p-6 md:p-10 overflow-y-auto space-y-6 flex-1 custom-scrollbar">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome da Categoria</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
-                    placeholder="Ex: Animais, Infantil..."
-                  />
+              {/* Language Selection Tabs */}
+              <div className="px-6 md:px-10 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Idioma Ativo:</span>
+                <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setActiveLangTab('pt')}
+                    className={`px-2.5 py-1 rounded text-[9px] font-black uppercase transition-all cursor-pointer ${
+                      activeLangTab === 'pt' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    🇧🇷 PT
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveLangTab('en')}
+                    className={`px-2.5 py-1 rounded text-[9px] font-black uppercase transition-all cursor-pointer ${
+                      activeLangTab === 'en' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    🇺🇸 EN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveLangTab('es')}
+                    className={`px-2.5 py-1 rounded text-[9px] font-black uppercase transition-all cursor-pointer ${
+                      activeLangTab === 'es' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    🇪🇸 ES
+                  </button>
                 </div>
+              </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Slug</label>
-                  <input
-                    type="text"
-                    value={formData.slug}
-                    onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
-                    placeholder="Opcional (gerado automaticamente se vazio)"
-                  />
-                </div>
+              <div className="p-6 md:p-10 overflow-y-auto space-y-6 flex-1 custom-scrollbar">
+                {activeLangTab === 'pt' && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome da Categoria</label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder="Ex: Animais, Infantil..."
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Slug</label>
+                      <input
+                        type="text"
+                        value={formData.slug}
+                        onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder="Opcional (gerado automaticamente se vazio)"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {activeLangTab !== 'pt' && (
+                  <>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                          Nome da Categoria ({activeLangTab.toUpperCase()})
+                        </label>
+                        <button
+                          type="button"
+                          disabled={translatingField !== null}
+                          onClick={() => handleAutoTranslate('name')}
+                          className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          {translatingField === 'name' ? 'Traduzindo...' : '🤖 Traduzir com Gemini'}
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={activeLangTab === 'en' ? formData.name_en : formData.name_es}
+                        onChange={(e) => setFormData({ ...formData, [activeLangTab === 'en' ? 'name_en' : 'name_es']: e.target.value })}
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder={`Ex: Animals, Kids (${activeLangTab.toUpperCase()})`}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                        Slug ({activeLangTab.toUpperCase()})
+                      </label>
+                      <input
+                        type="text"
+                        value={activeLangTab === 'en' ? formData.slug_en : formData.slug_es}
+                        onChange={(e) => setFormData({ ...formData, [activeLangTab === 'en' ? 'slug_en' : 'slug_es']: e.target.value })}
+                        className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                        placeholder="Opcional"
+                      />
+                    </div>
+                  </>
+                )}
 
                 <div className="grid grid-cols-2 gap-6">
                   <div className="space-y-2">
@@ -565,16 +736,43 @@ export default function AdminCategoryList() {
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Descrição</label>
-                  <textarea
-                    rows={4}
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold resize-none"
-                    placeholder="Descrição da categoria (opcional)"
-                  />
-                </div>
+                {activeLangTab === 'pt' && (
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Descrição</label>
+                    <textarea
+                      rows={4}
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                      className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold resize-none focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                      placeholder="Descrição da categoria (opcional)"
+                    />
+                  </div>
+                )}
+
+                {activeLangTab !== 'pt' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                        Descrição ({activeLangTab.toUpperCase()})
+                      </label>
+                      <button
+                        type="button"
+                        disabled={translatingField !== null}
+                        onClick={() => handleAutoTranslate('description')}
+                        className="text-[9px] font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      >
+                        {translatingField === 'description' ? 'Traduzindo...' : '🤖 Traduzir com Gemini'}
+                      </button>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={activeLangTab === 'en' ? formData.description_en : formData.description_es}
+                      onChange={(e) => setFormData({ ...formData, [activeLangTab === 'en' ? 'description_en' : 'description_es']: e.target.value })}
+                      className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold resize-none focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-400 transition-all"
+                      placeholder={`Descrição da categoria em ${activeLangTab.toUpperCase()} (opcional)`}
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Status</label>

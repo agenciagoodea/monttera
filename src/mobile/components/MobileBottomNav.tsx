@@ -3,39 +3,55 @@ import { Home, Grid, Search, ShoppingCart, User } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useCart } from '../../contexts/CartContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../contexts/I18nContext';
 
 export default function MobileBottomNav() {
   const location = useLocation();
   const { totalItems } = useCart();
   const { user } = useAuth();
+  const { language, t } = useI18n();
   const currentPath = location.pathname;
+
+  const getLocalizedPath = (pathType: string) => {
+    const prefix = language === 'pt' ? '' : `/${language}`;
+    switch (pathType) {
+      case 'home': return prefix || '/';
+      case 'categories': return `${prefix}/${language === 'en' ? 'categories' : 'categorias'}`;
+      case 'search': return `${prefix}/${language === 'en' ? 'search' : 'busca'}`;
+      case 'cart': return `${prefix}/${language === 'en' ? 'cart' : language === 'es' ? 'carrito' : 'carrinho'}`;
+      case 'account': return user 
+        ? `${prefix}/${language === 'en' ? 'my-account' : language === 'es' ? 'mi-cuenta' : 'minha-conta'}`
+        : `${prefix}/login`;
+      default: return prefix || '/';
+    }
+  };
 
   const navItems = [
     {
-      label: 'Início',
+      label: t('common.home'),
       icon: Home,
-      path: '/'
+      path: getLocalizedPath('home')
     },
     {
-      label: 'Categorias',
+      label: language === 'pt' ? 'Categorias' : language === 'en' ? 'Categories' : 'Categorías',
       icon: Grid,
-      path: '/categorias'
+      path: getLocalizedPath('categories')
     },
     {
-      label: 'Buscar',
+      label: language === 'pt' ? 'Buscar' : language === 'en' ? 'Search' : 'Buscar',
       icon: Search,
-      path: '/busca'
+      path: getLocalizedPath('search')
     },
     {
-      label: 'Carrinho',
+      label: t('common.cart'),
       icon: ShoppingCart,
-      path: '/carrinho',
+      path: getLocalizedPath('cart'),
       badge: totalItems
     },
     {
-      label: 'Conta',
+      label: language === 'pt' ? 'Conta' : language === 'en' ? 'Account' : 'Cuenta',
       icon: User,
-      path: user ? '/minha-conta' : '/login'
+      path: getLocalizedPath('account')
     }
   ];
 
@@ -44,7 +60,6 @@ export default function MobileBottomNav() {
       <div className="max-w-md w-full mx-auto flex items-center justify-around">
         {navItems.map((item) => {
           const Icon = item.icon;
-          // Verifica se o caminho atual confere com o item
           const isActive = currentPath === item.path || 
             (item.path !== '/' && currentPath.startsWith(item.path));
 
@@ -68,7 +83,7 @@ export default function MobileBottomNav() {
                 {item.label}
               </span>
 
-              {/* Badge Dinâmico para Itens do Carrinho */}
+              {/* Badge Dinâmico */}
               {item.badge !== undefined && item.badge > 0 && (
                 <span className="absolute top-1 right-[22%] bg-red-500 text-white font-extrabold text-[8px] min-w-[16px] h-4 rounded-full flex items-center justify-center border border-white shadow-sm">
                   {item.badge}

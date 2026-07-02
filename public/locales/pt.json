@@ -1,0 +1,82 @@
+{
+  "common": {
+    "home": "Início",
+    "shop": "Loja",
+    "about_us": "Nossa Empresa",
+    "quote": "Orçamento",
+    "contact": "Contato",
+    "help": "Ajuda",
+    "privacy": "Privacidade",
+    "my_account": "Minha Conta",
+    "hello": "Olá",
+    "login": "Entrar",
+    "register": "Cadastrar",
+    "logout": "Sair",
+    "search_placeholder": "Pesquise por uma palavra curta (ex.: policia, veterinária, enfermagem, carro)...",
+    "search_results": "Ver todos os resultados para",
+    "no_results": "Nenhum produto encontrado",
+    "no_results_sub": "Tente buscar por termos diferentes ou mais genéricos.",
+    "cart": "Carrinho",
+    "favorites": "Favoritos",
+    "loading": "Carregando...",
+    "error": "Ocorreu um erro",
+    "currency_symbol": "R$ ",
+    "all_rights_reserved": "Todos os direitos reservados",
+    "secure_environment": "Ambiente Seguro",
+    "ssl_protection": "Proteção SSL 256-bit",
+    "whatsapp_support": "Suporte via WhatsApp",
+    "email_support": "Suporte via E-mail"
+  },
+  "menu": {
+    "dashboard": "Painel Geral",
+    "orders": "Meus Pedidos",
+    "downloads": "Meus Downloads",
+    "addresses": "Endereços",
+    "profile": "Detalhes da Conta",
+    "admin_dashboard": "Painel Admin"
+  },
+  "product": {
+    "buy_now": "Comprar Agora",
+    "add_to_cart": "Adicionar ao Carrinho",
+    "description": "Descrição",
+    "short_description": "Resumo",
+    "details": "Detalhes Técnicos",
+    "colors": "Cores",
+    "stitch_count": "Pontos",
+    "format": "Formatos",
+    "downloads_info": "Download imediato após aprovação",
+    "featured": "Destaques",
+    "new": "Novidade",
+    "category": "Categoria",
+    "reviews": "Avaliações",
+    "no_reviews": "Este produto ainda não possui avaliações.",
+    "related_products": "Produtos Relacionados"
+  },
+  "cart_page": {
+    "title": "Seu Carrinho de Compras",
+    "empty": "Seu carrinho está vazio.",
+    "go_to_shop": "Ir para a Loja",
+    "subtotal": "Subtotal",
+    "total": "Total",
+    "checkout": "Finalizar Compra",
+    "remove": "Remover"
+  },
+  "checkout_page": {
+    "title": "Finalizar Compra",
+    "payment_method": "Método de Pagamento",
+    "credit_card_pix": "Cartão de Crédito ou PIX",
+    "paypal": "PayPal",
+    "place_order": "Concluir Pedido",
+    "billing_details": "Dados de Faturamento"
+  },
+  "footer": {
+    "intro_text": "Transforme suas ideias em bordados perfeitos! Oferecemos matrizes de bordado computadorizado de alta qualidade, prontas para dar vida aos seus projetos com precisão e criatividade."
+  },
+  "help_page": {
+    "title": "Como podemos ajudar?",
+    "subtitle": "Encontre respostas rápidas ou entre em contato com nosso suporte.",
+    "faq_title": "Dúvidas Frequentes",
+    "need_more_help": "Ainda precisa de ajuda?",
+    "need_more_help_desc": "Nossa equipe de suporte está disponível de segunda a sexta, das 09h às 18h, para resolver qualquer dúvida ou problema técnico."
+  }
+}

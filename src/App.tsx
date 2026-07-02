@@ -53,6 +53,8 @@ const AdminFiles = lazy(() => import('./pages/admin/AdminFiles'));
 const AdminReviews = lazy(() => import('./pages/admin/AdminReviews'));
 const AdminAnalytics = lazy(() => import('./pages/admin/AdminAnalytics'));
 const AdminSeoDashboard = lazy(() => import('./pages/admin/AdminSeoDashboard'));
+const AdminFaqList = lazy(() => import('./pages/admin/AdminFaqList'));
+const AdminBlogList = lazy(() => import('./pages/admin/AdminBlogList'));
 
 import AdminLayout from './layouts/AdminLayout';
 import { AuthProvider } from './contexts/AuthContext';
@@ -62,6 +64,7 @@ import { AppDataProvider } from './contexts/AppDataContext';
 import { useAuth } from './contexts/AuthContext';
 import { useAppData } from './contexts/AppDataContext';
 import { applySeo } from './lib/seo';
+import { I18nProvider, useI18n } from './contexts/I18nContext';
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-white/50 backdrop-blur-sm fixed inset-0 z-50">
@@ -88,32 +91,44 @@ function RequireRegisteredUser({ children }: { children: ReactElement }) {
 function RouteSeoDefaults() {
   const location = useLocation();
   const { settings } = useAppData();
+  const { language, t } = useI18n();
 
   useEffect(() => {
-    const siteName = String(settings.site_name || 'Digital Bordados').trim();
+    // Carregar configurações localizadas do banco se existirem
+    const suffix = language === 'pt' ? '' : `_${language}`;
+    const siteNameKey = `site_name${suffix}`;
+    const siteDescKey = `site_description${suffix}`;
+    const seoTitleKey = `seo_meta_title${suffix}`;
+    const seoDescKey = `seo_meta_description${suffix}`;
+    const seoKeywordsKey = `seo_keywords${suffix}`;
+
+    const siteName = String(settings[siteNameKey] || settings.site_name || 'Digital Bordados').trim();
     const appUrl = String(settings.app_url || window.location.origin).replace(/\/+$/, '');
+    
     const baseDescription = String(
-      settings.site_description || 'Matrizes de bordado digitais para produção profissional.',
+      settings[seoDescKey] || settings[siteDescKey] || settings.site_description || 'Matrizes de bordado digitais para produção profissional.'
     ).trim();
 
     const path = location.pathname;
+    
+    // Expressões regulares para mapear SEO multilíngue
     const seoByRoute: Array<{ match: RegExp; title: string; description: string; robots?: string }> = [
-      { match: /^\/$/, title: `${siteName} | Início`, description: baseDescription },
-      { match: /^\/loja/, title: `Loja | ${siteName}`, description: 'Explore nossa vitrine de matrizes de bordado digitais.' },
-      { match: /^\/orcamento/, title: `Orçamento | ${siteName}`, description: 'Solicite orçamento para desenvolvimento profissional de matrizes de bordado.' },
-      { match: /^\/contato/, title: `Contato | ${siteName}`, description: `Fale com a equipe da ${siteName}.` },
-      { match: /^\/nossa-empresa/, title: `Nossa Empresa | ${siteName}`, description: `Conheca a historia, missao e valores da ${siteName}.` },
-      { match: /^\/produto\//, title: `${siteName} | Produto`, description: baseDescription },
-      { match: /^\/favoritos/, title: `Favoritos | ${siteName}`, description: 'Lista de produtos favoritados.', robots: 'noindex,follow' },
-      { match: /^\/carrinho/, title: `Carrinho | ${siteName}`, description: 'Confira os itens adicionados ao carrinho.', robots: 'noindex,follow' },
-      { match: /^\/checkout/, title: `Finalizar Compra | ${siteName}`, description: 'Finalize sua compra com segurança.', robots: 'noindex,follow' },
-      { match: /^\/obrigado-compra/, title: `Obrigado pela Compra | ${siteName}`, description: 'Confirmação do seu pedido.', robots: 'noindex,follow' },
-      { match: /^\/login/, title: `Entrar | ${siteName}`, description: 'Acesse sua conta para comprar e baixar matrizes.', robots: 'noindex,follow' },
-      { match: /^\/cadastro/, title: `Cadastro | ${siteName}`, description: 'Crie sua conta para comprar matrizes de bordado.', robots: 'noindex,follow' },
-      { match: /^\/esqueci-senha/, title: `Recuperar Senha | ${siteName}`, description: 'Recupere o acesso à sua conta.', robots: 'noindex,follow' },
-      { match: /^\/redefinir-senha/, title: `Redefinir Senha | ${siteName}`, description: 'Redefina a senha da sua conta.', robots: 'noindex,follow' },
-      { match: /^\/minha-conta/, title: `Minha Conta | ${siteName}`, description: 'Área do cliente.', robots: 'noindex,follow' },
-      { match: /^\/admin/, title: `Admin | ${siteName}`, description: 'Painel administrativo', robots: 'noindex,follow' },
+      { match: /^\/(?:en|es)?\/?$/, title: `${siteName} | ${t('common.home')}`, description: baseDescription },
+      { match: /^\/(?:en\/shop|es\/tienda|loja)/, title: `${t('common.shop')} | ${siteName}`, description: t('common.search_placeholder') },
+      { match: /^\/(?:en\/quote|es\/presupuesto|orcamento)/, title: `${t('common.quote')} | ${siteName}`, description: t('help_page.subtitle') },
+      { match: /^\/(?:en\/contact|es\/contacto|contato)/, title: `${t('common.contact')} | ${siteName}`, description: t('help_page.subtitle') },
+      { match: /^\/(?:en\/about-us|es\/nuestra-empresa|nossa-empresa)/, title: `${t('common.about_us')} | ${siteName}`, description: t('footer.intro_text') },
+      { match: /^\/(?:en\/product|es\/producto|produto)\//, title: `${siteName} | ${t('common.shop')}`, description: baseDescription },
+      { match: /^\/(?:en\/favorites|es\/favoritos|favoritos)/, title: `${t('common.favorites')} | ${siteName}`, description: 'Favorites list', robots: 'noindex,follow' },
+      { match: /^\/(?:en\/cart|es\/carrito|carrinho)/, title: `${t('common.cart')} | ${siteName}`, description: 'Shopping cart', robots: 'noindex,follow' },
+      { match: /^\/(?:en\/checkout|es\/checkout|checkout)/, title: `${t('checkout_page.title')} | ${siteName}`, description: 'Checkout', robots: 'noindex,follow' },
+      { match: /^\/(?:en\/thank-you|es\/obrigado-compra|obrigado-compra)/, title: `${t('common.my_account')} | ${siteName}`, description: 'Order confirmation', robots: 'noindex,follow' },
+      { match: /^\/(?:en\/login|es\/login|login)/, title: `${t('common.login')} | ${siteName}`, description: 'Login', robots: 'noindex,follow' },
+      { match: /^\/(?:en\/register|es\/cadastro|cadastro)/, title: `${t('common.register')} | ${siteName}`, description: 'Register', robots: 'noindex,follow' },
+      { match: /^\/(?:en\/forgot-password|es\/esqueci-senha|esqueci-senha)/, title: `${t('common.login')} | ${siteName}`, description: 'Forgot password', robots: 'noindex,follow' },
+      { match: /^\/(?:en\/reset-password|es\/redefinir-senha|redefinir-senha)/, title: `${t('common.login')} | ${siteName}`, description: 'Reset password', robots: 'noindex,follow' },
+      { match: /^\/(?:en\/my-account|es\/mi-cuenta|minha-conta)/, title: `${t('common.my_account')} | ${siteName}`, description: 'My account', robots: 'noindex,follow' },
+      { match: /^\/admin/, title: `Admin | ${siteName}`, description: 'Admin panel', robots: 'noindex,follow' },
     ];
 
     const selected = seoByRoute.find((entry) => entry.match.test(path));
@@ -143,10 +158,10 @@ function RouteSeoDefaults() {
       image: String(settings.seo_og_image || settings.logo_url || '/uploads/seo-default-share.jpg'),
       favicon: String((settings as any).favicon_url || '/favicon.ico'),
       twitterCard: String(settings.seo_twitter_card || 'summary_large_image'),
-      keywords: String(settings.seo_keywords || ''),
+      keywords: String(settings[seoKeywordsKey] || settings.seo_keywords || ''),
       jsonLd: organizationSchema,
     });
-  }, [location.pathname, location.search, settings]);
+  }, [location.pathname, location.search, settings, language]);
 
   return null;
 }
@@ -302,48 +317,96 @@ export default function App() {
       <Router>
         <AuthProvider>
           <AppDataProvider>
-            <FavoritesProvider>
-              <CartProvider>
-                <GlobalFaviconSync />
-                <Suspense fallback={<PageLoader />}>
-                  <Routes>
-                    <Route path="/*" element={
-                      <MobileLayout>
-                        <RouteSeoDefaults />
-                        <AnalyticsTracker />
-                        <Suspense fallback={<PageLoader />}>
-                          <Routes>
-                            <Route path="/" element={<MobileHome />} />
-                            <Route path="/categorias" element={<MobileCategories />} />
-                            <Route path="/busca" element={<MobileSearch />} />
-                            <Route path="/login" element={<MobileLogin />} />
-                            <Route path="/cadastro" element={<MobileRegister />} />
-                            <Route path="/esqueci-senha" element={<Suspense fallback={<PageLoader />}><ForgotPassword /></Suspense>} />
-                            <Route path="/redefinir-senha" element={<Suspense fallback={<PageLoader />}><ResetPassword /></Suspense>} />
-                            <Route path="/carrinho" element={<RequireRegisteredUser><MobileCart /></RequireRegisteredUser>} />
-                            <Route path="/favoritos" element={<Suspense fallback={<PageLoader />}><FavoritesPage /></Suspense>} />
-                            <Route path="/minha-conta/*" element={<RequireRegisteredUser><MobileMyAccount /></RequireRegisteredUser>} />
-                            <Route path="/produto/:slug" element={<MobileProductDetail />} />
-                            <Route path="/politica" element={<Suspense fallback={<PageLoader />}><PrivacyPolicy /></Suspense>} />
-                            <Route path="/exclusao-dados" element={<Suspense fallback={<PageLoader />}><DataDeletion /></Suspense>} />
-                            <Route path="/ajuda" element={<Suspense fallback={<PageLoader />}><HelpPage /></Suspense>} />
-                            <Route path="/nossa-empresa" element={<Suspense fallback={<PageLoader />}><CompanyPage /></Suspense>} />
-                            <Route path="/orcamento" element={<Suspense fallback={<PageLoader />}><BudgetPage /></Suspense>} />
-                            <Route path="/contato" element={<Suspense fallback={<PageLoader />}><ContactPage /></Suspense>} />
-                            <Route path="/checkout/paypal/success" element={<PayPalSuccess />} />
-                            <Route path="/checkout/paypal/cancel" element={<PayPalCancel />} />
-                            <Route path="/obrigado-compra" element={<ThankYouPage />} />
-                            <Route path="*" element={<Navigate to="/" replace />} />
-                          </Routes>
-                        </Suspense>
-                        <WhatsAppWidget />
-                        <SocialProofNotification />
-                      </MobileLayout>
-                    } />
-                  </Routes>
-                </Suspense>
-              </CartProvider>
-            </FavoritesProvider>
+            <I18nProvider>
+              <FavoritesProvider>
+                <CartProvider>
+                  <GlobalFaviconSync />
+                  <Suspense fallback={<PageLoader />}>
+                    <Routes>
+                      <Route path="/*" element={
+                        <MobileLayout>
+                          <RouteSeoDefaults />
+                          <AnalyticsTracker />
+                          <Suspense fallback={<PageLoader />}>
+                            <Routes>
+                              {/* PT Routes */}
+                              <Route path="/" element={<MobileHome />} />
+                              <Route path="/categorias" element={<MobileCategories />} />
+                              <Route path="/busca" element={<MobileSearch />} />
+                              <Route path="/login" element={<MobileLogin />} />
+                              <Route path="/cadastro" element={<MobileRegister />} />
+                              <Route path="/esqueci-senha" element={<Suspense fallback={<PageLoader />}><ForgotPassword /></Suspense>} />
+                              <Route path="/redefinir-senha" element={<Suspense fallback={<PageLoader />}><ResetPassword /></Suspense>} />
+                              <Route path="/carrinho" element={<RequireRegisteredUser><MobileCart /></RequireRegisteredUser>} />
+                              <Route path="/favoritos" element={<Suspense fallback={<PageLoader />}><FavoritesPage /></Suspense>} />
+                              <Route path="/minha-conta/*" element={<RequireRegisteredUser><MobileMyAccount /></RequireRegisteredUser>} />
+                              <Route path="/produto/:slug" element={<MobileProductDetail />} />
+                              <Route path="/politica" element={<Suspense fallback={<PageLoader />}><PrivacyPolicy /></Suspense>} />
+                              <Route path="/exclusao-dados" element={<Suspense fallback={<PageLoader />}><DataDeletion /></Suspense>} />
+                              <Route path="/ajuda" element={<Suspense fallback={<PageLoader />}><HelpPage /></Suspense>} />
+                              <Route path="/nossa-empresa" element={<Suspense fallback={<PageLoader />}><CompanyPage /></Suspense>} />
+                              <Route path="/orcamento" element={<Suspense fallback={<PageLoader />}><BudgetPage /></Suspense>} />
+                              <Route path="/contato" element={<Suspense fallback={<PageLoader />}><ContactPage /></Suspense>} />
+                              <Route path="/checkout/paypal/success" element={<PayPalSuccess />} />
+                              <Route path="/checkout/paypal/cancel" element={<PayPalCancel />} />
+                              <Route path="/obrigado-compra" element={<ThankYouPage />} />
+
+                              {/* EN Routes */}
+                              <Route path="/en" element={<MobileHome />} />
+                              <Route path="/en/categories" element={<MobileCategories />} />
+                              <Route path="/en/search" element={<MobileSearch />} />
+                              <Route path="/en/login" element={<MobileLogin />} />
+                              <Route path="/en/register" element={<MobileRegister />} />
+                              <Route path="/en/forgot-password" element={<Suspense fallback={<PageLoader />}><ForgotPassword /></Suspense>} />
+                              <Route path="/en/reset-password" element={<Suspense fallback={<PageLoader />}><ResetPassword /></Suspense>} />
+                              <Route path="/en/cart" element={<RequireRegisteredUser><MobileCart /></RequireRegisteredUser>} />
+                              <Route path="/en/favorites" element={<Suspense fallback={<PageLoader />}><FavoritesPage /></Suspense>} />
+                              <Route path="/en/my-account/*" element={<RequireRegisteredUser><MobileMyAccount /></RequireRegisteredUser>} />
+                              <Route path="/en/product/:slug" element={<MobileProductDetail />} />
+                              <Route path="/en/policy" element={<Suspense fallback={<PageLoader />}><PrivacyPolicy /></Suspense>} />
+                              <Route path="/en/data-deletion" element={<Suspense fallback={<PageLoader />}><DataDeletion /></Suspense>} />
+                              <Route path="/en/help" element={<Suspense fallback={<PageLoader />}><HelpPage /></Suspense>} />
+                              <Route path="/en/about-us" element={<Suspense fallback={<PageLoader />}><CompanyPage /></Suspense>} />
+                              <Route path="/en/quote" element={<Suspense fallback={<PageLoader />}><BudgetPage /></Suspense>} />
+                              <Route path="/en/contact" element={<Suspense fallback={<PageLoader />}><ContactPage /></Suspense>} />
+                              <Route path="/en/checkout/paypal/success" element={<PayPalSuccess />} />
+                              <Route path="/en/checkout/paypal/cancel" element={<PayPalCancel />} />
+                              <Route path="/en/thank-you" element={<ThankYouPage />} />
+
+                              {/* ES Routes */}
+                              <Route path="/es" element={<MobileHome />} />
+                              <Route path="/es/categorias" element={<MobileCategories />} />
+                              <Route path="/es/busca" element={<MobileSearch />} />
+                              <Route path="/es/login" element={<MobileLogin />} />
+                              <Route path="/es/cadastro" element={<MobileRegister />} />
+                              <Route path="/es/esqueci-senha" element={<Suspense fallback={<PageLoader />}><ForgotPassword /></Suspense>} />
+                              <Route path="/es/redefinir-senha" element={<Suspense fallback={<PageLoader />}><ResetPassword /></Suspense>} />
+                              <Route path="/es/carrito" element={<RequireRegisteredUser><MobileCart /></RequireRegisteredUser>} />
+                              <Route path="/es/favoritos" element={<Suspense fallback={<PageLoader />}><FavoritesPage /></Suspense>} />
+                              <Route path="/es/mi-cuenta/*" element={<RequireRegisteredUser><MobileMyAccount /></RequireRegisteredUser>} />
+                              <Route path="/es/producto/:slug" element={<MobileProductDetail />} />
+                              <Route path="/es/politica" element={<Suspense fallback={<PageLoader />}><PrivacyPolicy /></Suspense>} />
+                              <Route path="/es/exclusao-dados" element={<Suspense fallback={<PageLoader />}><DataDeletion /></Suspense>} />
+                              <Route path="/es/ayuda" element={<Suspense fallback={<PageLoader />}><HelpPage /></Suspense>} />
+                              <Route path="/es/nuestra-empresa" element={<Suspense fallback={<PageLoader />}><CompanyPage /></Suspense>} />
+                              <Route path="/es/presupuesto" element={<Suspense fallback={<PageLoader />}><BudgetPage /></Suspense>} />
+                              <Route path="/es/contacto" element={<Suspense fallback={<PageLoader />}><ContactPage /></Suspense>} />
+                              <Route path="/es/checkout/paypal/success" element={<PayPalSuccess />} />
+                              <Route path="/es/checkout/paypal/cancel" element={<PayPalCancel />} />
+                              <Route path="/es/obrigado-compra" element={<ThankYouPage />} />
+
+                              <Route path="*" element={<Navigate to="/" replace />} />
+                            </Routes>
+                          </Suspense>
+                          <WhatsAppWidget />
+                          <SocialProofNotification />
+                        </MobileLayout>
+                      } />
+                    </Routes>
+                  </Suspense>
+                </CartProvider>
+              </FavoritesProvider>
+            </I18nProvider>
           </AppDataProvider>
         </AuthProvider>
       </Router>
@@ -354,90 +417,144 @@ export default function App() {
     <Router>
       <AuthProvider>
         <AppDataProvider>
-          <FavoritesProvider>
-            <CartProvider>
-              <GlobalFaviconSync />
-              <Suspense fallback={<PageLoader />}>
-              <Routes>
-          {/* Admin Routes */}
-          <Route path="/admin/*" element={
-            <AdminLayout>
-              <Suspense fallback={<PageLoader />}>
-              <Routes>
-                <Route path="/" element={<AdminDashboard />} />
-                <Route path="/produtos" element={<AdminProductList />} />
-                <Route path="/produtos/novo" element={<AdminProductForm />} />
-                <Route path="/produtos/editar/:id" element={<AdminProductForm />} />
-                <Route path="/categorias" element={<AdminCategoryList />} />
-                <Route path="/tags" element={<AdminTagList />} />
-                <Route path="/pedidos" element={<AdminOrderList />} />
-                <Route path="/clientes" element={<AdminUserList />} />
-                <Route path="/avaliacoes" element={<AdminReviews />} />
-                <Route path="/estatisticas" element={<AdminAnalytics />} />
-                <Route path="/seo" element={<AdminSeoDashboard />} />
-                <Route path="/relatorios" element={<AdminReports />} />
-                <Route path="/arquivos" element={<AdminFiles />} />
-                <Route path="/configuracoes" element={<AdminSettings />} />
-              </Routes>
-            </Suspense>
-            </AdminLayout>
-          } />
-
-          {/* Public Routes */}
-          <Route path="/*" element={
-            <div className="min-h-screen bg-white font-sans text-gray-900 scroll-smooth flex flex-col">
-              <RouteSeoDefaults />
-              <AnalyticsTracker />
-              <Header />
-              <div className="flex-1">
+          <I18nProvider>
+            <FavoritesProvider>
+              <CartProvider>
+                <GlobalFaviconSync />
                 <Suspense fallback={<PageLoader />}>
-              <Routes>
-                  <Route path="/" element={<Home />} />
-                  <Route path="/loja" element={<ShopPage />} />
-                  <Route path="/orcamento" element={<BudgetPage />} />
-                  <Route path="/contato" element={<ContactPage />} />
-                  <Route path="/nossa-empresa" element={<CompanyPage />} />
-                  <Route path="/produto/:slug" element={<ProductDetail />} />
-                  <Route
-                    path="/carrinho"
-                    element={
-                      <RequireRegisteredUser>
-                        <CartPage />
-                      </RequireRegisteredUser>
-                    }
-                  />
-                  <Route path="/favoritos" element={<FavoritesPage />} />
-                  <Route path="/minha-conta" element={<MyAccount />} />
-                  <Route path="/minha-conta/pedidos" element={<MyAccount />} />
-                  <Route path="/minha-conta/downloads" element={<MyAccount />} />
-                  <Route path="/minha-conta/enderecos" element={<MyAccount />} />
-                  <Route path="/minha-conta/perfil" element={<MyAccount />} />
-                  <Route path="/minha-conta/privacidade" element={<MyAccount />} />
-                  <Route path="/minha-conta/lista-de-desejos" element={<MyAccount />} />
-                  <Route path="/login" element={<Login />} />
-                  <Route path="/cadastro" element={<Register />} />
-                  <Route path="/esqueci-senha" element={<ForgotPassword />} />
-                  <Route path="/redefinir-senha" element={<ResetPassword />} />
-                  <Route path="/checkout/paypal/success" element={<PayPalSuccess />} />
-                  <Route path="/checkout/paypal/cancel" element={<PayPalCancel />} />
-                  <Route path="/obrigado-compra" element={<ThankYouPage />} />
-                  <Route path="/politica" element={<PrivacyPolicy />} />
-                  <Route path="/exclusao-dados" element={<DataDeletion />} />
-                  <Route path="/ajuda" element={<HelpPage />} />
-                </Routes>
-            </Suspense>
-              </div>
-              <CookieConsentBanner />
-              <MobileRedirectBanner />
-              <WhatsAppWidget />
-              <SocialProofNotification />
-              <Footer />
-            </div>
-          } />
-          </Routes>
-            </Suspense>
-            </CartProvider>
-          </FavoritesProvider>
+                  <Routes>
+                    {/* Admin Routes */}
+                    <Route path="/admin/*" element={
+                      <AdminLayout>
+                        <Suspense fallback={<PageLoader />}>
+                          <Routes>
+                            <Route path="/" element={<AdminDashboard />} />
+                            <Route path="/produtos" element={<AdminProductList />} />
+                            <Route path="/produtos/novo" element={<AdminProductForm />} />
+                            <Route path="/produtos/editar/:id" element={<AdminProductForm />} />
+                            <Route path="/categorias" element={<AdminCategoryList />} />
+                            <Route path="/faq" element={<AdminFaqList />} />
+                            <Route path="/blog" element={<AdminBlogList />} />
+                            <Route path="/tags" element={<AdminTagList />} />
+                            <Route path="/pedidos" element={<AdminOrderList />} />
+                            <Route path="/clientes" element={<AdminUserList />} />
+                            <Route path="/avaliacoes" element={<AdminReviews />} />
+                            <Route path="/estatisticas" element={<AdminAnalytics />} />
+                            <Route path="/seo" element={<AdminSeoDashboard />} />
+                            <Route path="/relatorios" element={<AdminReports />} />
+                            <Route path="/arquivos" element={<AdminFiles />} />
+                            <Route path="/configuracoes" element={<AdminSettings />} />
+                          </Routes>
+                        </Suspense>
+                      </AdminLayout>
+                    } />
+
+                    {/* Public Routes */}
+                    <Route path="/*" element={
+                      <div className="min-h-screen bg-white font-sans text-gray-900 scroll-smooth flex flex-col">
+                        <RouteSeoDefaults />
+                        <AnalyticsTracker />
+                        <Header />
+                        <div className="flex-1">
+                          <Suspense fallback={<PageLoader />}>
+                            <Routes>
+                              {/* PT Routes */}
+                              <Route path="/" element={<Home />} />
+                              <Route path="/loja" element={<ShopPage />} />
+                              <Route path="/orcamento" element={<BudgetPage />} />
+                              <Route path="/contato" element={<ContactPage />} />
+                              <Route path="/nossa-empresa" element={<CompanyPage />} />
+                              <Route path="/produto/:slug" element={<ProductDetail />} />
+                              <Route path="/carrinho" element={<RequireRegisteredUser><CartPage /></RequireRegisteredUser>} />
+                              <Route path="/favoritos" element={<FavoritesPage />} />
+                              <Route path="/minha-conta" element={<MyAccount />} />
+                              <Route path="/minha-conta/pedidos" element={<MyAccount />} />
+                              <Route path="/minha-conta/downloads" element={<MyAccount />} />
+                              <Route path="/minha-conta/enderecos" element={<MyAccount />} />
+                              <Route path="/minha-conta/perfil" element={<MyAccount />} />
+                              <Route path="/minha-conta/privacidade" element={<MyAccount />} />
+                              <Route path="/minha-conta/lista-de-desejos" element={<MyAccount />} />
+                              <Route path="/login" element={<Login />} />
+                              <Route path="/cadastro" element={<Register />} />
+                              <Route path="/esqueci-senha" element={<ForgotPassword />} />
+                              <Route path="/redefinir-senha" element={<ResetPassword />} />
+                              <Route path="/checkout/paypal/success" element={<PayPalSuccess />} />
+                              <Route path="/checkout/paypal/cancel" element={<PayPalCancel />} />
+                              <Route path="/obrigado-compra" element={<ThankYouPage />} />
+                              <Route path="/politica" element={<PrivacyPolicy />} />
+                              <Route path="/exclusao-dados" element={<DataDeletion />} />
+                              <Route path="/ajuda" element={<HelpPage />} />
+
+                              {/* EN Routes */}
+                              <Route path="/en" element={<Home />} />
+                              <Route path="/en/shop" element={<ShopPage />} />
+                              <Route path="/en/quote" element={<BudgetPage />} />
+                              <Route path="/en/contact" element={<ContactPage />} />
+                              <Route path="/en/about-us" element={<CompanyPage />} />
+                              <Route path="/en/product/:slug" element={<ProductDetail />} />
+                              <Route path="/en/cart" element={<RequireRegisteredUser><CartPage /></RequireRegisteredUser>} />
+                              <Route path="/en/favorites" element={<FavoritesPage />} />
+                              <Route path="/en/my-account" element={<MyAccount />} />
+                              <Route path="/en/my-account/pedidos" element={<MyAccount />} />
+                              <Route path="/en/my-account/downloads" element={<MyAccount />} />
+                              <Route path="/en/my-account/enderecos" element={<MyAccount />} />
+                              <Route path="/en/my-account/perfil" element={<MyAccount />} />
+                              <Route path="/en/my-account/privacidade" element={<MyAccount />} />
+                              <Route path="/en/my-account/lista-de-desejos" element={<MyAccount />} />
+                              <Route path="/en/login" element={<Login />} />
+                              <Route path="/en/register" element={<Register />} />
+                              <Route path="/en/forgot-password" element={<ForgotPassword />} />
+                              <Route path="/en/reset-password" element={<ResetPassword />} />
+                              <Route path="/en/checkout/paypal/success" element={<PayPalSuccess />} />
+                              <Route path="/en/checkout/paypal/cancel" element={<PayPalCancel />} />
+                              <Route path="/en/thank-you" element={<ThankYouPage />} />
+                              <Route path="/en/policy" element={<PrivacyPolicy />} />
+                              <Route path="/en/data-deletion" element={<DataDeletion />} />
+                              <Route path="/en/help" element={<HelpPage />} />
+
+                              {/* ES Routes */}
+                              <Route path="/es" element={<Home />} />
+                              <Route path="/es/tienda" element={<ShopPage />} />
+                              <Route path="/es/presupuesto" element={<BudgetPage />} />
+                              <Route path="/es/contacto" element={<ContactPage />} />
+                              <Route path="/es/nuestra-empresa" element={<CompanyPage />} />
+                              <Route path="/es/producto/:slug" element={<ProductDetail />} />
+                              <Route path="/es/carrito" element={<RequireRegisteredUser><CartPage /></RequireRegisteredUser>} />
+                              <Route path="/es/favoritos" element={<FavoritesPage />} />
+                              <Route path="/es/mi-cuenta" element={<MyAccount />} />
+                              <Route path="/es/mi-cuenta/pedidos" element={<MyAccount />} />
+                              <Route path="/es/mi-cuenta/downloads" element={<MyAccount />} />
+                              <Route path="/es/mi-cuenta/enderecos" element={<MyAccount />} />
+                              <Route path="/es/mi-cuenta/perfil" element={<MyAccount />} />
+                              <Route path="/es/mi-cuenta/privacidade" element={<MyAccount />} />
+                              <Route path="/es/mi-cuenta/lista-de-desejos" element={<MyAccount />} />
+                              <Route path="/es/login" element={<Login />} />
+                              <Route path="/es/cadastro" element={<Register />} />
+                              <Route path="/es/esqueci-senha" element={<ForgotPassword />} />
+                              <Route path="/es/redefinir-senha" element={<ResetPassword />} />
+                              <Route path="/es/checkout/paypal/success" element={<PayPalSuccess />} />
+                              <Route path="/es/checkout/paypal/cancel" element={<PayPalCancel />} />
+                              <Route path="/es/obrigado-compra" element={<ThankYouPage />} />
+                              <Route path="/es/politica" element={<PrivacyPolicy />} />
+                              <Route path="/es/exclusao-dados" element={<DataDeletion />} />
+                              <Route path="/es/ayuda" element={<HelpPage />} />
+                              
+                              <Route path="*" element={<Navigate to="/" replace />} />
+                            </Routes>
+                          </Suspense>
+                        </div>
+                        <CookieConsentBanner />
+                        <MobileRedirectBanner />
+                        <WhatsAppWidget />
+                        <SocialProofNotification />
+                        <Footer />
+                      </div>
+                    } />
+                  </Routes>
+                </Suspense>
+              </CartProvider>
+            </FavoritesProvider>
+          </I18nProvider>
         </AppDataProvider>
       </AuthProvider>
     </Router>

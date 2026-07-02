@@ -1,0 +1,82 @@
+{
+  "common": {
+    "home": "Home",
+    "shop": "Shop",
+    "about_us": "About Us",
+    "quote": "Get a Quote",
+    "contact": "Contact",
+    "help": "Help",
+    "privacy": "Privacy",
+    "my_account": "My Account",
+    "hello": "Hello",
+    "login": "Login",
+    "register": "Register",
+    "logout": "Logout",
+    "search_placeholder": "Search for a keyword (e.g. police, flowers, animals, car)...",
+    "search_results": "See all results for",
+    "no_results": "No products found",
+    "no_results_sub": "Try searching for different or more generic terms.",
+    "cart": "Cart",
+    "favorites": "Favorites",
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "currency_symbol": "$ ",
+    "all_rights_reserved": "All rights reserved",
+    "secure_environment": "Secure Environment",
+    "ssl_protection": "256-bit SSL Protection",
+    "whatsapp_support": "WhatsApp Support",
+    "email_support": "Email Support"
+  },
+  "menu": {
+    "dashboard": "General Panel",
+    "orders": "My Orders",
+    "downloads": "My Downloads",
+    "addresses": "Addresses",
+    "profile": "Account Details",
+    "admin_dashboard": "Admin Panel"
+  },
+  "product": {
+    "buy_now": "Buy Now",
+    "add_to_cart": "Add to Cart",
+    "description": "Description",
+    "short_description": "Summary",
+    "details": "Technical Details",
+    "colors": "Colors",
+    "stitch_count": "Stitches",
+    "format": "Formats",
+    "downloads_info": "Instant download after payment approval",
+    "featured": "Featured",
+    "new": "New",
+    "category": "Category",
+    "reviews": "Reviews",
+    "no_reviews": "This product has no reviews yet.",
+    "related_products": "Related Products"
+  },
+  "cart_page": {
+    "title": "Your Shopping Cart",
+    "empty": "Your cart is empty.",
+    "go_to_shop": "Go to Shop",
+    "subtotal": "Subtotal",
+    "total": "Total",
+    "checkout": "Proceed to Checkout",
+    "remove": "Remove"
+  },
+  "checkout_page": {
+    "title": "Checkout",
+    "payment_method": "Payment Method",
+    "credit_card_pix": "Credit Card or local options",
+    "paypal": "PayPal",
+    "place_order": "Place Order",
+    "billing_details": "Billing Details"
+  },
+  "footer": {
+    "intro_text": "Transform your ideas into perfect embroidery! We offer high-quality computerized embroidery designs ready to bring life to your projects with precision and creativity."
+  },
+  "help_page": {
+    "title": "How can we help?",
+    "subtitle": "Find quick answers or contact our support team.",
+    "faq_title": "Frequently Asked Questions",
+    "need_more_help": "Still need help?",
+    "need_more_help_desc": "Our support team is available Monday to Friday, from 9:00 AM to 6:00 PM, to resolve any questions or technical issues."
+  }
+}

@@ -1,9 +1,12 @@
 import { Facebook, Instagram, Youtube, ShieldCheck, Package } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAppData } from '../contexts/AppDataContext';
+import { useI18n } from '../contexts/I18nContext';
 
 export default function Footer() {
   const { settings } = useAppData();
+  const { t, language } = useI18n();
+
   const normalizeExternalUrl = (url?: string) => {
     const value = String(url || '').trim();
     if (!value) return '';
@@ -14,6 +17,23 @@ export default function Footer() {
   const facebookUrl = normalizeExternalUrl(settings.facebook_url);
   const instagramUrl = normalizeExternalUrl(settings.instagram_url);
   const youtubeUrl = normalizeExternalUrl(settings.youtube_url);
+
+  const getLocalizedPath = (pathType: string) => {
+    const prefix = language === 'pt' ? '' : `/${language}`;
+    switch (pathType) {
+      case 'home': return prefix || '/';
+      case 'shop': return `${prefix}/${language === 'en' ? 'shop' : language === 'es' ? 'tienda' : 'loja'}`;
+      case 'about_us': return `${prefix}/${language === 'en' ? 'about-us' : language === 'es' ? 'nuestra-empresa' : 'nossa-empresa'}`;
+      case 'quote': return `${prefix}/${language === 'en' ? 'quote' : language === 'es' ? 'presupuesto' : 'orcamento'}`;
+      case 'contact': return `${prefix}/${language === 'en' ? 'contact' : language === 'es' ? 'contacto' : 'contato'}`;
+      case 'favorites': return `${prefix}/favoritos`;
+      case 'cart': return `${prefix}/${language === 'en' ? 'cart' : language === 'es' ? 'carrito' : 'carrinho'}`;
+      case 'privacy': return `${prefix}/${language === 'en' ? 'policy' : 'politica'}`;
+      case 'help': return `${prefix}/${language === 'en' ? 'help' : language === 'es' ? 'ayuda' : 'ajuda'}`;
+      case 'my_account': return `${prefix}/${language === 'en' ? 'my-account' : language === 'es' ? 'mi-cuenta' : 'minha-conta'}`;
+      default: return prefix || '/';
+    }
+  };
 
   return (
     <footer className="bg-primary text-white pt-24 pb-12 px-6 md:px-10 mt-32 relative overflow-hidden">
@@ -27,7 +47,7 @@ export default function Footer() {
           
           {/* Brand & Intro */}
           <div className="lg:col-span-5 space-y-10">
-            <Link to="/" className="flex flex-col group">
+            <Link to={getLocalizedPath('home')} className="flex flex-col group">
               {settings.logo_url ? (
                 <div className="bg-white/95 p-6 rounded-3xl w-fit shadow-xl shadow-black/10">
                   <img src={settings.logo_url} alt={settings.site_name} className="h-36 w-auto object-contain" />
@@ -43,7 +63,7 @@ export default function Footer() {
             </Link>
             
             <p className="text-white/70 text-base leading-relaxed font-medium max-w-md">
-              Transforme suas ideias em bordados perfeitos! Oferecemos matrizes de bordado computadorizado de alta qualidade, prontas para dar vida aos seus projetos com precisão e criatividade.
+              {t('footer.intro_text')}
             </p>
 
             <div className="flex items-center gap-4">
@@ -67,13 +87,13 @@ export default function Footer() {
 
           {/* Links Column 1 */}
           <div className="lg:col-span-3">
-            <h4 className="text-white font-black mb-10 uppercase text-xs tracking-[0.3em] opacity-50">Minha Conta</h4>
+            <h4 className="text-white font-black mb-10 uppercase text-xs tracking-[0.3em] opacity-50">{t('common.my_account')}</h4>
             <ul className="space-y-5 text-sm font-bold">
-              <li><Link to="/minha-conta" className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> Painel Geral</Link></li>
-              <li><Link to="/minha-conta/pedidos" className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> Meus Pedidos</Link></li>
-              <li><Link to="/minha-conta/downloads" className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> Meus Downloads</Link></li>
-              <li><Link to="/minha-conta/enderecos" className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> Endereços</Link></li>
-              <li><Link to="/minha-conta/perfil" className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> Detalhes da Conta</Link></li>
+              <li><Link to={getLocalizedPath('my_account')} className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> {t('menu.dashboard')}</Link></li>
+              <li><Link to={`${getLocalizedPath('my_account')}/pedidos`} className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> {t('menu.orders')}</Link></li>
+              <li><Link to={`${getLocalizedPath('my_account')}/downloads`} className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> {t('menu.downloads')}</Link></li>
+              <li><Link to={`${getLocalizedPath('my_account')}/enderecos`} className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> {t('menu.addresses')}</Link></li>
+              <li><Link to={`${getLocalizedPath('my_account')}/perfil`} className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> {t('menu.profile')}</Link></li>
             </ul>
           </div>
 
@@ -81,21 +101,21 @@ export default function Footer() {
           <div className="lg:col-span-2">
             <h4 className="text-white font-black mb-10 uppercase text-xs tracking-[0.3em] opacity-50">Menu</h4>
             <ul className="space-y-5 text-sm font-bold">
-              <li><Link to="/" className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> Início</Link></li>
-              <li><Link to="/loja" className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> Loja</Link></li>
-              <li><Link to="/orcamento" className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> Solicitar Matriz</Link></li>
-              <li><Link to="/contato" className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> Fale Conosco</Link></li>
+              <li><Link to={getLocalizedPath('home')} className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> {t('common.home')}</Link></li>
+              <li><Link to={getLocalizedPath('shop')} className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> {t('common.shop')}</Link></li>
+              <li><Link to={getLocalizedPath('quote')} className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> {t('common.quote')}</Link></li>
+              <li><Link to={getLocalizedPath('contact')} className="flex items-center gap-3 text-white/80 hover:text-white hover:translate-x-2 transition-all"><Package className="w-4 h-4 text-white/30" /> {t('common.contact')}</Link></li>
             </ul>
           </div>
 
           {/* Payment Methods */}
           <div className="lg:col-span-2">
-            <h4 className="text-white font-black mb-10 uppercase text-xs tracking-[0.3em] opacity-50">Pagamento</h4>
+            <h4 className="text-white font-black mb-10 uppercase text-xs tracking-[0.3em] opacity-50">{t('checkout_page.payment_method')}</h4>
             <div className="flex items-center justify-start">
               <div className="bg-white/95 p-5 rounded-[2.2rem] w-fit shadow-xl shadow-black/10 flex items-center justify-center hover:scale-105 transition-transform duration-300">
                 <img 
                   src="/uploads/pagamentos.webp" 
-                  alt="Formas de pagamento aceitas" 
+                  alt="Payment options" 
                   className="h-16 w-auto object-contain"
                 />
               </div>
@@ -109,7 +129,7 @@ export default function Footer() {
               {new Date().getFullYear()} © {settings.site_name || 'Digital Bordados'} E-commerce
             </p>
             <p className="text-[9px] font-medium text-white/30 uppercase tracking-[0.2em]">
-              Av. Fortaleza, 90 - Bairro Novo CEP 66010-000 - Belém/PA. Desenvolvido por <span className="text-white/60 font-black">Agência Goodiea</span>
+              Av. Fortaleza, 90 - Bairro Novo CEP 66010-000 - Belém/PA. {t('common.all_rights_reserved')}
             </p>
           </div>
           
@@ -117,13 +137,13 @@ export default function Footer() {
              <div className="flex items-center gap-4 bg-white/5 border border-white/10 px-6 py-3 rounded-2xl backdrop-blur-md">
                 <ShieldCheck className="w-6 h-6 text-emerald-400" />
                 <span className="text-[10px] font-black text-white/80 uppercase tracking-widest leading-tight">
-                   Ambiente Seguro<br/>
-                   <span className="text-[8px] text-white/40 font-bold uppercase tracking-widest">Proteção SSL 256-bit</span>
+                   {t('common.secure_environment')}<br/>
+                   <span className="text-[8px] text-white/40 font-bold uppercase tracking-widest">{t('common.ssl_protection')}</span>
                 </span>
              </div>
              <div className="flex gap-8 text-[11px] font-black text-white/60 uppercase tracking-widest">
-                <Link to="/politica" className="hover:text-white transition-colors">Privacidade</Link>
-                <Link to="/ajuda" className="hover:text-white transition-colors">Ajuda</Link>
+                <Link to={getLocalizedPath('privacy')} className="hover:text-white transition-colors">{t('common.privacy')}</Link>
+                <Link to={getLocalizedPath('help')} className="hover:text-white transition-colors">{t('common.help')}</Link>
              </div>
           </div>
         </div>

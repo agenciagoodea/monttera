@@ -97,6 +97,136 @@ export async function initDb() {
   try {
     await dbAsync.query(`ALTER TABLE product_images ADD COLUMN url_webp TEXT NULL AFTER url`);
   } catch (_) {}
+
+  // --- MIGRAÇÕES DE INTERNACIONALIZAÇÃO (i18n) ---
+  console.log('[i18n] Executando migrações de internacionalização...');
+
+  // Colunas de i18n para produtos
+  const productCols = [
+    { name: 'name_en', def: 'VARCHAR(255) NULL' },
+    { name: 'name_es', def: 'VARCHAR(255) NULL' },
+    { name: 'slug_en', def: 'VARCHAR(255) NULL' },
+    { name: 'slug_es', def: 'VARCHAR(255) NULL' },
+    { name: 'short_description_en', def: 'TEXT NULL' },
+    { name: 'short_description_es', def: 'TEXT NULL' },
+    { name: 'description_en', def: 'LONGTEXT NULL' },
+    { name: 'description_es', def: 'LONGTEXT NULL' },
+    { name: 'seo_title_en', def: 'VARCHAR(255) NULL' },
+    { name: 'seo_title_es', def: 'VARCHAR(255) NULL' },
+    { name: 'seo_description_en', def: 'VARCHAR(255) NULL' },
+    { name: 'seo_description_es', def: 'VARCHAR(255) NULL' },
+    { name: 'image_alt_en', def: 'VARCHAR(255) NULL' },
+    { name: 'image_alt_es', def: 'VARCHAR(255) NULL' }
+  ];
+  for (const col of productCols) {
+    try {
+      await dbAsync.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS ${col.name} ${col.def}`);
+    } catch (_) {}
+  }
+
+  // Índices para os slugs traduzidos de produtos
+  try {
+    await dbAsync.query(`CREATE INDEX IF NOT EXISTS idx_products_slug_en ON products(slug_en(191))`);
+  } catch (_) {}
+  try {
+    await dbAsync.query(`CREATE INDEX IF NOT EXISTS idx_products_slug_es ON products(slug_es(191))`);
+  } catch (_) {}
+
+  // Colunas de i18n para categorias
+  const categoryCols = [
+    { name: 'name_en', def: 'VARCHAR(255) NULL' },
+    { name: 'name_es', def: 'VARCHAR(255) NULL' },
+    { name: 'slug_en', def: 'VARCHAR(255) NULL' },
+    { name: 'slug_es', def: 'VARCHAR(255) NULL' },
+    { name: 'description_en', def: 'TEXT NULL' },
+    { name: 'description_es', def: 'TEXT NULL' },
+    { name: 'seo_title_en', def: 'VARCHAR(255) NULL' },
+    { name: 'seo_title_es', def: 'VARCHAR(255) NULL' },
+    { name: 'seo_description_en', def: 'VARCHAR(255) NULL' },
+    { name: 'seo_description_es', def: 'VARCHAR(255) NULL' }
+  ];
+  for (const col of categoryCols) {
+    try {
+      await dbAsync.query(`ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS ${col.name} ${col.def}`);
+    } catch (_) {}
+  }
+
+  // Colunas de i18n para tags
+  const tagCols = [
+    { name: 'name_en', def: 'VARCHAR(255) NULL' },
+    { name: 'name_es', def: 'VARCHAR(255) NULL' },
+    { name: 'slug_en', def: 'VARCHAR(255) NULL' },
+    { name: 'slug_es', def: 'VARCHAR(255) NULL' }
+  ];
+  for (const col of tagCols) {
+    try {
+      await dbAsync.query(`ALTER TABLE product_tags ADD COLUMN IF NOT EXISTS ${col.name} ${col.def}`);
+    } catch (_) {}
+  }
+
+  // Idioma de preferência para usuários e pedidos
+  try {
+    await dbAsync.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'pt'`);
+  } catch (_) {}
+  try {
+    await dbAsync.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'pt'`);
+  } catch (_) {}
+
+  // Colunas de i18n para templates de e-mail
+  try {
+    await dbAsync.query(`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS subject_en VARCHAR(300) NULL`);
+  } catch (_) {}
+  try {
+    await dbAsync.query(`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS subject_es VARCHAR(300) NULL`);
+  } catch (_) {}
+  try {
+    await dbAsync.query(`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS body_en LONGTEXT NULL`);
+  } catch (_) {}
+  try {
+    await dbAsync.query(`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS body_es LONGTEXT NULL`);
+  } catch (_) {}
+
+  // Tabela de FAQs
+  await dbAsync.query(`
+    CREATE TABLE IF NOT EXISTS faqs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      question_pt TEXT NOT NULL,
+      question_en TEXT NULL,
+      question_es TEXT NULL,
+      answer_pt TEXT NOT NULL,
+      answer_en TEXT NULL,
+      answer_es TEXT NULL,
+      display_order INT DEFAULT 0,
+      is_active TINYINT DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  // Tabela de Blog Posts
+  await dbAsync.query(`
+    CREATE TABLE IF NOT EXISTS blog_posts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      title_pt VARCHAR(255) NOT NULL,
+      title_en VARCHAR(255) NULL,
+      title_es VARCHAR(255) NULL,
+      slug_pt VARCHAR(255) NOT NULL,
+      slug_en VARCHAR(255) NULL,
+      slug_es VARCHAR(255) NULL,
+      content_pt LONGTEXT NOT NULL,
+      content_en LONGTEXT NULL,
+      content_es LONGTEXT NULL,
+      summary_pt TEXT NULL,
+      summary_en TEXT NULL,
+      summary_es TEXT NULL,
+      image_url VARCHAR(512) NULL,
+      status VARCHAR(50) DEFAULT 'draft',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_blog_slug_pt (slug_pt)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  console.log('[i18n] Migrações de banco concluídas com sucesso.');
 }
 
 
