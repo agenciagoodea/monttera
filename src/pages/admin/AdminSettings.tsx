@@ -56,6 +56,7 @@ export default function AdminSettings() {
   const [showWebhookSecret, setShowWebhookSecret] = useState(false);
   const [showGoogleSecret, setShowGoogleSecret] = useState(false);
   const [showFacebookSecret, setShowFacebookSecret] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [copiedGoogleCallback, setCopiedGoogleCallback] = useState(false);
   const [copiedFacebookCallback, setCopiedFacebookCallback] = useState(false);
   const [copiedAppleCallback, setCopiedAppleCallback] = useState(false);
@@ -167,6 +168,7 @@ export default function AdminSettings() {
     seo_enable_breadcrumb_schema: 'true',
     seo_sitemap_enabled: 'true',
     seo_robots_custom_rules: '',
+    gemini_api_key: '',
     // Suporte ao Cliente
     support_whatsapp: '',
     support_email: '',
@@ -312,6 +314,7 @@ export default function AdminSettings() {
           facebook_app_secret: data.facebook_app_secret ?? prev.facebook_app_secret,
           apple_enabled: data.apple_enabled ?? prev.apple_enabled,
           home_sliders: data.home_sliders || prev.home_sliders || '[]',
+          gemini_api_key: data.gemini_api_key ?? prev.gemini_api_key,
         }));
       }
     } catch (error) {
@@ -2996,6 +2999,48 @@ export default function AdminSettings() {
                       </div>
                       <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-[11px] text-blue-800 font-semibold">
                         💡 Salve as configurações SEO antes de visualizar para garantir que as últimas alterações estejam refletidas nos arquivos gerados.
+                      </div>
+                    </div>
+
+                    {/* Google Gemini Card */}
+                    <div className="rounded-[2rem] border border-slate-200 p-6 md:p-8 bg-gradient-to-br from-indigo-50/20 to-purple-50/20 space-y-6 mt-6">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-100">
+                          <Globe2 className="w-5 h-5 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">Google Gemini API</h3>
+                          <p className="text-[10px] font-bold text-slate-400">Configuração de Inteligência Artificial para Tradução</p>
+                        </div>
+                      </div>
+                      
+                      <div className="rounded-2xl border border-slate-100 bg-white/85 backdrop-blur-sm p-6 space-y-5">
+                        <p className="text-[11px] text-slate-600 font-bold leading-relaxed">
+                          A chave de API configurada abaixo é utilizada para realizar traduções automáticas instantâneas de produtos, categorias, perguntas do FAQ e posts do blog nos formulários do painel administrativo.
+                        </p>
+                        
+                        <div className="space-y-2 max-w-2xl">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">GEMINI API KEY</label>
+                          <div className="relative flex items-center">
+                            <input
+                              type={showGeminiKey ? 'text' : 'password'}
+                              placeholder="Insira sua chave de API (AIzaSy...)"
+                              value={settings.gemini_api_key || ''}
+                              onChange={e => setSettings({ ...settings, gemini_api_key: e.target.value })}
+                              className="w-full px-5 py-3.5 pr-12 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-indigo-500 text-xs font-bold font-mono"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowGeminiKey(!showGeminiKey)}
+                              className="absolute right-4 text-slate-400 hover:text-slate-600 focus:outline-none"
+                            >
+                              {showGeminiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                            ⚠️ Deixe em branco para usar a chave padrão configurada na variável de ambiente do servidor (.env).
+                          </p>
+                        </div>
                       </div>
                     </div>
 

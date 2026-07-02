@@ -11502,9 +11502,10 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         return res.status(400).json({ error: 'target deve ser "en" ou "es"' });
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
+      const geminiSetting = await dbAsync.get('SELECT value FROM settings WHERE `key` = ?', 'gemini_api_key') as any;
+      const apiKey = (geminiSetting?.value || process.env.GEMINI_API_KEY || '').trim();
       if (!apiKey) {
-        return res.status(400).json({ error: 'Chave do Gemini (GEMINI_API_KEY) nao encontrada no arquivo .env' });
+        return res.status(400).json({ error: 'Chave do Gemini (gemini_api_key) não configurada no painel administrativo e nem no arquivo .env' });
       }
 
       console.log(`[Gemini Translate] Traduzindo para ${target}: "${text.slice(0, 50)}..."`);
