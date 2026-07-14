@@ -70,7 +70,9 @@ export default function MobileProductDetail() {
                   id: Number(img?.id || 0),
                   product_id: Number(img?.product_id || 0),
                   url: String(img?.url || '').trim(),
+                  url_webp: String(img?.url_webp || '').trim(),
                   full_url: getPublicAssetUrl(String(img?.full_url || img?.url || '')),
+                  full_url_webp: getPublicAssetUrl(String(img?.full_url_webp || img?.url_webp || '')),
                   alt_text: String(img?.alt_text || '').trim(),
                   is_featured: img?.is_featured ?? 0,
                   created_at: img?.created_at ?? null,
@@ -207,6 +209,27 @@ export default function MobileProductDetail() {
     });
   };
 
+  const webpMapping = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (!product) return map;
+    
+    const mainJpg = getPublicAssetUrl(product.image);
+    const mainWebp = product.image_webp ? getPublicAssetUrl(product.image_webp) : '';
+    if (mainJpg && mainWebp) {
+      map[mainJpg] = mainWebp;
+    }
+    
+    (product.gallery || []).forEach((img) => {
+      const jpgUrl = getPublicAssetUrl(img.url);
+      const webpUrl = img.url_webp ? getPublicAssetUrl(img.url_webp) : '';
+      if (jpgUrl && webpUrl) {
+        map[jpgUrl] = webpUrl;
+      }
+    });
+    
+    return map;
+  }, [product]);
+
   const toggleSection = (section: 'desc' | 'specs' | 'reviews') => {
     setOpenSection(openSection === section ? null : section);
   };
@@ -281,12 +304,17 @@ export default function MobileProductDetail() {
                 key={`${img}-${idx}`} 
                 className="w-full h-full shrink-0 snap-start flex items-center justify-center relative bg-slate-50/20"
               >
-                <img 
-                  src={img} 
-                  alt={`${product.name} - ${idx}`}
-                  onError={() => setFailedImages(prev => ({ ...prev, [img]: true }))}
-                  className="w-full h-full object-cover"
-                />
+                <picture>
+                  {img && webpMapping[img] && (
+                    <source srcSet={webpMapping[img]} type="image/webp" />
+                  )}
+                  <img 
+                    src={img} 
+                    alt={`${product.name} - ${idx}`}
+                    onError={() => setFailedImages(prev => ({ ...prev, [img]: true }))}
+                    className="w-full h-full object-cover"
+                  />
+                </picture>
               </div>
             ))}
           </div>

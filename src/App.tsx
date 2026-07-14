@@ -90,7 +90,7 @@ function RequireRegisteredUser({ children }: { children: ReactElement }) {
 
 function RouteSeoDefaults() {
   const location = useLocation();
-  const { settings } = useAppData();
+  const { settings, categories } = useAppData();
   const { language, t } = useI18n();
 
   useEffect(() => {
@@ -136,6 +136,13 @@ function RouteSeoDefaults() {
     const shouldRenderOrganizationSchema = String(settings.seo_enable_organization_schema || 'true').toLowerCase() === 'true';
     const organizationName = String(settings.seo_organization_name || siteName).trim();
     const organizationLogo = String(settings.seo_organization_logo || settings.logo_url || settings.seo_og_image || '/uploads/seo-default-share.jpg').trim();
+    const formatSocialUrl = (url?: string) => {
+      if (!url) return null;
+      const trimmed = url.trim();
+      if (!trimmed) return null;
+      if (/^https?:\/\//i.test(trimmed)) return trimmed;
+      return `https://${trimmed}`;
+    };
     const organizationSchema = shouldRenderOrganizationSchema
       ? {
           '@context': 'https://schema.org',
@@ -145,14 +152,40 @@ function RouteSeoDefaults() {
           logo: organizationLogo.startsWith('http')
             ? organizationLogo
             : `${appUrl}${organizationLogo.startsWith('/') ? '' : '/'}${organizationLogo}`,
-          sameAs: [settings.seo_facebook_url, settings.seo_instagram_url, settings.seo_twitter_url].filter(Boolean),
+          sameAs: [
+            formatSocialUrl(settings.seo_facebook_url),
+            formatSocialUrl(settings.seo_instagram_url),
+            formatSocialUrl(settings.seo_twitter_url),
+          ].filter(Boolean) as string[],
         }
       : undefined;
 
+    let seoTitle = selected?.title || `${siteName} | Página`;
+    let seoDesc = selected?.description || baseDescription;
+
+    const urlParams = new URLSearchParams(location.search);
+    const categoryParam = urlParams.get('category');
+    if (categoryParam) {
+      const activeCat = categories.find(
+        (c) => c.slug === categoryParam || c.name === categoryParam
+      );
+      if (activeCat) {
+        const catName = language === 'pt' ? activeCat.name : language === 'en' ? (activeCat.name_en || activeCat.name) : (activeCat.name_es || activeCat.name);
+        const catDesc = language === 'pt' ? activeCat.description : language === 'en' ? (activeCat.description_en || activeCat.description) : (activeCat.description_es || activeCat.description);
+        
+        seoTitle = `${catName} | Matrizes de Bordado | ${siteName}`;
+        if (catDesc) {
+          seoDesc = String(catDesc).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+        } else {
+          seoDesc = `Confira nossa coleção de matrizes de bordados de ${catName} na ${siteName}. Arquivos de alta qualidade para download imediato.`;
+        }
+      }
+    }
+
     applySeo({
-      title: selected?.title || `${siteName} | Página`,
-      description: selected?.description || baseDescription,
-      robots: selected?.robots || 'index,follow',
+      title: seoTitle,
+      description: seoDesc,
+      robots: selected?.robots || (language !== 'pt' ? 'noindex,follow' : 'index,follow'),
       canonical: path,
       siteName,
       image: String(settings.seo_og_image || settings.logo_url || '/uploads/seo-default-share.jpg'),
@@ -161,7 +194,7 @@ function RouteSeoDefaults() {
       keywords: String(settings[seoKeywordsKey] || settings.seo_keywords || ''),
       jsonLd: organizationSchema,
     });
-  }, [location.pathname, location.search, settings, language]);
+  }, [location.pathname, location.search, settings, language, categories]);
 
   return null;
 }

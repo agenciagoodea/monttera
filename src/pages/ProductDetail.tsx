@@ -9,6 +9,7 @@ import { useFavorites } from '../contexts/FavoritesContext';
 import { useAppData } from '../contexts/AppDataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useI18n } from '../contexts/I18nContext';
 
 interface Review {
   id: number;
@@ -23,6 +24,7 @@ export default function ProductDetail() {
   const { slug } = useParams();
   const { settings } = useAppData();
   const { user } = useAuth();
+  const { language } = useI18n();
   const { addToCart, items } = useCart();
   const { isFavorite, toggleFavorite } = useFavorites();
   const [product, setProduct] = useState<Product | null>(null);
@@ -80,7 +82,9 @@ export default function ProductDetail() {
                   id: Number(img?.id || 0),
                   product_id: Number(img?.product_id || 0),
                   url: String(img?.url || '').trim(),
+                  url_webp: String(img?.url_webp || '').trim(),
                   full_url: getPublicAssetUrl(String(img?.full_url || img?.url || '')),
+                  full_url_webp: getPublicAssetUrl(String(img?.full_url_webp || img?.url_webp || '')),
                   alt_text: String(img?.alt_text || '').trim(),
                   is_featured: img?.is_featured ?? 0,
                   created_at: img?.created_at ?? null,
@@ -303,7 +307,7 @@ export default function ProductDetail() {
 
     const imageForSeo = displayedImage || product.image || '/uploads/seo-default-share.jpg';
     const canonicalTemplate = String(resolveProductTemplate(product.canonical_url || '')).trim();
-    const canonical = canonicalTemplate || `/produto/${product.slug}`;
+    const canonical = /^https?:\/\//i.test(canonicalTemplate) ? canonicalTemplate : `/produto/${product.slug}`;
 
     const offerUrl = buildAbsoluteUrl(canonical);
     
@@ -422,13 +426,13 @@ export default function ProductDetail() {
       canonical,
       image: imageForSeo,
       siteName,
-      robots: Number((product as any)?.noindex || 0) === 1 ? 'noindex,nofollow' : 'index,follow',
+      robots: (Number((product as any)?.noindex || 0) === 1 || language !== 'pt') ? 'noindex,nofollow' : 'index,follow',
       twitterCard: String(settings.seo_twitter_card || 'summary_large_image'),
       ogType: 'product',
       keywords: String(resolveProductTemplate(product.seo_keywords || product.tags || settings.seo_keywords || '')),
       jsonLd: combinedSchemas.length > 0 ? combinedSchemas : undefined,
     });
-  }, [product, displayedImage, settings, siteDisplayName, reviews, avgRating]);
+  }, [product, displayedImage, settings, siteDisplayName, reviews, avgRating, language]);
 
   if (loading) {
     return (

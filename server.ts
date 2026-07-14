@@ -2300,15 +2300,33 @@ async function startServer() {
   const PORT = Number(process.env.PORT || 3000);
   app.set('trust proxy', 1);
 
-  // Redireciona WWW para Não-WWW permanentemente (301) em produção para evitar conteúdo duplicado no SEO
+  // Redireciona WWW para Não-WWW, HTTP para HTTPS e index.html para / permanentemente (301) em produção para evitar conteúdo duplicado no SEO
   app.use((req, res, next) => {
-    const host = String(req.headers.host || '').trim();
-    if (host.startsWith('www.')) {
-      const cleanHost = host.slice(4);
-      const targetUrl = `${req.protocol}://${cleanHost}${req.originalUrl}`;
-      console.log(`[Redirect] Redirecting ${host} to ${cleanHost} via 301`);
+    const host = String(req.headers.host || '').trim().toLowerCase();
+    const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1') || host.startsWith('192.168.');
+    
+    // 1. Redirecionar index.html para /
+    if (req.path === '/index.html') {
+      const query = req.url.substring(req.path.length);
+      const targetUrl = `/${query}`;
       res.writeHead(301, { Location: targetUrl });
       return res.end();
+    }
+
+    if (!isLocalhost) {
+      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+      const hasWww = host.startsWith('www.');
+
+      if (!isHttps || hasWww) {
+        let cleanHost = host;
+        if (hasWww) {
+          cleanHost = host.slice(4);
+        }
+        const targetUrl = `https://${cleanHost}${req.originalUrl}`;
+        console.log(`[Redirect] Redirecting to ${targetUrl} via 301`);
+        res.writeHead(301, { Location: targetUrl });
+        return res.end();
+      }
     }
     next();
   });
@@ -10721,20 +10739,13 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         { pt: '/orcamento', en: '/en/quote', es: '/es/presupuesto', priority: '0.8' }
       ];
 
-      const body = staticRoutes.flatMap(route => {
-        return ['pt', 'en', 'es'].map(lang => {
-          const locPath = lang === 'pt' ? route.pt : (lang === 'en' ? route.en : route.es);
-          return `
+      const body = staticRoutes.map(route => {
+        return `
   <url>
-    <loc>${appUrl}${locPath}</loc>
-    <xhtml:link rel="alternate" hreflang="pt-br" href="${appUrl}${route.pt}" />
-    <xhtml:link rel="alternate" hreflang="en" href="${appUrl}${route.en}" />
-    <xhtml:link rel="alternate" hreflang="es" href="${appUrl}${route.es}" />
-    <xhtml:link rel="alternate" hreflang="x-default" href="${appUrl}${route.pt}" />
+    <loc>${appUrl}${route.pt}</loc>
     <priority>${route.priority}</priority>
     <changefreq>daily</changefreq>
   </url>`;
-        });
       }).join('');
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -10774,29 +10785,17 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
-      const body = products.flatMap(p => {
+      const body = products.map(p => {
         const slugPt = p.slug;
-        const slugEn = p.slug_en || p.slug;
-        const slugEs = p.slug_es || p.slug;
         const dateStr = formatLastMod(p.updated_at || p.created_at);
 
-        return ['pt', 'en', 'es'].map(lang => {
-          const locPath = lang === 'pt' 
-            ? `/produto/${slugPt}` 
-            : (lang === 'en' ? `/en/product/${slugEn}` : `/es/producto/${slugEs}`);
-          
-          return `
+        return `
   <url>
-    <loc>${appUrl}${locPath}</loc>
-    <xhtml:link rel="alternate" hreflang="pt-br" href="${appUrl}/produto/${xmlEscape(slugPt)}" />
-    <xhtml:link rel="alternate" hreflang="en" href="${appUrl}/en/product/${xmlEscape(slugEn)}" />
-    <xhtml:link rel="alternate" hreflang="es" href="${appUrl}/es/producto/${xmlEscape(slugEs)}" />
-    <xhtml:link rel="alternate" hreflang="x-default" href="${appUrl}/produto/${xmlEscape(slugPt)}" />
+    <loc>${appUrl}/produto/${xmlEscape(slugPt)}</loc>
     <lastmod>${dateStr}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>`;
-        });
       }).join('');
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -10836,29 +10835,17 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
 
       const xmlEscape = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
-      const body = categories.flatMap(c => {
+      const body = categories.map(c => {
         const slugPt = c.slug;
-        const slugEn = c.slug_en || c.slug;
-        const slugEs = c.slug_es || c.slug;
         const dateStr = formatLastMod(c.created_at);
 
-        return ['pt', 'en', 'es'].map(lang => {
-          const locPath = lang === 'pt' 
-            ? `/?category=${slugPt}` 
-            : (lang === 'en' ? `/en/?category=${slugEn}` : `/es/?category=${slugEs}`);
-          
-          return `
+        return `
   <url>
-    <loc>${appUrl}${locPath}</loc>
-    <xhtml:link rel="alternate" hreflang="pt-br" href="${appUrl}/?category=${xmlEscape(slugPt)}" />
-    <xhtml:link rel="alternate" hreflang="en" href="${appUrl}/en/?category=${xmlEscape(slugEn)}" />
-    <xhtml:link rel="alternate" hreflang="es" href="${appUrl}/es/?category=${xmlEscape(slugEs)}" />
-    <xhtml:link rel="alternate" hreflang="x-default" href="${appUrl}/?category=${xmlEscape(slugPt)}" />
+    <loc>${appUrl}/?category=${xmlEscape(slugPt)}</loc>
     <lastmod>${dateStr}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>`;
-        });
       }).join('');
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -12983,6 +12970,24 @@ ${text}`
         let canonicalUrl = `${appUrl}${reqPath === '/' ? '' : reqPath}`;
         if (req.query.category) {
           canonicalUrl += `?category=${encodeURIComponent(String(req.query.category))}`;
+          
+          const catParam = String(req.query.category).trim();
+          const category = await dbAsync.get(`
+            SELECT name, name_en, name_es, description, description_en, description_es 
+            FROM product_categories 
+            WHERE (slug = ? OR name = ?) AND status = 'active'
+          `, catParam, catParam) as any;
+          if (category) {
+            const catName = currentLang === 'pt' ? category.name : currentLang === 'en' ? (category.name_en || category.name) : (category.name_es || category.name);
+            const catDesc = currentLang === 'pt' ? category.description : currentLang === 'en' ? (category.description_en || category.description) : (category.description_es || category.description);
+            
+            title = `${catName} | Matrizes de Bordado | ${siteName}`;
+            if (catDesc) {
+              description = String(catDesc).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+            } else {
+              description = `Confira nossa coleção de matrizes de bordados de ${catName} na ${siteName}. Arquivos de alta qualidade para download imediato.`;
+            }
+          }
         }
         
         // Determinação dinâmica do robots noindex no backend
@@ -13001,7 +13006,7 @@ ${text}`
         const noindexParams = ['nocache', 'add-to-cart', 'remove_item', 'redirect', 'pagenum'];
         const hasNoindexParam = noindexParams.some(param => req.query[param] !== undefined);
         
-        if (isNoindexPath || hasNoindexParam) {
+        if (isNoindexPath || hasNoindexParam || currentLang !== 'pt') {
           robots = 'noindex,follow';
         }
 
@@ -13033,7 +13038,18 @@ ${text}`
         });
 
         // Adicionar Organization no grafo
-        const sameAsLinks = [s.facebook_url, s.instagram_url, s.youtube_url].filter(Boolean) as string[];
+        const formatSocialUrl = (url: unknown): string | null => {
+          if (!url) return null;
+          const trimmed = String(url).trim();
+          if (!trimmed) return null;
+          if (/^https?:\/\//i.test(trimmed)) return trimmed;
+          return `https://${trimmed}`;
+        };
+        const sameAsLinks = [
+          formatSocialUrl(s.facebook_url),
+          formatSocialUrl(s.instagram_url),
+          formatSocialUrl(s.youtube_url)
+        ].filter(Boolean) as string[];
         jsonLdGraph.push({
           "@type": "Organization",
           "@id": `${appUrl}/#organization`,
@@ -13064,6 +13080,9 @@ ${text}`
 
           if (product) {
             matchedProduct = product;
+            if (product.noindex === 1 || product.noindex === '1') {
+              robots = 'noindex,follow';
+            }
             const siteDisplayName = String(s.site_name || 'Digital Bordados').trim();
             const pName = currentLang === 'pt' ? product.name : currentLang === 'en' ? (product.name_en || product.name) : (product.name_es || product.name);
             const pDesc = currentLang === 'pt' ? product.description : currentLang === 'en' ? (product.description_en || product.description) : (product.description_es || product.description);
@@ -13127,7 +13146,12 @@ ${text}`
             const activeSlug = currentLang === 'pt' ? product.slug : currentLang === 'en' ? (product.slug_en || product.slug) : (product.slug_es || product.slug);
             const redirectPrefix = currentLang === 'pt' ? '' : `/${currentLang}`;
             const routeWord = currentLang === 'en' ? 'product' : currentLang === 'es' ? 'producto' : 'produto';
-            canonicalUrl = `${appUrl}${redirectPrefix}/${routeWord}/${activeSlug}`;
+            const dbCanonical = String(product.canonical_url || '').trim();
+            if (/^https?:\/\//i.test(dbCanonical)) {
+              canonicalUrl = dbCanonical;
+            } else {
+              canonicalUrl = `${appUrl}${redirectPrefix}/${routeWord}/${activeSlug}`;
+            }
 
             if (product.image) {
               absoluteOgImage = product.image.startsWith('http') ? product.image : `${appUrl}${product.image.startsWith('/') ? '' : '/'}${product.image}`;
@@ -13297,7 +13321,7 @@ ${text}`
             '/es/contacto': { pt: '/contato', en: '/en/contact', es: '/es/contacto' },
           };
 
-          const normalizedPath = req.path.endsWith('/') && req.path.length > 1 ? req.path.slice(0, -1) : req.path;
+          const normalizedPath = reqPath.endsWith('/') && reqPath.length > 1 ? reqPath.slice(0, -1) : reqPath;
           const mapped = routeMap[normalizedPath];
           if (mapped) {
             hreflangTags = `
@@ -13306,7 +13330,7 @@ ${text}`
   <link rel="alternate" hreflang="es" href="${appUrl}${mapped.es}" />
   <link rel="alternate" hreflang="x-default" href="${appUrl}${mapped.pt}" />`;
           } else {
-            let cleanPath = req.path;
+            let cleanPath = reqPath;
             if (cleanPath.startsWith('/en/')) cleanPath = cleanPath.slice(3);
             else if (cleanPath.startsWith('/es/')) cleanPath = cleanPath.slice(3);
             else if (cleanPath === '/en' || cleanPath === '/es') cleanPath = '/';

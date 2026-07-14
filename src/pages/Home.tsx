@@ -67,6 +67,7 @@ export default function Home() {
 
   return (
     <main className="max-w-[1440px] mx-auto px-4 md:px-10 py-6 md:py-10">
+      <h1 className="sr-only">Digital Bordados - Matrizes de Bordados Computadorizados de Alta Qualidade</h1>
       <div className="flex flex-col lg:flex-row gap-10">
         {/* Sidebar */}
         <div className="w-full lg:w-72 shrink-0">
