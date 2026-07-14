@@ -2300,20 +2300,12 @@ async function startServer() {
   const PORT = Number(process.env.PORT || 3000);
   app.set('trust proxy', 1);
 
-  // Redireciona WWW para Não-WWW e index.html para / permanentemente (301) em produção para evitar conteúdo duplicado no SEO
+  // Redireciona WWW para Não-WWW permanentemente (301) em produção para evitar conteúdo duplicado no SEO
   app.use((req, res, next) => {
     const host = String(req.headers.host || '').trim().toLowerCase();
     const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1') || host.startsWith('192.168.');
     
-    // 1. Redirecionar index.html para / apenas se a URL digitada pelo usuário continha index.html
-    if (req.originalUrl.startsWith('/index.html')) {
-      const query = req.originalUrl.substring('/index.html'.length);
-      const targetUrl = `/${query}`;
-      res.writeHead(301, { Location: targetUrl });
-      return res.end();
-    }
-
-    // 2. Redirecionar WWW para Não-WWW
+    // Redirecionar WWW para Não-WWW
     if (!isLocalhost && host.startsWith('www.')) {
       const cleanHost = host.slice(4);
       const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : req.protocol;
