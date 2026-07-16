@@ -3,6 +3,7 @@ PassengerEnabled on
 PassengerAppType node
 PassengerStartupFile app.js
 PassengerAppRoot /home/kryontecnologic/monttera
+PassengerNodejs /home/kryontecnologic/nodevenv/politicasasound/20/bin/node
 # END Passenger
 
 # Rewrite rules for React Vite SPA (fallback to index.html for frontend routing)
