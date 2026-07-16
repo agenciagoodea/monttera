@@ -14,6 +14,9 @@ PassengerNodejs /home/kryontecnologic/nodevenv/politicasasound/20/bin/node
   # Serve assets directly from dist/assets
   RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
   
+  # Serve locales directly from dist/locales
+  RewriteRule ^locales/(.*)$ dist/locales/$1 [L]
+  
   # Serve uploads directly from dist/uploads
   RewriteRule ^uploads/(.*)$ dist/uploads/$1 [L]
 
