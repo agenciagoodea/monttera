@@ -98,17 +98,26 @@ function uploadFile(remoteDir, localFilePath) {
 
 function cpanelAPI2(module, func, params = {}) {
   return new Promise((resolve, reject) => {
-    const query = Object.entries(params)
-      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-      .join('&');
-    const urlPath = `/json-api/cpanel?cpanel_jsonapi_user=${CPANEL_USER}&cpanel_jsonapi_apiversion=2&cpanel_jsonapi_module=${module}&cpanel_jsonapi_func=${func}&${query}`;
-    
+    const body = Object.entries({
+      cpanel_jsonapi_user: CPANEL_USER,
+      cpanel_jsonapi_apiversion: '2',
+      cpanel_jsonapi_module: module,
+      cpanel_jsonapi_func: func,
+      ...params
+    })
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+
     const options = {
       hostname: CPANEL_HOST,
       port: CPANEL_PORT,
-      path: urlPath,
-      method: 'GET',
-      headers: { 'Authorization': `Basic ${AUTH}` },
+      path: '/json-api/cpanel',
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${AUTH}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(body)
+      },
       rejectUnauthorized: false
     };
 
@@ -124,7 +133,8 @@ function cpanelAPI2(module, func, params = {}) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(60000, () => { req.destroy(); reject(new Error('Timeout')); });
+    req.setTimeout(120000, () => { req.destroy(); reject(new Error('Timeout')); });
+    req.write(body);
     req.end();
   });
 }
@@ -144,7 +154,7 @@ async function main() {
     sourcefiles: `${APP_DIR}/${BUNDLE_NAME}`
   }).catch(() => null);
 
-  // 1. Upload do bundle.tar.gz
+  // 1. Upload do bundle.zip
   const uploadRes = await uploadFile(APP_DIR, BUNDLE_PATH);
   if (uploadRes.status === 1) {
     console.log('  ✅ Upload concluído com sucesso.');
@@ -153,7 +163,7 @@ async function main() {
     process.exit(1);
   }
 
-  // 2. Extrair o arquivo no servidor usando cPanel API 2 Fileman::fileop
+  // 2. Extrair o arquivo no servidor usando cPanel API 2 Fileman::fileop via POST
   console.log('\n📦 Extraindo bundle no servidor...');
   const extractRes = await cpanelAPI2('Fileman', 'fileop', {
     op: 'extract',
@@ -162,15 +172,17 @@ async function main() {
   });
 
   const cpanelResult = extractRes.cpanelresult || {};
-  const cpanelData = cpanelResult.data || {};
+  const cpanelData = cpanelResult.data || [];
+  const fileResult = cpanelData[0] || {};
   
   if (cpanelResult.error) {
     console.error('  ❌ Falha na extração:', cpanelResult.error);
     process.exit(1);
-  } else if (cpanelData.result === 1 || cpanelData.reason?.includes('Extracting') || cpanelData.reason?.includes('successful')) {
+  } else if (fileResult.result === 1) {
     console.log('  ✅ Extração concluída com sucesso.');
   } else {
-    console.log('  ⚠️  Resultado da extração:', JSON.stringify(extractRes));
+    console.error('  ❌ Falha no resultado da extração:', JSON.stringify(fileResult));
+    process.exit(1);
   }
 
   // 3. Remover o arquivo zip no servidor
@@ -180,7 +192,11 @@ async function main() {
     sourcefiles: `${APP_DIR}/${BUNDLE_NAME}`
   });
 
-  if (deleteRes.status === 1) {
+  const deleteResult = deleteRes.cpanelresult || {};
+  const deleteData = deleteResult.data || [];
+  const deleteFileResult = deleteData[0] || {};
+
+  if (deleteFileResult.result === 1) {
     console.log('  ✅ Limpeza concluída.');
   } else {
     console.log('  ⚠️  Aviso: Não foi possível deletar o bundle no servidor:', JSON.stringify(deleteRes));
