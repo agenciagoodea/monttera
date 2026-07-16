@@ -6,20 +6,24 @@ PassengerAppRoot /home/kryontecnologic/monttera
 PassengerNodejs /home/kryontecnologic/nodevenv/politicasasound/20/bin/node
 # END Passenger
 
-# Rewrite rules for React Vite SPA (fallback to index.html for frontend routing)
+# Rewrite rules for React Vite SPA behind Node/Passenger
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
+
+  # Serve assets directly from dist/assets
+  RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
   
+  # Serve uploads directly from dist/uploads
+  RewriteRule ^uploads/(.*)$ dist/uploads/$1 [L]
+
   # Let Passenger handle API requests directly
   RewriteCond %{REQUEST_URI} ^/api [NC]
   RewriteRule .* - [L]
-  
-  # For static files and directories, serve directly
-  RewriteCond %{REQUEST_FILENAME} -f [OR]
-  RewriteCond %{REQUEST_FILENAME} -d
+
+  # All other requests (like / or /products) go to Passenger (app.js)
+  # If a requested path is not a file/dir, let Passenger handle it
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule .* - [L]
-  
-  # All other requests redirect to index.html for React Router
-  RewriteRule ^ index.html [L]
 </IfModule>

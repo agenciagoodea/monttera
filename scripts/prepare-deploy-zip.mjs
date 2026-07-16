@@ -13,7 +13,6 @@ const required = [
   'dist/package.json',
   'package.json',
   'package-lock.json',
-  'index.html',
   'app.js',
   '.htaccess'
 ];
@@ -37,7 +36,6 @@ const includes = [
   'package.json',
   'package-lock.json',
   '.npmrc',
-  'index.html',
   'app.js',
   '.htaccess',
   'scripts',
