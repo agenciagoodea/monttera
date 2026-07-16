@@ -15,7 +15,7 @@ const dbConfig: DbConfig = {
   port: Number(process.env.MYSQL_PORT || '3306'),
   user: process.env.MYSQL_USER || 'root',
   password: process.env.MYSQL_PASSWORD || '',
-  database: process.env.MYSQL_DATABASE || 'digitalbordados_novo',
+  database: process.env.MYSQL_DATABASE || 'kryontecnologic_monttera',
   charset: 'utf8mb4',
 };
 

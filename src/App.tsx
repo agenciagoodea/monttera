@@ -78,7 +78,7 @@ function RequireRegisteredUser({ children }: { children: ReactElement }) {
 
   if (loading) return <PageLoader />;
   if (!user) {
-    const isMobile = location.search.includes('mobile=true') || window.location.hostname === 'm.digitalbordados.com.br';
+    const isMobile = location.search.includes('mobile=true') || window.location.hostname === 'm.monttera.com.br';
     const redirect = encodeURIComponent(`${location.pathname}${location.search}`);
     const target = isMobile 
       ? `/cadastro?redirect=${redirect}&mobile=true` 
@@ -343,7 +343,7 @@ function MobileSearchBox() {
 }
 
 export default function App() {
-  const isMobileHost = window.location.hostname === 'm.digitalbordados.com.br' || window.location.search.includes('mobile=true');
+  const isMobileHost = window.location.hostname === 'm.monttera.com.br' || window.location.search.includes('mobile=true');
 
   if (isMobileHost) {
     return (

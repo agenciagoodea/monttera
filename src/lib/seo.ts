@@ -12,7 +12,7 @@ type SeoInput = {
   jsonLd?: Record<string, unknown> | Record<string, unknown>[];
 };
 
-const DEFAULT_SITE_URL = 'https://digitalbordados.com.br';
+const DEFAULT_SITE_URL = 'https://monttera.com.br';
 
 function upsertMetaByName(name: string, content: string) {
   let node = document.querySelector(`meta[name="${name}"]`) as HTMLMetaElement | null;
@@ -119,8 +119,8 @@ export function applySeo(input: SeoInput) {
 
   // Forçar canônico para o domínio desktop principal
   const desktopCanonical = canonical
-    .replace('https://m.digitalbordados.com.br', 'https://digitalbordados.com.br')
-    .replace('http://m.digitalbordados.com.br', 'https://digitalbordados.com.br');
+    .replace('https://m.monttera.com.br', 'https://monttera.com.br')
+    .replace('http://m.monttera.com.br', 'https://monttera.com.br');
 
   // 2. Determinação dinâmica do robots noindex
   let robots = String(input.robots || 'index,follow').trim();
@@ -169,7 +169,7 @@ export function applySeo(input: SeoInput) {
   // Se for o host desktop, adiciona alternate apontando para o mobile
   const isMobileHost = window.location.hostname.startsWith('m.');
   if (!isMobileHost) {
-    const mobileUrl = desktopCanonical.replace('https://digitalbordados.com.br', 'https://m.digitalbordados.com.br');
+    const mobileUrl = desktopCanonical.replace('https://monttera.com.br', 'https://m.monttera.com.br');
     upsertAlternate(mobileUrl);
   } else {
     upsertAlternate(null); // Remove alternate se for o mobile

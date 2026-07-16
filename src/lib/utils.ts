@@ -16,7 +16,7 @@ export function getPublicAssetUrl(value?: string | null): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
 
-  if (/^digitalbordados\.com\.br\//i.test(raw)) {
+  if (/^(?:digitalbordados|monttera)\.com\.br\//i.test(raw)) {
     return `https://${raw.replace(/^\/+/, '')}`;
   }
 
@@ -24,7 +24,7 @@ export function getPublicAssetUrl(value?: string | null): string {
     return raw;
   }
 
-  const domain = 'https://digitalbordados.com.br';
+  const domain = typeof window !== 'undefined' ? window.location.origin : 'https://monttera.com.br';
   const noLeadingSlash = raw.replace(/^\/+/, '');
 
   if (raw.startsWith('/wp-content/uploads/')) {

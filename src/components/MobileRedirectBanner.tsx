@@ -11,15 +11,15 @@ function getCookie(name: string): string {
 function setCookie(name: string, value: string, days: number) {
   const expires = new Date();
   expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
-  const domain = window.location.hostname.endsWith('digitalbordados.com.br') 
-    ? '; domain=.digitalbordados.com.br' 
+  const domain = window.location.hostname.endsWith('monttera.com.br') 
+    ? '; domain=.monttera.com.br' 
     : (window.location.hostname.includes('.') ? `; domain=.${window.location.hostname.split('.').slice(-2).join('.')}` : '');
   document.cookie = `${name}=${value}; expires=${expires.toUTCString()}; path=/${domain}`;
 }
 
 function removeCookie(name: string) {
-  const domain = window.location.hostname.endsWith('digitalbordados.com.br') 
-    ? '; domain=.digitalbordados.com.br' 
+  const domain = window.location.hostname.endsWith('monttera.com.br') 
+    ? '; domain=.monttera.com.br' 
     : (window.location.hostname.includes('.') ? `; domain=.${window.location.hostname.split('.').slice(-2).join('.')}` : '');
   document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/${domain}`;
 }
