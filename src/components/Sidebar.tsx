@@ -2,6 +2,7 @@ import { Category } from '../types';
 import { Plus, Minus } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import LucideIcon from './LucideIcon';
+import SideBanner from './SideBanner';
 
 interface SidebarProps {
   categories: Category[];
@@ -48,7 +49,7 @@ export default function Sidebar({ categories, selectedCategory, onSelectCategory
                   : 'text-slate-600 hover:bg-slate-50 border border-transparent'
               }`}
             >
-              <span>Todas as Matrizes</span>
+              <span>Todos os Produtos</span>
               {selectedCategory === null && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
             </button>
           </li>
@@ -113,6 +114,8 @@ export default function Sidebar({ categories, selectedCategory, onSelectCategory
           })}
         </ul>
       </div>
+
+      <SideBanner />
     </aside>
   );
 }

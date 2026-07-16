@@ -9872,6 +9872,9 @@ app.post('/api/admin/users', authenticate, isAdmin, async (req, res) => {
         }
       });
       apiCache.delete('public_settings');
+      apiCache.delete('public_settings_pt');
+      apiCache.delete('public_settings_en');
+      apiCache.delete('public_settings_es');
       settingsCacheExpiresAt = 0;
       res.json({ success: true });
     } catch (error) {
@@ -12749,7 +12752,12 @@ ${text}`
 
   // Vite Integration
   const isProdEnv = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
-  const hasDistIndex = fs.existsSync(path.join(process.cwd(), 'dist', 'index.html')) || fs.existsSync(path.join(_dirname, 'index.html'));
+  // Verifica se existe build de produção (dist/index.html com assets compilados).
+  // NÃO usa path.join(_dirname, 'index.html') pois isso detecta falsamente o index.html
+  // do Vite (raiz do projeto) como build de produção quando _dirname === process.cwd().
+  const distIndexPath = path.join(process.cwd(), 'dist', 'index.html');
+  const altDistIndexPath = _dirname !== process.cwd() ? path.join(_dirname, 'index.html') : null;
+  const hasDistIndex = fs.existsSync(distIndexPath) || (altDistIndexPath ? fs.existsSync(altDistIndexPath) : false);
   const isForceProduction = isProdEnv || process.env.VERCEL || hasDistIndex;
   if (!isForceProduction) {
     const { createServer: createViteServer } = await import('vite');

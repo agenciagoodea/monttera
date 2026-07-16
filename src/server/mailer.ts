@@ -61,7 +61,7 @@ export async function sendEmail({ to, templateKey, variables = {} }: SendEmailPa
     }
 
     // 3. Prepare variables
-    const baseAppUrl = (app_url || 'https://digitalbordados.com.br').replace(/\/+$/, '');
+    const baseAppUrl = (app_url || 'https://monttera.com.br').replace(/\/+$/, '');
     let resolvedLogo = logo_url || '';
     if (resolvedLogo && !resolvedLogo.startsWith('http://') && !resolvedLogo.startsWith('https://')) {
       resolvedLogo = `${baseAppUrl}/${resolvedLogo.replace(/^\/+/, '')}`;
@@ -69,7 +69,7 @@ export async function sendEmail({ to, templateKey, variables = {} }: SendEmailPa
 
     const templateVars = {
       store_logo: resolvedLogo,
-      store_name: site_name || 'Digital Bordados',
+      store_name: site_name || 'Monttera',
       app_url: baseAppUrl,
       ...variables
     };

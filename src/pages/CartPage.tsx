@@ -548,10 +548,10 @@ export default function CartPage() {
         </div>
         <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight mb-2">Seu carrinho está vazio</h2>
         <p className="text-slate-500 font-medium mb-10 text-center max-w-sm">
-          Parece que você ainda não adicionou nenhuma matriz ao seu carrinho.
+          Parece que você ainda não adicionou nenhum produto ao seu carrinho.
         </p>
         <Link to="/" className="bg-blue-600 text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-500/20 hover:bg-blue-700 hover:-translate-y-1 transition-all">
-          Explorar Matrizes
+          Explorar Produtos
         </Link>
       </div>
     );

@@ -81,7 +81,7 @@ export default function AdminReports() {
 
       pdf.setFontSize(18);
       pdf.setTextColor(30, 41, 59);
-      pdf.text('RELATORIO DE DESEMPENHO - DIGITAL BORDADOS', 15, 20);
+      pdf.text('RELATORIO DE DESEMPENHO - LOJA ONLINE', 15, 20);
       pdf.setFontSize(10);
       pdf.setTextColor(100, 116, 139);
       const dateStr = new Date().toLocaleDateString('pt-BR');
@@ -89,7 +89,7 @@ export default function AdminReports() {
       pdf.text(`Gerado em: ${dateStr} as ${timeStr} | Periodo: ${period.toUpperCase()}`, 15, 28);
 
       pdf.addImage(imgData, 'PNG', 10, 35, pdfWidth - 20, pdfHeight - 20);
-      pdf.save(`relatorio-digital-bordados-${period}-${Date.now()}.pdf`);
+      pdf.save(`relatorio-desempenho-${period}-${Date.now()}.pdf`);
     } catch (error) {
       console.error('PDF Export error:', error);
       alert('Erro ao gerar PDF. Tente novamente.');
@@ -101,7 +101,7 @@ export default function AdminReports() {
   const handleDownloadExcel = () => {
     if (!stats) return;
     const lines: string[] = [];
-    lines.push('Relatorio Digital Bordados');
+    lines.push('Relatório de Desempenho');
     lines.push(`Periodo,${period}`);
     lines.push(`Receita Bruta,${Number(stats.revenue?.gross || 0).toFixed(2)}`);
     lines.push(`Receita Liquida,${Number(stats.revenue?.net || stats.revenue?.total || 0).toFixed(2)}`);

@@ -89,9 +89,9 @@ export function buildAbsoluteUrl(pathOrUrl?: string | null): string {
 }
 
 export function applySeo(input: SeoInput) {
-  const siteName = String(input.siteName || 'Digital Bordados').trim();
+  const siteName = String(input.siteName || 'Monttera').trim();
   const title = String(input.title || siteName).trim();
-  const description = String(input.description || 'Matrizes de bordado digitais com qualidade profissional.').trim();
+  const description = String(input.description || 'Sua loja online completa com os melhores produtos e serviços.').trim();
   const image = buildAbsoluteUrl(input.image || '/uploads/seo-default-share.jpg');
   const keywords = String(input.keywords || '').trim();
   const twitterCard = String(input.twitterCard || 'summary_large_image').trim();

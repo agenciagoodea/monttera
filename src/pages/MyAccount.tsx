@@ -503,7 +503,7 @@ export default function MyAccount() {
   const menuItems: Array<{ key: AccountTab | 'logout'; label: string; icon: any }> = [
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { key: 'orders', label: 'Pedidos', icon: ShoppingBag },
-    { key: 'downloads', label: 'Matrizes Compradas', icon: Download },
+    { key: 'downloads', label: 'Meus Downloads', icon: Download },
     { key: 'address', label: 'Endereço', icon: MapPinHouse },
     { key: 'profile', label: 'Perfil', icon: UserRound },
     { key: 'wishlist', label: 'Favoritos', icon: Heart },
@@ -1096,7 +1096,7 @@ export default function MyAccount() {
             <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 md:p-8 shadow-sm">
               <h2 className="text-2xl font-black text-slate-900 mb-3">Olá, {displayName}!</h2>
               <p className="text-slate-600 leading-relaxed font-semibold">
-                A partir do painel da sua conta, você pode visualizar seus pedidos recentes, acessar suas matrizes compradas,
+                A partir do painel da sua conta, você pode visualizar seus pedidos recentes, acessar seus arquivos comprados,
                 gerenciar seus endereços e editar os detalhes da sua conta.
               </p>
               <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-6">
@@ -1128,7 +1128,7 @@ export default function MyAccount() {
                     </div>
                   </div>
                   <button onClick={() => handleMenuClick('downloads')} className="mt-4 w-full py-2 bg-white/50 border border-emerald-100 rounded-xl text-[10px] font-black text-emerald-700 uppercase tracking-widest hover:bg-white transition-colors">
-                    Baixar Matrizes
+                     Acessar Downloads
                   </button>
                 </div>
 
@@ -1235,9 +1235,9 @@ export default function MyAccount() {
 
           {activeTab === 'downloads' && (
             <div className="bg-white rounded-[1.5rem] border border-slate-100 p-6 shadow-sm">
-              <h2 className="text-xl font-black text-slate-900 mb-4">Matrizes Compradas</h2>
+              <h2 className="text-xl font-black text-slate-900 mb-4">Meus Downloads</h2>
               {downloads.length === 0 ? (
-                <p className="text-sm font-semibold text-slate-500">Nenhuma matriz comprada encontrada.</p>
+                <p className="text-sm font-semibold text-slate-500">Nenhum produto comprado encontrado.</p>
               ) : (
                 <div className="space-y-3">
                   {downloads.map((item) => (
@@ -1264,7 +1264,7 @@ export default function MyAccount() {
                             item.file_path ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-300 cursor-not-allowed'
                           }`}
                         >
-                          <Download className="w-4 h-4" /> Baixar Matriz (ZIP)
+                          <Download className="w-4 h-4" /> Baixar Arquivo
                         </a>
                         {item.production_sheet && (
                           <a
@@ -1287,7 +1287,7 @@ export default function MyAccount() {
                   <span>🔒</span> Uso exclusivo para quem adquiriu
                 </p>
                 <p className="text-xs font-semibold leading-relaxed">
-                  Essa matriz foi desenvolvida com muito carinho e dedicação. Por isso, pedimos que não compartilhe, doe ou revenda este arquivo em nenhuma plataforma, rede social ou mídia digital.
+                   Este conteúdo digital foi desenvolvido com muito cuidado. Por isso, pedimos que não compartilhe, doe ou revenda este arquivo em nenhuma plataforma, rede social ou mídia digital.
                 </p>
                 <p className="text-[11px] font-black uppercase tracking-wide text-amber-800 flex items-center gap-2">
                   <span>📜</span> A redistribuição sem autorização é proibida pela Lei de Direitos Autorais (Lei 9.610/98).

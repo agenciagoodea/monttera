@@ -118,7 +118,7 @@ export default function WhatsAppWidget() {
     
     const textToSend = inputValue.trim()
       ? encodeURIComponent(inputValue.trim())
-      : encodeURIComponent('Olá! Vim do site e gostaria de tirar uma dúvida sobre as matrizes de bordado.');
+      : encodeURIComponent('Olá! Vim do site e gostaria de tirar uma dúvida.');
       
     window.open(`https://wa.me/${cleanNumber}?text=${textToSend}`, '_blank');
     setInputValue('');
@@ -262,7 +262,7 @@ export default function WhatsAppWidget() {
               
               <div>
                 <div className="flex items-center gap-1">
-                  <h4 className="text-xs font-black tracking-wide">Suporte Digital Bordados</h4>
+                  <h4 className="text-xs font-black tracking-wide">Suporte {settings?.site_name || 'Monttera'}</h4>
                   {/* Verified Badge */}
                   <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-sky-400 drop-shadow-[0_1px_1px_rgba(0,0,0,0.15)]" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
@@ -299,7 +299,7 @@ export default function WhatsAppWidget() {
               /* Mensagem de Suporte */
               <div className="bg-white rounded-2xl rounded-tl-none p-3.5 shadow-sm text-xs text-slate-800 max-w-[85%] self-start relative border border-slate-100 flex flex-col gap-1.5 transition-all">
                 <p className="font-medium leading-relaxed">
-                  Olá! Seja bem-vindo(a) à Digital Bordados! 🧵✨
+                  Olá! Seja bem-vindo(a) à {settings?.site_name || 'nossa loja'}! 😊✨
                 </p>
                 <p className="font-medium leading-relaxed">
                   Nosso atendimento está <strong className="text-emerald-600 font-extrabold">online</strong> pronto para te ajudar a encontrar suas matrizes ou tirar qualquer dúvida.

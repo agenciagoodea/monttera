@@ -513,7 +513,7 @@ export default function AdminProductForm() {
       '{{cores}}': formData.colors || '0',
       '{{categoria_principal}}':
         categories.find((category) => category.id === Number(formData.category_id))?.name || 'Categoria',
-      '{{site_nome}}': 'Digital Bordados',
+      '{{site_nome}}': 'Monttera',
     }),
     [formData, categories],
   );

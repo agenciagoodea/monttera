@@ -83,7 +83,7 @@ export default function Register() {
         <div className="p-8 md:p-12">
           <div className="text-center mb-8">
             <h2 className="text-4xl font-black text-slate-800 uppercase tracking-tight mb-3">Criar Conta</h2>
-            <p className="text-slate-500 font-medium">Junte-se à maior comunidade de bordadeiras do Brasil.</p>
+            <p className="text-slate-500 font-medium">Crie sua conta e aproveite todas as vantagens da nossa loja.</p>
           </div>
 
           {/* Login social — opção rápida */}

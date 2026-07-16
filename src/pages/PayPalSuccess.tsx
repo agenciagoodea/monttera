@@ -73,7 +73,7 @@ export default function PayPalSuccess() {
               Seu pedido {orderId ? `#${orderId}` : ''} foi pago com sucesso via PayPal.
             </p>
             <p className="text-slate-400 text-sm mb-8">
-              Seus arquivos de bordado já estão disponíveis na sua conta.
+              Seus arquivos já estão disponíveis na sua conta.
             </p>
             <Link
               to="/minha-conta"

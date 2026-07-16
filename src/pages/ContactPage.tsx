@@ -106,7 +106,7 @@ export default function ContactPage() {
     } as CSSProperties;
   }, [primary, secondary]);
 
-  const contactEmail = settings.email_contact || 'contato@digitalbordados.com.br';
+  const contactEmail = settings.email_contact || 'contato@monttera.com.br';
   const contactPhone = settings.phone || '(91) 992426-1982';
   const contactAddress = settings.address || 'Atendimento online em todo o Brasil';
   const contactHours = settings.contact_hours || 'Seg a Sex, 8h as 18h';

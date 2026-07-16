@@ -55,9 +55,9 @@ export default function Footer() {
               ) : (
                 <div className="flex flex-col">
                   <span className="text-4xl font-black text-white leading-none tracking-tighter uppercase">
-                    DIGITAL<span className="text-white/60 font-light">BORDADOS</span>
+                    MONT<span className="text-white/60 font-light">TERA</span>
                   </span>
-                  <span className="text-[10px] font-black text-white/40 tracking-[0.4em] -mt-0.5">EXCELÊNCIA EM MATRIZES</span>
+                  <span className="text-[10px] font-black text-white/40 tracking-[0.4em] -mt-0.5">SUA LOJA ONLINE</span>
                 </div>
               )}
             </Link>
@@ -126,7 +126,7 @@ export default function Footer() {
         <div className="border-t border-white/10 pt-12 flex flex-col lg:flex-row items-center justify-between gap-8">
           <div className="space-y-2 text-center lg:text-left">
             <p className="text-[11px] font-bold text-white/50 uppercase tracking-widest">
-              {new Date().getFullYear()} © {settings.site_name || 'Digital Bordados'} E-commerce
+              {new Date().getFullYear()} © {settings.site_name || 'Monttera'} E-commerce
             </p>
             <p className="text-[9px] font-medium text-white/30 uppercase tracking-[0.2em]">
               Av. Fortaleza, 90 - Bairro Novo CEP 66010-000 - Belém/PA. {t('common.all_rights_reserved')}

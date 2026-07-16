@@ -12,7 +12,7 @@
     "login": "Entrar",
     "register": "Cadastrar",
     "logout": "Sair",
-    "search_placeholder": "Pesquise por uma palavra curta (ex.: policia, veterinária, enfermagem, carro)...",
+    "search_placeholder": "Pesquise por produtos, categorias ou palavras-chave...",
     "search_results": "Ver todos os resultados para",
     "no_results": "Nenhum produto encontrado",
     "no_results_sub": "Tente buscar por termos diferentes ou mais genéricos.",
@@ -42,7 +42,7 @@
     "short_description": "Resumo",
     "details": "Detalhes Técnicos",
     "colors": "Cores",
-    "stitch_count": "Pontos",
+    "stitch_count": "Especificação",
     "format": "Formatos",
     "downloads_info": "Download imediato após aprovação",
     "featured": "Destaques",
@@ -70,7 +70,7 @@
     "billing_details": "Dados de Faturamento"
   },
   "footer": {
-    "intro_text": "Transforme suas ideias em bordados perfeitos! Oferecemos matrizes de bordado computadorizado de alta qualidade, prontas para dar vida aos seus projetos com precisão e criatividade."
+    "intro_text": "Sua loja online completa com os melhores produtos e serviços. Oferecemos soluções de alta qualidade, prontas para atender aos seus projetos com precisão e excelência."
   },
   "help_page": {
     "title": "Como podemos ajudar?",

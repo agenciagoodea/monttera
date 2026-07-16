@@ -14,7 +14,7 @@ export default function Header() {
   const { language, t, changeLanguage } = useI18n();
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [topBarEnabled, setTopBarEnabled] = useState(true);
-  const [topBarMessage, setTopBarMessage] = useState('Faça seu cadastro e baixe suas matrizes no painel ao lado. Aproveite!');
+  const [topBarMessage, setTopBarMessage] = useState('Cadastre-se e aproveite todas as vantagens da nossa loja. Aproveite!');
   const [search, setSearch] = useState(searchParams.get('q') || '');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -22,10 +22,20 @@ export default function Header() {
   const [activeIndex, setActiveIndex] = useState(-1);
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [rates, setRates] = useState({ usdBrl: 5.62, usdGyd: 7820, usdArs: 955 });
   
   const searchRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Flutuação das moedas baseada no dia do mês
+    const seed = new Date().getDate();
+    const usdBrlVal = 5.50 + ((seed * 17) % 30) / 100;
+    const usdGydVal = 7700 + ((seed * 117) % 240);
+    const usdArsVal = 930 + ((seed * 97) % 70);
+    setRates({ usdBrl: usdBrlVal, usdGyd: usdGydVal, usdArs: usdArsVal });
+  }, []);
 
   useEffect(() => {
     setSearch(searchParams.get('q') || '');
@@ -165,19 +175,35 @@ export default function Header() {
 
   return (
     <header className="w-full">
-      {/* Top Bar */}
-      {topBarEnabled && topBarMessage && (
-        <div className="bg-primary text-white py-2.5 px-4 md:px-10">
-          <div className="max-w-[1440px] mx-auto relative flex items-center justify-center">
-            <div className="text-[10px] md:text-xs font-black tracking-[0.14em] uppercase text-center animate-pulse bg-white/15 border border-white/20 rounded-full px-4 py-1.5 shadow-lg shadow-black/10">
+      {topBarEnabled && (
+        <div className="bg-slate-900 text-white py-2 px-4 md:px-10 border-b border-slate-800">
+          <div className="max-w-[1440px] mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-center md:text-left">
+            <div className="text-[10px] md:text-xs font-semibold text-slate-300">
               {topBarMessage}
             </div>
-            <div className="hidden md:flex items-center gap-3 ml-4 absolute right-0 top-1/2 -translate-y-1/2" ref={langRef}>
+
+            {/* Widget de Moedas estilo Compras Paraguai */}
+            <div className="flex flex-wrap items-center justify-center gap-4 text-[10px] md:text-xs font-bold text-slate-300">
+              <span className="flex items-center gap-1">
+                <span className="text-[9px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-black">CÂMBIO DÓLAR</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span>🇺🇸/🇧🇷</span> <span className="text-emerald-400">R$ {rates.usdBrl.toFixed(2)}</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span>🇺🇸/🇵🇾</span> <span className="text-emerald-400">G$ {rates.usdGyd.toLocaleString('pt-BR')}</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span>🇺🇸/🇦🇷</span> <span className="text-emerald-400">$ {rates.usdArs.toLocaleString('pt-BR')}</span>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3" ref={langRef}>
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setLangMenuOpen(!langMenuOpen)}
-                  className="flex items-center gap-1.5 text-xs font-bold text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full transition-all border border-white/15 cursor-pointer"
+                  className="flex items-center gap-1.5 text-[10px] md:text-xs font-bold text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full transition-all border border-white/15 cursor-pointer"
                 >
                   <Globe className="w-3.5 h-3.5" />
                   {language === 'pt' ? '🇧🇷 Português' : language === 'en' ? '🇺🇸 English' : '🇪🇸 Español'}
@@ -221,9 +247,9 @@ export default function Header() {
               ) : (
                 <>
                   <span className="text-4xl font-black text-primary leading-none tracking-tighter uppercase group-hover:text-blue-800 transition-colors">
-                    DIGITAL<span className="text-blue-400 font-light">BORDADOS</span>
+                    MONT<span className="text-blue-400 font-light">TERA</span>
                   </span>
-                  <span className="text-[12px] font-extrabold text-slate-400 tracking-[0.3em] -mt-1">EXCELÊNCIA EM MATRIZES</span>
+                  <span className="text-[12px] font-extrabold text-slate-400 tracking-[0.3em] -mt-1">SUA LOJA ONLINE</span>
                 </>
               )}
             </Link>

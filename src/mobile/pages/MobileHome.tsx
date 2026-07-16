@@ -111,7 +111,7 @@ export default function MobileHome() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="sr-only">Digital Bordados - Matrizes de Bordados Computadorizados de Alta Qualidade</h1>
+      <h1 className="sr-only">Monttera - Loja Online com os Melhores Produtos</h1>
       
       {/* Banner Principal Unificado e Dinâmico */}
       <Banner />

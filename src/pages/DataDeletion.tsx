@@ -81,12 +81,12 @@ export default function DataDeletion() {
               Instruções de Remoção no Facebook
             </h2>
             <p className="text-xs text-slate-500 font-semibold leading-relaxed">
-              Se você utilizou o recurso "Entrar com Facebook" e deseja remover as permissões do aplicativo <strong>Digital Bordados</strong> de sua conta, você pode revogá-lo diretamente pelas configurações da Meta:
+              Se você utilizou o recurso "Entrar com Facebook" e deseja remover as permissões do aplicativo <strong>Monttera</strong> de sua conta, você pode revogá-lo diretamente pelas configurações da Meta:
             </p>
             
             <ol className="text-xs text-slate-600 font-semibold space-y-2 list-decimal pl-5">
               <li>Acesse as configurações do seu perfil do Facebook em <a href="https://www.facebook.com/settings?tab=applications" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Configurações &gt; Aplicativos e Sites</a>.</li>
-              <li>Procure e selecione o aplicativo <strong>"Digital Bordados"</strong> ou <strong>"Digital Bordados Login"</strong> na lista.</li>
+              <li>Procure e selecione o aplicativo <strong>"Monttera"</strong> ou <strong>"Monttera Login"</strong> na lista.</li>
               <li>Clique no botão <strong>Remover</strong> ao lado do nome do aplicativo.</li>
               <li>Confirme a remoção na caixa de diálogo. Pronto! O aplicativo não terá mais acesso às suas informações básicas.</li>
             </ol>
@@ -105,8 +105,8 @@ export default function DataDeletion() {
               <strong>O que acontece ao excluir seus dados?</strong>
               <ul className="list-disc pl-5 mt-1.5 space-y-1">
                 <li>Sua conta e perfil de acesso serão removidos de forma definitiva.</li>
-                <li>Seu histórico de pedidos de matrizes de bordados será apagado.</li>
-                <li><strong>Atenção:</strong> Você perderá permanentemente o acesso ao painel de downloads das matrizes que comprou em nosso site.</li>
+                <li>Seu histórico de pedidos será apagado.</li>
+                <li><strong>Atenção:</strong> Você perderá permanentemente o acesso ao painel de downloads dos produtos que comprou em nosso site.</li>
               </ul>
             </div>
           </div>
@@ -219,7 +219,7 @@ export default function DataDeletion() {
 
             <div className="pt-4 border-t border-slate-100 flex items-center justify-center gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-wider">
               <LinkIcon className="w-3.5 h-3.5" />
-              <span>Digital Bordados • LGPD</span>
+              <span>Monttera • LGPD</span>
             </div>
 
           </div>

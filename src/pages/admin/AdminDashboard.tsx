@@ -189,7 +189,7 @@ export default function AdminDashboard() {
             Dashboard
             <span className="text-xs font-black bg-blue-600 text-white px-3 py-1 rounded-full uppercase tracking-widest">Live</span>
           </h1>
-          <p className="text-slate-500 font-medium mt-1">Acompanhe a performance da Digital Bordados em tempo real.</p>
+          <p className="text-slate-500 font-medium mt-1">Acompanhe a performance da loja em tempo real.</p>
         </div>
         <div className="flex items-center gap-3">
           <button 

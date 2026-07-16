@@ -12,7 +12,7 @@
     "login": "Entrar",
     "register": "Registrarse",
     "logout": "Salir",
-    "search_placeholder": "Busque por una palabra clave (ej. policía, flores, animales, coche)...",
+    "search_placeholder": "Busque productos, categorías o palabras clave...",
     "search_results": "Ver todos los resultados para",
     "no_results": "Ningún producto encontrado",
     "no_results_sub": "Intente buscar términos diferentes o más genéricos.",
@@ -32,7 +32,7 @@
     "orders": "Mis Pedidos",
     "downloads": "Mis Descargas",
     "addresses": "Direcciones",
-    "profile": "Detalles de la Cuenta",
+    "profile": "Detalhes de la Cuenta",
     "admin_dashboard": "Panel de Admin"
   },
   "product": {
@@ -42,7 +42,7 @@
     "short_description": "Resumen",
     "details": "Detalles Técnicos",
     "colors": "Colores",
-    "stitch_count": "Puntos",
+    "stitch_count": "Especificación",
     "format": "Formatos",
     "downloads_info": "Descarga instantánea tras la aprobación del pago",
     "featured": "Destacados",
@@ -70,7 +70,7 @@
     "billing_details": "Datos de Facturación"
   },
   "footer": {
-    "intro_text": "¡Transforme sus ideas en bordados perfectos! Ofrecemos diseños de bordado computarizado de alta calidad listos para dar vida a sus proyectos con precisión y creatividad."
+    "intro_text": "¡Su tienda online completa con los mejores productos y servicios! Ofrecemos soluciones de alta calidad listos para dar vida a sus proyectos con precisión y excelencia."
   },
   "help_page": {
     "title": "¿Cómo podemos ayudar?",

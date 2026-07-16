@@ -122,11 +122,11 @@ export default function BudgetPage() {
           <Sparkles className="h-3.5 w-3.5" /> Orçamento sob medida
         </p>
         <h1 className="mt-4 text-3xl md:text-5xl font-black tracking-[-0.03em] max-w-4xl">
-          Desenvolvimento profissional de matrizes de bordado
+          Desenvolvimento profissional de produtos personalizados
         </h1>
         <p className="mt-4 max-w-3xl text-sm md:text-base text-blue-100/95 font-semibold">
-          <span className="block">Transforme sua arte em uma matriz otimizada e pronta para produção.</span>
-          <span className="block">Análise detalizada de cada projeto para garantir acabamento superior e eficiência na máquina.</span>
+          <span className="block">Transforme sua ideia em um produto otimizado e pronto para entrega.</span>
+          <span className="block">Análise detalhada de cada projeto para garantir acabamento superior e qualidade.</span>
         </p>
       </section>
 

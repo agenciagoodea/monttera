@@ -122,26 +122,26 @@ export default function AdminSettings() {
     social_proof_enabled: 'true',
     social_proof_delay: '10',
     // Home/Info
-    site_name: 'Digital Bordados',
-    site_description: 'Excelência em Matrizes de Bordado',
+    site_name: 'Monttera',
+    site_description: 'Sua Loja de Produtos Online',
     logo_url: '/logo.png',
     primary_color: '#3b82f6',
     secondary_color: '#1e293b',
     phone: '',
-    email_contact: 'contato@digitalbordados.com',
+    email_contact: 'contato@monttera.com',
     address: '',
     contact_hours: 'Seg a Sex, 8h às 18h',
     contact_whatsapp: '',
     new_badge_days: '10',
     redirect_to_checkout_after_add_to_cart: 'false',
     top_bar_enabled: 'true',
-    top_bar_message: 'Faça seu cadastro e baixe suas matrizes no painel ao lado. Aproveite!',
+    top_bar_message: 'Cadastre-se e aproveite todas as vantagens da nossa loja!',
     home_company_enabled: 'true',
     home_company_title: 'Nossa Empresa',
-    home_company_subtitle: 'Qualidade e confiança em matrizes de bordado digital',
-    home_company_text: 'Criamos experiências em bordado com curadoria técnica, produção consistente e atendimento especializado para quem vive do bordado.',
-    home_company_mission: 'Entregar matrizes de alta qualidade com agilidade e suporte humano.',
-    home_company_vision: 'Ser referência nacional em matrizes para bordado profissional.',
+    home_company_subtitle: 'Qualidade e confiança em produtos e serviços',
+    home_company_text: 'Criamos soluções consistentes e atendimento especializado para sua melhor experiência.',
+    home_company_mission: 'Entregar produtos com excelência, agilidade e excelente suporte.',
+    home_company_vision: 'Ser referência nacional em qualidade e e-commerce.',
     home_company_values: 'Qualidade, Transparência, Agilidade, Inovação e Respeito ao cliente.',
     home_company_image_main: '',
     home_company_image_secondary: '',
@@ -150,9 +150,9 @@ export default function AdminSettings() {
     home_company_bg_color: '#0f172a',
     home_company_text_color: '#f8fafc',
     home_company_icons: '["shield","sparkles","award"]',
-    seo_meta_title: 'Digital Bordados',
-    seo_meta_description: 'Matrizes de bordado digital com qualidade profissional.',
-    seo_keywords: 'matriz de bordado, bordado computadorizado, matriz pes, dst, jef',
+    seo_meta_title: 'Monttera',
+    seo_meta_description: 'Sua loja online com os melhores produtos e serviços.',
+    seo_keywords: 'loja online, produtos digitais, monttera, e-commerce',
     seo_robots_index: 'true',
     seo_robots_follow: 'true',
     seo_og_image: '/uploads/seo-default-share.jpg',
@@ -161,7 +161,7 @@ export default function AdminSettings() {
     seo_facebook_url: '',
     seo_instagram_url: '',
     seo_twitter_url: '',
-    seo_organization_name: 'Digital Bordados',
+    seo_organization_name: 'Monttera',
     seo_organization_logo: '',
     seo_enable_product_schema: 'true',
     seo_enable_organization_schema: 'true',
@@ -209,6 +209,7 @@ export default function AdminSettings() {
     email_requests: '',
     brand_logos: '[]',
     home_sliders: '[]',
+    side_sliders: '[]',
     lgpd_enabled: 'true',
     lgpd_require_consent_register: 'true',
     lgpd_require_checkout_consent: 'true',
@@ -314,6 +315,7 @@ export default function AdminSettings() {
           facebook_app_secret: data.facebook_app_secret ?? prev.facebook_app_secret,
           apple_enabled: data.apple_enabled ?? prev.apple_enabled,
           home_sliders: data.home_sliders || prev.home_sliders || '[]',
+          side_sliders: data.side_sliders || prev.side_sliders || '[]',
           gemini_api_key: data.gemini_api_key ?? prev.gemini_api_key,
         }));
       }
@@ -1594,6 +1596,301 @@ export default function AdminSettings() {
                     );
                   })()}
 
+                  {/* Slideshow Lateral (Banners na Lateral da Home) */}
+                  {(() => {
+                    let sideSlidersList: any[] = [];
+                    try {
+                      sideSlidersList = JSON.parse(settings.side_sliders || '[]');
+                    } catch (e) {
+                      sideSlidersList = [];
+                    }
+                    if (!Array.isArray(sideSlidersList)) sideSlidersList = [];
+
+                    const getSlideVisibility = (slide: any) => {
+                      const show_mobile = slide.show_mobile ?? (slide.visibility === 'all' || slide.visibility === 'mobile' || !slide.visibility);
+                      const show_desktop = slide.show_desktop ?? (slide.visibility === 'all' || slide.visibility === 'desktop' || !slide.visibility);
+                      return { show_mobile, show_desktop };
+                    };
+
+                    const activeDesktopCount = sideSlidersList.filter(s => s.active !== false && getSlideVisibility(s).show_desktop).length;
+                    const activeMobileCount = sideSlidersList.filter(s => s.active !== false && getSlideVisibility(s).show_mobile).length;
+
+                    return (
+                      <div>
+                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Slideshow Lateral (Banners na Lateral da Home)</h3>
+                        <div className="rounded-[2rem] border border-slate-100 bg-slate-50 p-6 space-y-6">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              Gerencie os banners exibidos na lateral direita da página inicial. Formato ideal: 400x400 pixels.
+                            </p>
+                            <div className="flex gap-3 text-[9px] font-black uppercase tracking-wider text-slate-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shrink-0">
+                              <span>Desktop: <span className={activeDesktopCount >= 6 ? 'text-amber-500 font-black' : 'text-blue-600 font-black'}>{activeDesktopCount}/6</span></span>
+                              <span className="text-slate-300">|</span>
+                              <span>Celular: <span className={activeMobileCount >= 6 ? 'text-amber-500 font-black' : 'text-blue-600 font-black'}>{activeMobileCount}/6</span></span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            {sideSlidersList.map((slider, idx) => {
+                              const { show_desktop, show_mobile } = getSlideVisibility(slider);
+                              return (
+                                <div key={slider.id || idx} className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
+                                  <div className="w-32 h-16 bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex items-center justify-center shrink-0">
+                                    {slider.image_url ? (
+                                      <img src={slider.image_url} alt="Slide Preview" className="w-full h-full object-cover" />
+                                    ) : (
+                                      <ImageIcon className="w-6 h-6 text-slate-300" />
+                                    )}
+                                  </div>
+                                  
+                                  <div className="flex-1 w-full space-y-3">
+                                    <div>
+                                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Link do Banner (Opcional)</label>
+                                      <input 
+                                        type="text" 
+                                        className="w-full px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold"
+                                        placeholder="Ex: /categoria/celulares ou https://link.com"
+                                        value={slider.link || ''}
+                                        onChange={(e) => {
+                                          const updated = [...sideSlidersList];
+                                          updated[idx] = { ...updated[idx], link: e.target.value };
+                                          setSettings({ ...settings, side_sliders: JSON.stringify(updated) });
+                                        }}
+                                      />
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updated = [...sideSlidersList];
+                                            const isActivating = updated[idx].active === false;
+                                            if (isActivating) {
+                                              if (show_desktop && activeDesktopCount >= 6) {
+                                                setMessage({ text: 'Não é possível ativar este slide. O limite de 6 banners ativos para Desktop foi atingido.', type: 'error' });
+                                                return;
+                                              }
+                                              if (show_mobile && activeMobileCount >= 6) {
+                                                setMessage({ text: 'Não é possível ativar este slide. O limite de 6 banners ativos para Celular foi atingido.', type: 'error' });
+                                                return;
+                                              }
+                                            }
+                                            updated[idx] = { ...updated[idx], active: updated[idx].active === false ? true : false };
+                                            setSettings({ ...settings, side_sliders: JSON.stringify(updated) });
+                                          }}
+                                          className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ${slider.active !== false ? 'bg-blue-600' : 'bg-slate-300'}`}
+                                        >
+                                          <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-all ${slider.active !== false ? 'left-6' : 'left-0.5'}`} />
+                                        </button>
+                                        <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">
+                                          {slider.active !== false ? 'Ativado' : 'Desativado'}
+                                        </span>
+                                      </div>
+                                      
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Exibir em:</span>
+                                        <div className="flex gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updated = [...sideSlidersList];
+                                              const isActivatingMobile = !show_mobile;
+                                              const isSlideActive = updated[idx].active !== false;
+
+                                              if (isSlideActive && isActivatingMobile && activeMobileCount >= 6) {
+                                                setMessage({ text: 'Não é possível exibir no Celular. O limite de 6 banners ativos foi atingido.', type: 'error' });
+                                                return;
+                                              }
+
+                                              updated[idx] = {
+                                                ...updated[idx],
+                                                visibility: undefined,
+                                                show_mobile: !show_mobile,
+                                                show_desktop: show_desktop
+                                              };
+                                              setSettings({ ...settings, side_sliders: JSON.stringify(updated) });
+                                            }}
+                                            className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 active:scale-95 ${
+                                              show_mobile
+                                                ? 'bg-blue-50 border-blue-600 text-blue-600 font-bold'
+                                                : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-slate-300'
+                                            }`}
+                                            title="Celular"
+                                          >
+                                            <Smartphone className="w-4 h-4" />
+                                            <span className="text-[9px] font-black uppercase tracking-wider">Celular</span>
+                                          </button>
+                                          
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updated = [...sideSlidersList];
+                                              const isActivatingDesktop = !show_desktop;
+                                              const isSlideActive = updated[idx].active !== false;
+
+                                              if (isSlideActive && isActivatingDesktop && activeDesktopCount >= 6) {
+                                                setMessage({ text: 'Não é possível exibir no Desktop. O limite de 6 banners ativos foi atingido.', type: 'error' });
+                                                return;
+                                              }
+
+                                              updated[idx] = {
+                                                ...updated[idx],
+                                                visibility: undefined,
+                                                show_mobile: show_mobile,
+                                                show_desktop: !show_desktop
+                                              };
+                                              setSettings({ ...settings, side_sliders: JSON.stringify(updated) });
+                                            }}
+                                            className={`p-2 rounded-xl border transition-all flex items-center gap-1.5 active:scale-95 ${
+                                              show_desktop
+                                                ? 'bg-blue-50 border-blue-600 text-blue-600 font-bold'
+                                                : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-slate-300'
+                                            }`}
+                                            title="Desktop"
+                                          >
+                                            <Monitor className="w-4 h-4" />
+                                            <span className="text-[9px] font-black uppercase tracking-wider">Desktop</span>
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                                    <button
+                                      type="button"
+                                      disabled={idx === 0}
+                                      onClick={() => {
+                                        if (idx === 0) return;
+                                        const updated = [...sideSlidersList];
+                                        const temp = updated[idx];
+                                        updated[idx] = updated[idx - 1];
+                                        updated[idx - 1] = temp;
+                                        setSettings({ ...settings, side_sliders: JSON.stringify(updated) });
+                                      }}
+                                      className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                                      title="Mover para Cima"
+                                    >
+                                      <ArrowUp className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={idx === sideSlidersList.length - 1}
+                                      onClick={() => {
+                                        if (idx === sideSlidersList.length - 1) return;
+                                        const updated = [...sideSlidersList];
+                                        const temp = updated[idx];
+                                        updated[idx] = updated[idx + 1];
+                                        updated[idx + 1] = temp;
+                                        setSettings({ ...settings, side_sliders: JSON.stringify(updated) });
+                                      }}
+                                      className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                                      title="Mover para Baixo"
+                                    >
+                                      <ArrowDown className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = sideSlidersList.filter((_, i) => i !== idx);
+                                        setSettings({ ...settings, side_sliders: JSON.stringify(updated) });
+                                        setMessage({ text: 'Banner removido. Lembre-se de salvar as alterações.', type: 'success' });
+                                      }}
+                                      className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
+                                      title="Remover Banner"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {sideSlidersList.length === 0 && (
+                              <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl bg-white">
+                                <ImageIcon className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nenhum banner lateral configurado</p>
+                                <p className="text-[9px] font-semibold text-slate-400 mt-1">A lateral ficará oculta e o banner principal ocupará todo o espaço.</p>
+                              </div>
+                            )}
+
+                            {activeDesktopCount < 6 || activeMobileCount < 6 ? (
+                              <label className="flex items-center justify-center gap-2 w-full py-4 border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 hover:border-blue-300 text-blue-600 rounded-2xl cursor-pointer transition-all active:scale-[0.99]">
+                                <Plus className="w-4 h-4" />
+                                <span className="text-[10px] font-black uppercase tracking-widest">Adicionar Novo Banner Lateral</span>
+                                <input 
+                                  type="file" 
+                                  className="hidden" 
+                                  accept="image/*"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+
+                                    try {
+                                      const formData = new FormData();
+                                      formData.append('logo', file);
+
+                                      const res = await fetch('/api/admin/upload-logo', {
+                                        method: 'POST',
+                                        body: formData,
+                                      });
+
+                                      const data = await res.json().catch(() => ({}));
+                                      if (!res.ok) {
+                                        setMessage({ text: data?.error || 'Erro ao subir imagem do banner.', type: 'error' });
+                                        return;
+                                      }
+
+                                      if (data.url) {
+                                        const wantDesktop = activeDesktopCount < 6;
+                                        const wantMobile = activeMobileCount < 6;
+                                        const newSlide = {
+                                          id: Date.now().toString(),
+                                          image_url: data.url,
+                                          link: '',
+                                          active: wantDesktop || wantMobile,
+                                          show_mobile: wantMobile,
+                                          show_desktop: wantDesktop
+                                        };
+                                        const updated = [...sideSlidersList, newSlide];
+                                        setSettings({ ...settings, side_sliders: JSON.stringify(updated) });
+                                        
+                                        if (!wantDesktop) {
+                                          setMessage({ text: 'Banner adicionado para Celular. O limite de Desktop foi atingido.', type: 'success' });
+                                        } else if (!wantMobile) {
+                                          setMessage({ text: 'Banner adicionado para Desktop. O limite de Celular foi atingido.', type: 'success' });
+                                        } else {
+                                          setMessage({ text: 'Banner adicionado com sucesso! Salve para aplicar.', type: 'success' });
+                                        }
+                                      }
+                                    } catch (err) {
+                                      setMessage({ text: 'Erro ao subir imagem do banner.', type: 'error' });
+                                    } finally {
+                                      e.currentTarget.value = '';
+                                    }
+                                  }}
+                                />
+                              </label>
+                            ) : null}
+
+                            <div className="space-y-1 text-center">
+                              {activeDesktopCount >= 6 && (
+                                <p className="text-[9px] font-bold text-amber-500 uppercase tracking-wider">
+                                  Limite máximo de 6 banners ativos atingido para Desktop.
+                                </p>
+                              )}
+                              {activeMobileCount >= 6 && (
+                                <p className="text-[9px] font-bold text-amber-500 uppercase tracking-wider">
+                                  Limite máximo de 6 banners ativos atingido para Celular.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <div>
                     <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 pb-2 border-b border-slate-50">Seção Nossa Empresa</h3>
                     <div className="rounded-[2rem] border border-slate-100 bg-slate-50 p-6 space-y-6">
@@ -2027,7 +2324,7 @@ export default function AdminSettings() {
                             className="w-full px-5 py-3.5 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 text-xs font-bold"
                             value={settings.smtp_from_name}
                             onChange={e => setSettings({...settings, smtp_from_name: e.target.value})}
-                            placeholder="Suporte Digital Bordados"
+                            placeholder="Suporte Monttera"
                           />
                         </div>
                         <div className="space-y-2">

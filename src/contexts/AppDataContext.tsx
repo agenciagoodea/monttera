@@ -28,13 +28,19 @@ let categoriesPromise: Promise<Category[]> | null = null;
 let settingsPromise: Promise<AppSettings> | null = null;
 
 function fetchCategories(): Promise<Category[]> {
-  if (categoriesCache) return Promise.resolve(categoriesCache);
+  if (categoriesCache && categoriesCache.length > 0) return Promise.resolve(categoriesCache);
   if (categoriesPromise) return categoriesPromise;
   categoriesPromise = fetch('/api/categories')
     .then((r) => r.json())
     .then((data) => {
-      categoriesCache = Array.isArray(data) ? data : [];
-      return categoriesCache;
+      const list = Array.isArray(data) ? data : [];
+      if (list.length > 0) {
+        categoriesCache = list;
+      } else {
+        // Não guarda no cache se vier vazio: permite retry na próxima montagem
+        categoriesPromise = null;
+      }
+      return list;
     })
     .catch(() => {
       categoriesPromise = null; // permite retry em caso de falha

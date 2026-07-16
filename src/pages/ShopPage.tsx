@@ -135,7 +135,7 @@ export default function ShopPage() {
         <p className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.24em]">
           <Sparkles className="h-3.5 w-3.5" /> Loja oficial
         </p>
-        <h1 className="mt-4 text-3xl md:text-5xl font-black tracking-[-0.03em] max-w-4xl">Matrizes Profissionais</h1>
+        <h1 className="mt-4 text-3xl md:text-5xl font-black tracking-[-0.03em] max-w-4xl">Nossa Loja</h1>
         <p className="mt-4 max-w-3xl text-sm md:text-base text-blue-100/95 font-semibold">{subtitle}</p>
       </section>
 
@@ -196,7 +196,7 @@ export default function ShopPage() {
               {sortedProducts.length === 0 && (
                 <div className="mt-8 text-center py-24 bg-white rounded-[3rem] border border-slate-100 shadow-sm">
                   <Search className="w-12 h-12 text-slate-100 mx-auto mb-4" />
-                  <p className="text-slate-400 font-black uppercase tracking-widest text-xs">Nenhuma matriz encontrada.</p>
+                  <p className="text-slate-400 font-black uppercase tracking-widest text-xs">Nenhum produto encontrado.</p>
                 </div>
               )}
 

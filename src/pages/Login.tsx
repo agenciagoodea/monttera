@@ -86,7 +86,7 @@ export default function Login() {
         <div className="p-8 md:p-10">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tight mb-2">Login</h2>
-            <p className="text-slate-500 font-medium">Bem-vindo de volta ao Digital Bordados</p>
+            <p className="text-slate-500 font-medium">Bem-vindo de volta à nossa loja</p>
           </div>
 
           {successMessage && (

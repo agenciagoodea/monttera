@@ -102,11 +102,11 @@ function RouteSeoDefaults() {
     const seoDescKey = `seo_meta_description${suffix}`;
     const seoKeywordsKey = `seo_keywords${suffix}`;
 
-    const siteName = String(settings[siteNameKey] || settings.site_name || 'Digital Bordados').trim();
+    const siteName = String(settings[siteNameKey] || settings.site_name || 'Monttera').trim();
     const appUrl = String(settings.app_url || window.location.origin).replace(/\/+$/, '');
     
     const baseDescription = String(
-      settings[seoDescKey] || settings[siteDescKey] || settings.site_description || 'Matrizes de bordado digitais para produção profissional.'
+      settings[seoDescKey] || settings[siteDescKey] || settings.site_description || 'Sua loja online com os melhores produtos e entrega rápida.'
     ).trim();
 
     const path = location.pathname;
@@ -219,7 +219,7 @@ function AnalyticsTracker() {
         body: JSON.stringify({
           path,
           full_url: window.location.href,
-          page_title: document.title || 'Digital Bordados',
+          page_title: document.title || 'Monttera',
           referrer: document.referrer || '',
         }),
       }).catch((err) => {

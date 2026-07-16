@@ -12,7 +12,7 @@
     "login": "Login",
     "register": "Register",
     "logout": "Logout",
-    "search_placeholder": "Search for a keyword (e.g. police, flowers, animals, car)...",
+    "search_placeholder": "Search for products, categories or keywords...",
     "search_results": "See all results for",
     "no_results": "No products found",
     "no_results_sub": "Try searching for different or more generic terms.",
@@ -42,7 +42,7 @@
     "short_description": "Summary",
     "details": "Technical Details",
     "colors": "Colors",
-    "stitch_count": "Stitches",
+    "stitch_count": "Specification",
     "format": "Formats",
     "downloads_info": "Instant download after payment approval",
     "featured": "Featured",
@@ -70,7 +70,7 @@
     "billing_details": "Billing Details"
   },
   "footer": {
-    "intro_text": "Transform your ideas into perfect embroidery! We offer high-quality computerized embroidery designs ready to bring life to your projects with precision and creativity."
+    "intro_text": "Your complete online store with the best products and services. We offer high-quality solutions ready to bring life to your projects with precision and excellence."
   },
   "help_page": {
     "title": "How can we help?",

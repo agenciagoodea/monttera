@@ -13,14 +13,14 @@ function setCookie(name: string, value: string, days: number) {
   expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
   const domain = window.location.hostname.endsWith('digitalbordados.com.br') 
     ? '; domain=.digitalbordados.com.br' 
-    : '';
+    : (window.location.hostname.includes('.') ? `; domain=.${window.location.hostname.split('.').slice(-2).join('.')}` : '');
   document.cookie = `${name}=${value}; expires=${expires.toUTCString()}; path=/${domain}`;
 }
 
 function removeCookie(name: string) {
   const domain = window.location.hostname.endsWith('digitalbordados.com.br') 
     ? '; domain=.digitalbordados.com.br' 
-    : '';
+    : (window.location.hostname.includes('.') ? `; domain=.${window.location.hostname.split('.').slice(-2).join('.')}` : '');
   document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/${domain}`;
 }
 
@@ -52,12 +52,14 @@ export default function MobileRedirectBanner() {
     
     if (mode === 'desktop') {
       // Usuário está no celular (versão mobile) e deseja forçar o desktop
+      const baseHostname = window.location.hostname.replace(/^m\./, '');
       setCookie('prefer_desktop', 'true', 30);
-      window.location.href = `https://digitalbordados.com.br${currentPath}`;
+      window.location.href = `https://${baseHostname}${currentPath}`;
     } else if (mode === 'mobile') {
       // Usuário está no celular (versão desktop) e deseja retornar para o mobile
+      const baseHostname = window.location.hostname.replace(/^m\./, '');
       removeCookie('prefer_desktop');
-      window.location.href = `https://m.digitalbordados.com.br${currentPath}`;
+      window.location.href = `https://m.${baseHostname}${currentPath}`;
     }
   };
 

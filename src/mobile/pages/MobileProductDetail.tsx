@@ -189,7 +189,7 @@ export default function MobileProductDetail() {
     return formatted;
   };
 
-  const siteDisplayName = String(settings?.site_name || 'Digital Bordados').trim();
+  const siteDisplayName = String(settings?.site_name || 'Monttera').trim();
   const resolveProductTemplate = (value: unknown) => {
     const template = String(value ?? '');
     const map: Record<string, string> = {
@@ -283,7 +283,7 @@ export default function MobileProductDetail() {
           <div className="absolute inset-0 opacity-[0.03] pointer-events-none grid grid-cols-3 grid-rows-3 rotate-12 scale-150 select-none">
             {Array.from({ length: 9 }).map((_, i) => (
               <span key={i} className="text-[9px] font-black uppercase text-slate-900 flex items-center justify-center">
-                Digital Bordados
+                {siteDisplayName}
               </span>
             ))}
           </div>

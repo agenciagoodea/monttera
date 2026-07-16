@@ -8,19 +8,19 @@ const steps = [
   {
     id: 1,
     title: 'Crie sua conta',
-    text: 'Cadastre-se ou faça login para liberar seus downloads.',
+    text: 'Cadastre-se ou faça login para acessar sua área de compras.',
     icon: UserPlus,
   },
   {
     id: 2,
-    title: 'Escolha as matrizes',
-    text: 'Adicione ao carrinho as peças que você deseja baixar.',
+    title: 'Escolha os produtos',
+    text: 'Adicione ao carrinho os itens que você deseja adquirir.',
     icon: ShoppingCart,
   },
   {
     id: 3,
     title: 'Finalize o pagamento',
-    text: 'Pagamento aprovado, matriz liberada automaticamente.',
+    text: 'Pagamento aprovado, acesso liberado automaticamente.',
     icon: CheckCircle2,
   },
 ];
@@ -254,7 +254,7 @@ export default function Banner() {
             className="relative z-10"
           >
             <p className="max-w-full text-lg md:text-xl font-black text-white leading-tight uppercase tracking-tight">
-              Tudo pronto para você baixar sua matriz em poucos minutos.
+              Tudo pronto para você comprar com facilidade e segurança.
             </p>
 
             <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-3.5">
@@ -296,7 +296,7 @@ export default function Banner() {
           >
             <div className="mb-4 md:mb-5">
               <p className="max-w-full text-lg md:text-xl font-black text-white leading-tight uppercase tracking-tight">
-                Não achou a matriz? Envie-nos sua referência pelo formulário que retornamos.
+                Não achou o produto? Envie-nos sua solicitação e retornamos em breve.
               </p>
             </div>
 

@@ -62,7 +62,7 @@ export default function CompanyPage() {
           {settings.home_company_title || 'Nossa Empresa'}
         </h1>
         <p className="mt-4 max-w-3xl text-sm md:text-base text-blue-100/95 font-semibold">
-          {settings.home_company_subtitle || 'Qualidade e confianca em matrizes de bordado digital'}
+          {settings.home_company_subtitle || 'Qualidade e confiança em produtos e serviços digitais'}
         </p>
       </section>
 

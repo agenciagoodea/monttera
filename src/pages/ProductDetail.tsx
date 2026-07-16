@@ -231,7 +231,7 @@ export default function ProductDetail() {
   }, [product?.stitch_count]);
   const gallery = galleryImages;
   const displayedImage = activeImage || gallery[activeImageIndex] || product?.image;
-  const siteDisplayName = String(settings?.site_name || 'Digital Bordados').trim();
+  const siteDisplayName = String(settings?.site_name || 'Monttera').trim();
   const resolveProductTemplate = (value: unknown) => {
     const template = String(value ?? '');
     const map: Record<string, string> = {
@@ -331,7 +331,7 @@ export default function ProductDetail() {
       sku: product.sku && String(product.sku).trim().length >= 3 ? String(product.sku).trim() : `DB-${String(product.id).padStart(5, '0')}`,
       brand: {
         '@type': 'Brand',
-        name: product.brand || settings.site_name || 'Digital Bordados',
+        name: product.brand || settings.site_name || 'Monttera',
       },
       offers: {
         '@type': 'Offer',
@@ -462,7 +462,7 @@ export default function ProductDetail() {
     return (
       <div className="max-w-[1280px] mx-auto px-6 py-20 text-center">
         <Package className="w-16 h-16 text-slate-200 mx-auto mb-4" />
-        <h1 className="text-2xl font-black text-slate-800 uppercase mb-4">Matriz não encontrada</h1>
+        <h1 className="text-2xl font-black text-slate-800 uppercase mb-4">Produto não encontrado</h1>
         <Link to="/" className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors">
           <ChevronLeft className="w-4 h-4" />
           Voltar para a loja
@@ -548,7 +548,7 @@ export default function ProductDetail() {
               <div className="absolute inset-0 opacity-[0.03] pointer-events-none grid grid-cols-4 grid-rows-4 rotate-12 scale-150 select-none">
                 {Array.from({ length: 16 }).map((_, i) => (
                   <span key={i} className="text-[10px] font-black uppercase text-slate-900 flex items-center justify-center">
-                    Digital Bordados
+                    {settings?.site_name || 'Monttera'}
                   </span>
                 ))}
               </div>
@@ -877,7 +877,7 @@ export default function ProductDetail() {
               <div className="p-4 bg-white border border-slate-200 rounded-2xl">
                 <div className="flex items-center gap-2 mb-1 text-slate-500">
                   <Hash className="w-4 h-4" />
-                  <p className="text-[11px] font-bold uppercase tracking-widest">Pontos</p>
+                  <p className="text-[11px] font-bold uppercase tracking-widest">Quantidade</p>
                 </div>
                 <p className="text-base font-black text-slate-800">{product.stitch_count}</p>
               </div>
@@ -899,30 +899,16 @@ export default function ProductDetail() {
             />
           )}
 
-          <div className="mb-6">
-            <p className="text-sm font-bold text-slate-700 mb-3">Formatos incluídos:</p>
-            <div className="flex flex-wrap gap-2">
-              {['PES', 'JEF', 'DST', 'EXP', 'XXX'].map(format => (
-                <span key={format} className="px-3 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-black text-slate-500 shadow-sm">
-                  {format}
-                </span>
-              ))}
-            </div>
-          </div>
+          {/* Formatos removidos: exibir apenas se configurado via descrição do produto */}
 
           <div className="mb-8 p-4 bg-blue-50/50 border border-blue-100 rounded-2xl flex gap-3">
             <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
             <p className="text-[11px] font-medium text-blue-800 leading-relaxed">
-              Obs: Ao fazer o download, não recomendamos que altere o tamanho original, poderá estragar a peça ocasionando que o bordado fique com pontos pesados ou folgados danificando a matriz.
+              Após a compra, o acesso ao arquivo fica disponível imediatamente na sua área de cliente.
             </p>
           </div>
 
-          <div className="mb-8 p-4 bg-red-50 border border-red-200 rounded-2xl flex gap-3">
-            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-            <p className="text-[12px] font-bold text-red-600 leading-relaxed">
-              Não fazemos alteração de tamanho e edições nas matrizes, fique atento nos detalhes da imagem e tamanho deste produto na descrição. Clicando no PDF do ícone acima você pode ter mais detalhes de cores e demais informações desta matriz.
-            </p>
-          </div>
+
 
           <button
             onClick={() => {
@@ -1019,24 +1005,14 @@ export default function ProductDetail() {
                     dangerouslySetInnerHTML={{ __html: resolveProductTemplate(product.description) }}
                   />
                 ) : (
-                  <p className="text-slate-600 leading-loose text-base">
-                    Este produto consiste em um arquivo de bordado digital, desenvolvida para ser utilizada em máquinas de bordar computadorizadas desde domésticas a industriais.
+                   <p className="text-slate-600 leading-loose text-base">
+                    Este produto ainda não possui descrição detalhada. Consulte as imagens e informações disponíveis ou entre em contato conosco.
                   </p>
                 )}
                 
                 {!product.description && (
                   <div className="mt-8 space-y-4 text-slate-500 text-sm">
-                    <p>Após a compra, o arquivo estará disponível em sua área de cliente para download imediato em até cinco formatos diferentes, compatíveis com diversas marcas de máquinas de bordado, conforme listados abaixo.</p>
-                    <ul className="list-disc pl-5 space-y-1">
-                      <li>PES (Deco, Brother, Babylock)</li>
-                      <li>JEF (Janome, Elna, Kenmore)</li>
-                      <li>DST (Tajima)</li>
-                      <li>EXP (Melco)</li>
-                      <li>XXX (Compucon)</li>
-                    </ul>
-                    <p className="text-red-500 font-bold mt-6 italic">
-                      • Não fazemos alteração de tamanho e edições nas matrizes, fique atento nos detalhes da imagem e tamanho desta produto na descrição.
-                    </p>
+                    <p>Após a compra, o arquivo estará disponível em sua área de cliente para download imediato.</p>
                   </div>
                 )}
               </div>
@@ -1074,7 +1050,7 @@ export default function ProductDetail() {
                       <textarea
                         value={newComment}
                         onChange={(e) => setNewComment(e.target.value)}
-                        placeholder="O que você achou desta matriz?"
+                        placeholder="O que você achou deste produto?"
                         className="w-full h-32 bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all resize-none"
                       />
                     </div>

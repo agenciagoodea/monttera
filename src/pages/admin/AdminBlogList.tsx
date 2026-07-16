@@ -570,7 +570,7 @@ export default function AdminBlogList() {
                         value={formData.author}
                         onChange={e => setFormData({ ...formData, author: e.target.value })}
                         className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
-                        placeholder="Ex: Equipe Digital Bordados"
+                        placeholder="Ex: Equipe Monttera"
                       />
                     </div>
 

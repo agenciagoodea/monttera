@@ -11,3 +11,4 @@ cookie*.txt
 *.zip
 deploy-bundle.tar.gz
 database.sqlite
+.cpanel-credentials.json
