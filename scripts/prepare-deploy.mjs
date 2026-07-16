@@ -62,6 +62,7 @@ const includes = [
   '.npmrc',
   'index.html',
   'app.js',
+  '.htaccess',
   'scripts',
   '.env.example',
 ].filter(f => fs.existsSync(path.join(ROOT, f)));

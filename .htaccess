@@ -1,0 +1,24 @@
+# BEGIN Passenger
+PassengerEnabled on
+PassengerAppType node
+PassengerStartupFile app.js
+PassengerAppRoot /home/kryontecnologic/monttera
+# END Passenger
+
+# Rewrite rules for React Vite SPA (fallback to index.html for frontend routing)
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  
+  # Let Passenger handle API requests directly
+  RewriteCond %{REQUEST_URI} ^/api [NC]
+  RewriteRule .* - [L]
+  
+  # For static files and directories, serve directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule .* - [L]
+  
+  # All other requests redirect to index.html for React Router
+  RewriteRule ^ index.html [L]
+</IfModule>
